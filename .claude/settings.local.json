@@ -25,7 +25,20 @@
       "Bash(pnpm --filter @evidencevault/config add -D typescript@5.9)",
       "Bash(pnpm format *)",
       "Bash(git add *)",
-      "Bash(git commit -q -m 'M1: planning docs, ADRs, monorepo scaffold, typed config, CI *)"
+      "Bash(git commit -q -m 'M1: planning docs, ADRs, monorepo scaffold, typed config, CI *)",
+      "Bash(pnpm --filter @evidencevault/database add @prisma/client)",
+      "Bash(pnpm --filter @evidencevault/database add -D prisma typescript@5.9 vitest eslint @types/node)",
+      "Bash(node_modules/.bin/prisma generate *)",
+      "Bash(./node_modules/.bin/prisma generate *)",
+      "Bash(pnpm --filter @evidencevault/database add @prisma/client@6)",
+      "Bash(pnpm --filter @evidencevault/database add -D prisma@6)",
+      "Bash(./node_modules/.bin/prisma format *)",
+      "Bash(./node_modules/.bin/prisma migrate *)",
+      "Bash(pnpm --filter @evidencevault/database build)",
+      "Bash(pnpm --filter @evidencevault/database test)",
+      "Bash(pnpm --filter @evidencevault/database lint)",
+      "Bash(pnpm --filter @evidencevault/evidence add -D aws-sdk-client-mock)",
+      "Bash(git commit -q -m 'M2 \\(part\\): canonical Prisma schema, RLS migrations, audit chain, envelope encryption *)"
     ]
   }
 }

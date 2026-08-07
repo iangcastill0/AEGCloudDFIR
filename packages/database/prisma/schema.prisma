@@ -1,0 +1,1460 @@
+// EvidenceVault canonical data model.
+// Every tenant-owned table carries tenantId and is covered by PostgreSQL
+// row-level security (see migrations — RLS compares tenant_id to
+// current_setting('app.tenant_id')). AuditEvent is append-only with a
+// per-tenant SHA-256 hash chain.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("EV_DATABASE_MIGRATION_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Tenancy, identity, authorization
+// ---------------------------------------------------------------------------
+
+model Tenant {
+  id        String       @id @default(uuid()) @db.Uuid
+  name      String
+  slug      String       @unique
+  status    TenantStatus @default(active)
+  planQuota Json         @default("{}") // {maxAccounts, maxCustodians, maxStoredBytes, maxConcurrentCollections, ...}
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  memberships       Membership[]
+  connectorAccounts ConnectorAccount[]
+  custodians        Custodian[]
+  collections       Collection[]
+  evidenceItems     EvidenceItem[]
+  evidenceBlobs     EvidenceBlob[]
+  tags              Tag[]
+  cases             Case[]
+  savedSearches     SavedSearch[]
+  exports           Export[]
+  productions       Production[]
+  auditEvents       AuditEvent[]
+  retentionPolicies RetentionPolicy[]
+  deletionRequests  DeletionRequest[]
+
+  @@map("tenants")
+}
+
+enum TenantStatus {
+  active
+  suspended
+  pending_deletion
+}
+
+model User {
+  id              String    @id @default(uuid()) @db.Uuid
+  /// OIDC issuer that authenticated this user (Authentik base URL).
+  issuer          String
+  /// Stable OIDC subject claim.
+  subject         String
+  email           String
+  displayName     String    @default("")
+  /// Platform-level operator flag; platform_admins cannot read tenant evidence.
+  isPlatformAdmin Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  lastLoginAt     DateTime?
+
+  memberships Membership[]
+
+  @@unique([issuer, subject])
+  @@map("users")
+}
+
+model Membership {
+  id        String           @id @default(uuid()) @db.Uuid
+  tenantId  String           @db.Uuid
+  userId    String           @db.Uuid
+  status    MembershipStatus @default(active)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  tenant          Tenant           @relation(fields: [tenantId], references: [id])
+  user            User             @relation(fields: [userId], references: [id])
+  roles           RoleAssignment[]
+  caseMemberships CaseMember[]
+
+  @@unique([tenantId, userId])
+  @@index([userId])
+  @@map("memberships")
+}
+
+enum MembershipStatus {
+  active
+  disabled
+}
+
+model RoleAssignment {
+  id           String     @id @default(uuid()) @db.Uuid
+  tenantId     String     @db.Uuid
+  membershipId String     @db.Uuid
+  role         TenantRole
+  /// 'local' when assigned in-app, 'oidc_group' when derived from a group claim.
+  source       String     @default("local")
+  createdAt    DateTime   @default(now())
+
+  membership Membership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+
+  @@unique([membershipId, role])
+  @@index([tenantId])
+  @@map("role_assignments")
+}
+
+enum TenantRole {
+  org_admin
+  case_manager
+  reviewer
+  read_only
+  production_manager
+  auditor
+}
+
+// ---------------------------------------------------------------------------
+// Connectors and custodians
+// ---------------------------------------------------------------------------
+
+model ConnectorAccount {
+  id               String          @id @default(uuid()) @db.Uuid
+  tenantId         String          @db.Uuid
+  provider         Provider
+  mode             ConnectionMode
+  /// Human label, e.g. "Jane's mailbox" or "Contoso org (app permissions)".
+  label            String
+  /// Provider-side identity: UPN/email for delegated, tenant/domain for org.
+  externalIdentity String
+  /// Provider tenant/directory id or Workspace customer id when known.
+  externalTenantId String          @default("")
+  /// Allowed domains for Google DWD impersonation (org mode).
+  allowedDomains   String[]        @default([])
+  status           ConnectorStatus @default(pending_auth)
+  statusDetail     String          @default("")
+  createdById      String?         @db.Uuid
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  revokedAt        DateTime?
+
+  tenant      Tenant            @relation(fields: [tenantId], references: [id])
+  secrets     ConnectorSecret[]
+  scopes      ConnectorScope[]
+  custodians  Custodian[]
+  collections Collection[]
+
+  @@index([tenantId])
+  @@map("connector_accounts")
+}
+
+enum Provider {
+  microsoft
+  google
+}
+
+enum ConnectionMode {
+  delegated
+  organization
+}
+
+enum ConnectorStatus {
+  pending_auth
+  connected
+  error
+  revoked
+}
+
+/// Envelope-encrypted secret material (refresh tokens, DWD keys).
+/// Plaintext exists only in connector process memory; never in logs or APIs.
+model ConnectorSecret {
+  id                 String     @id @default(uuid()) @db.Uuid
+  tenantId           String     @db.Uuid
+  connectorAccountId String     @db.Uuid
+  kind               SecretKind
+  /// KeyEncryptionProvider key id used to wrap the DEK.
+  kekKeyId           String
+  wrappedDek         Bytes
+  dekIv              Bytes
+  dekTag             Bytes
+  ciphertext         Bytes
+  cipherIv           Bytes
+  cipherTag          Bytes
+  createdAt          DateTime   @default(now())
+  rotatedAt          DateTime?
+
+  connectorAccount ConnectorAccount @relation(fields: [connectorAccountId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([connectorAccountId])
+  @@map("connector_secrets")
+}
+
+enum SecretKind {
+  oauth_refresh_token
+  oauth_access_token
+  service_account_key
+  client_secret
+}
+
+model ConnectorScope {
+  id                 String   @id @default(uuid()) @db.Uuid
+  tenantId           String   @db.Uuid
+  connectorAccountId String   @db.Uuid
+  scope              String
+  grantedAt          DateTime @default(now())
+
+  connectorAccount ConnectorAccount @relation(fields: [connectorAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([connectorAccountId, scope])
+  @@index([tenantId])
+  @@map("connector_scopes")
+}
+
+model Custodian {
+  id                 String   @id @default(uuid()) @db.Uuid
+  tenantId           String   @db.Uuid
+  connectorAccountId String   @db.Uuid
+  /// Provider user id (Graph user id / Workspace user id).
+  externalId         String
+  email              String
+  displayName        String   @default("")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  connectorAccount     ConnectorAccount      @relation(fields: [connectorAccountId], references: [id])
+  collectionCustodians CollectionCustodian[]
+  evidenceItems        EvidenceItem[]
+  tenant               Tenant                @relation(fields: [tenantId], references: [id])
+
+  @@unique([connectorAccountId, externalId])
+  @@index([tenantId])
+  @@map("custodians")
+}
+
+// ---------------------------------------------------------------------------
+// Collections
+// ---------------------------------------------------------------------------
+
+model Collection {
+  id                 String             @id @default(uuid()) @db.Uuid
+  tenantId           String             @db.Uuid
+  connectorAccountId String             @db.Uuid
+  name               String
+  /// snapshot | continuous
+  kind               CollectionKind     @default(snapshot)
+  sources            CollectionSource[]
+  /// Scope selection as validated JSON (date range + tz, folders, labels,
+  /// drive roots, include flags for spam/trash/recoverable).
+  scope              Json
+  status             CollectionStatus   @default(created)
+  completeness       Completeness?
+  /// Idempotency key from the creating request.
+  idempotencyKey     String
+  startedAt          DateTime?
+  finishedAt         DateTime?
+  pausedAt           DateTime?
+  cancelledAt        DateTime?
+  createdById        String?            @db.Uuid
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  /// Manifest object key once finalized.
+  manifestKey        String             @default("")
+  manifestSha256     String             @default("")
+
+  tenant           Tenant                 @relation(fields: [tenantId], references: [id])
+  connectorAccount ConnectorAccount       @relation(fields: [connectorAccountId], references: [id])
+  custodians       CollectionCustodian[]
+  checkpoints      CollectionCheckpoint[]
+  items            CollectionItem[]
+  exceptions       CollectionException[]
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, status])
+  @@map("collections")
+}
+
+enum CollectionKind {
+  snapshot
+  continuous
+}
+
+enum CollectionSource {
+  email
+  drive
+}
+
+enum CollectionStatus {
+  created
+  discovering
+  fetching
+  processing
+  finalizing
+  completed
+  paused
+  cancelling
+  cancelled
+  failed
+}
+
+/// The only permitted completeness vocabulary. Never an unqualified "complete".
+enum Completeness {
+  complete_within_selected_api_scope
+  complete_with_exceptions
+  partial
+  failed
+  cancelled
+}
+
+model CollectionCustodian {
+  id           String           @id @default(uuid()) @db.Uuid
+  tenantId     String           @db.Uuid
+  collectionId String           @db.Uuid
+  custodianId  String           @db.Uuid
+  /// Per-custodian, per-source progress counters (discovered, fetched,
+  /// preserved, parsed, ocr, indexed, warnings, failures, retries,
+  /// rateLimitWaitMs) maintained by the worker.
+  progress     Json             @default("{}")
+  status       CollectionStatus @default(created)
+
+  collection Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  custodian  Custodian  @relation(fields: [custodianId], references: [id])
+
+  @@unique([collectionId, custodianId])
+  @@index([tenantId])
+  @@map("collection_custodians")
+}
+
+/// Monotonic resume state. A checkpoint row is written/advanced only after
+/// every item in the covered page (and its evidence objects) is durable.
+model CollectionCheckpoint {
+  id           String               @id @default(uuid()) @db.Uuid
+  tenantId     String               @db.Uuid
+  collectionId String               @db.Uuid
+  custodianId  String               @db.Uuid
+  source       CollectionSource
+  /// e.g. mail folder id, drive id, label id, or "__account__".
+  scopeKey     String
+  /// Opaque provider cursor: nextLink/deltaLink/pageToken/historyId.
+  cursorKind   CheckpointCursorKind
+  cursor       String
+  /// Strictly increasing; consumers ignore stale versions.
+  version      Int                  @default(0)
+  updatedAt    DateTime             @updatedAt
+
+  collection Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+
+  @@unique([collectionId, custodianId, source, scopeKey])
+  @@index([tenantId])
+  @@map("collection_checkpoints")
+}
+
+enum CheckpointCursorKind {
+  page
+  delta
+  history
+  changes
+  none
+}
+
+/// One row per logical provider item observed by a collection; the dedup
+/// spine that makes ingestion idempotent across crashes and retries.
+model CollectionItem {
+  id                  String              @id @default(uuid()) @db.Uuid
+  tenantId            String              @db.Uuid
+  collectionId        String              @db.Uuid
+  custodianId         String              @db.Uuid
+  source              CollectionSource
+  /// Provider item id (Graph message id / Gmail message id / Drive file id).
+  providerItemId      String
+  /// Immutable id where the provider offers one.
+  providerImmutableId String              @default("")
+  state               CollectionItemState @default(discovered)
+  evidenceItemId      String?             @db.Uuid
+  attempts            Int                 @default(0)
+  lastError           String              @default("")
+  updatedAt           DateTime            @updatedAt
+  createdAt           DateTime            @default(now())
+
+  collection Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+
+  @@unique([collectionId, custodianId, source, providerItemId])
+  @@index([tenantId])
+  @@index([collectionId, state])
+  @@map("collection_items")
+}
+
+enum CollectionItemState {
+  discovered
+  fetching
+  preserved
+  processed
+  indexed
+  failed
+  skipped
+}
+
+model CollectionException {
+  id             String            @id @default(uuid()) @db.Uuid
+  tenantId       String            @db.Uuid
+  collectionId   String            @db.Uuid
+  custodianId    String?           @db.Uuid
+  source         CollectionSource?
+  providerItemId String            @default("")
+  kind           ExceptionKind
+  message        String
+  detail         Json              @default("{}")
+  occurredAt     DateTime          @default(now())
+
+  collection Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([collectionId, kind])
+  @@map("collection_exceptions")
+}
+
+enum ExceptionKind {
+  unavailable_item
+  unsupported_item
+  non_downloadable
+  encrypted_item
+  rights_managed
+  corrupt_item
+  throttled_skip
+  expired_checkpoint
+  permission_denied
+  api_error
+  api_export_derivative
+  quarantined
+  other
+}
+
+model JobAttempt {
+  id          String           @id @default(uuid()) @db.Uuid
+  tenantId    String           @db.Uuid
+  queue       String
+  jobId       String
+  dedupKey    String
+  attempt     Int
+  status      JobAttemptStatus
+  error       String           @default("")
+  workerId    String           @default("")
+  startedAt   DateTime         @default(now())
+  finishedAt  DateTime?
+  heartbeatAt DateTime         @default(now())
+
+  @@index([tenantId])
+  @@index([queue, jobId])
+  @@map("job_attempts")
+}
+
+enum JobAttemptStatus {
+  running
+  succeeded
+  failed
+  lost
+}
+
+// ---------------------------------------------------------------------------
+// Evidence
+// ---------------------------------------------------------------------------
+
+/// Physical bytes, content-addressed and deduplicated per tenant.
+model EvidenceBlob {
+  id                String               @id @default(uuid()) @db.Uuid
+  tenantId          String               @db.Uuid
+  sha256            String
+  size              BigInt
+  /// Object key under tenants/{t}/originals/sha256/...
+  objectKey         String
+  /// Provider-supplied checksums preserved as metadata (never authoritative).
+  providerChecksums Json                 @default("{}")
+  storageClass      EvidenceStorageClass @default(original)
+  createdAt         DateTime             @default(now())
+
+  tenant Tenant         @relation(fields: [tenantId], references: [id])
+  items  EvidenceItem[]
+
+  @@unique([tenantId, sha256])
+  @@index([tenantId])
+  @@map("evidence_blobs")
+}
+
+enum EvidenceStorageClass {
+  original
+  quarantine
+}
+
+/// Logical evidence record: one per acquired item per custodian/context.
+/// Multiple items may share one blob (dedup) while preserving provenance.
+model EvidenceItem {
+  id                    String           @id @default(uuid()) @db.Uuid
+  tenantId              String           @db.Uuid
+  custodianId           String?          @db.Uuid
+  collectionId          String?          @db.Uuid
+  blobId                String?          @db.Uuid
+  kind                  EvidenceKind
+  /// Original filename or message subject-derived name.
+  name                  String
+  extension             String           @default("")
+  mimeType              String           @default("")
+  size                  BigInt           @default(0)
+  sha256                String           @default("")
+  provider              Provider?
+  providerItemId        String           @default("")
+  providerImmutableId   String           @default("")
+  /// Folder path / label set / drive path at acquisition.
+  sourcePath            String           @default("")
+  sourceLabels          String[]         @default([])
+  /// True when the stored bytes are an API export (e.g. Google-native file),
+  /// not a byte-identical native. Surfaced in UI, exports, manifests.
+  isApiExportDerivative Boolean          @default(false)
+  processingStatus      ProcessingStatus @default(pending)
+  processingDetail      String           @default("")
+  malwareStatus         MalwareStatus    @default(not_scanned)
+  /// Primary date used for sorting/productions (sent > received > modified > acquired).
+  primaryDate           DateTime?
+  acquiredAt            DateTime         @default(now())
+  /// Source timestamps preserved as reported by the provider.
+  sourceCreatedAt       DateTime?
+  sourceModifiedAt      DateTime?
+  /// Original timezone offset string of the source timestamp when known.
+  sourceTimezoneOffset  String           @default("")
+  /// Optimistic concurrency for mutable review metadata.
+  version               Int              @default(1)
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+
+  tenant              Tenant                 @relation(fields: [tenantId], references: [id])
+  blob                EvidenceBlob?          @relation(fields: [blobId], references: [id])
+  custodian           Custodian?             @relation(fields: [custodianId], references: [id])
+  emailMetadata       EmailMetadata?
+  driveMetadata       DriveMetadata?
+  headers             Header[]
+  participants        EmailParticipant[]
+  extractedTexts      ExtractedText[]
+  ocrPages            OcrPage[]
+  previews            Preview[]
+  malwareScans        MalwareScan[]
+  tagAssignments      TagAssignment[]
+  caseItems           CaseItem[]
+  redactions          Redaction[]
+  annotations         Annotation[]
+  versions            EvidenceVersion[]
+  parentRelationships EvidenceRelationship[] @relation("parentItem")
+  childRelationships  EvidenceRelationship[] @relation("childItem")
+  productionItems     ProductionItem[]
+  exportItems         ExportItem[]
+
+  @@index([tenantId])
+  @@index([tenantId, sha256])
+  @@index([tenantId, custodianId])
+  @@index([collectionId])
+  @@map("evidence_items")
+}
+
+enum EvidenceKind {
+  email
+  attachment
+  file
+  folder_metadata
+  container
+}
+
+enum ProcessingStatus {
+  pending
+  parsed
+  extracted
+  ocr_complete
+  preview_ready
+  indexed
+  failed
+  exception
+}
+
+enum MalwareStatus {
+  not_scanned
+  clean
+  infected
+  scan_failed
+}
+
+/// Provider-side version lineage (Drive revisions, OneDrive versions).
+model EvidenceVersion {
+  id                String    @id @default(uuid()) @db.Uuid
+  tenantId          String    @db.Uuid
+  evidenceItemId    String    @db.Uuid
+  providerVersionId String
+  versionLabel      String    @default("")
+  modifiedAt        DateTime?
+  modifiedBy        String    @default("")
+  size              BigInt    @default(0)
+  metadata          Json      @default("{}")
+  createdAt         DateTime  @default(now())
+
+  evidenceItem EvidenceItem @relation(fields: [evidenceItemId], references: [id], onDelete: Cascade)
+
+  @@unique([evidenceItemId, providerVersionId])
+  @@index([tenantId])
+  @@map("evidence_versions")
+}
+
+model EvidenceRelationship {
+  id        String           @id @default(uuid()) @db.Uuid
+  tenantId  String           @db.Uuid
+  parentId  String           @db.Uuid
+  childId   String           @db.Uuid
+  kind      RelationshipKind
+  /// Inline content-id or member path within a container.
+  detail    String           @default("")
+  createdAt DateTime         @default(now())
+
+  parent EvidenceItem @relation("parentItem", fields: [parentId], references: [id], onDelete: Cascade)
+  child  EvidenceItem @relation("childItem", fields: [childId], references: [id], onDelete: Cascade)
+
+  @@unique([parentId, childId, kind])
+  @@index([tenantId])
+  @@index([childId])
+  @@map("evidence_relationships")
+}
+
+enum RelationshipKind {
+  attachment
+  inline_attachment
+  container_member
+  duplicate_of
+  version_of
+  source_path_ancestor
+  family
+}
+
+model EmailMetadata {
+  id             String    @id @default(uuid()) @db.Uuid
+  tenantId       String    @db.Uuid
+  evidenceItemId String    @unique @db.Uuid
+  subject        String    @default("")
+  messageId      String    @default("")
+  inReplyTo      String    @default("")
+  references     String[]  @default([])
+  threadId       String    @default("")
+  conversationId String    @default("")
+  sentAt         DateTime?
+  receivedAt     DateTime?
+  /// Raw Date: header value with original offset preserved.
+  rawDateHeader  String    @default("")
+  folder         String    @default("")
+  labels         String[]  @default([])
+  categories     String[]  @default([])
+  flags          String[]  @default([])
+  /// True only when a BCC header/API field was actually present in the source.
+  bccPresent     Boolean   @default(false)
+  hasAttachments Boolean   @default(false)
+  bodyPlain      String    @default("")
+  bodyHtmlToText String    @default("")
+  smimeType      String    @default("")
+  isEncrypted    Boolean   @default(false)
+
+  evidenceItem EvidenceItem @relation(fields: [evidenceItemId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([tenantId, messageId])
+  @@map("email_metadata")
+}
+
+model EmailParticipant {
+  id                String          @id @default(uuid()) @db.Uuid
+  tenantId          String          @db.Uuid
+  evidenceItemId    String          @db.Uuid
+  role              ParticipantRole
+  /// Display name exactly as in the source header.
+  rawName           String          @default("")
+  /// Address exactly as in the source header.
+  rawAddress        String          @default("")
+  /// Lowercased, trimmed address for search.
+  normalizedAddress String          @default("")
+  domain            String          @default("")
+  position          Int             @default(0)
+
+  evidenceItem EvidenceItem @relation(fields: [evidenceItemId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([evidenceItemId, role])
+  @@index([tenantId, normalizedAddress])
+  @@map("email_participants")
+}
+
+enum ParticipantRole {
+  from
+  sender
+  to
+  cc
+  bcc
+  reply_to
+}
+
+/// Raw internet message headers, order-preserved, one row per header instance.
+model Header {
+  id             String @id @default(uuid()) @db.Uuid
+  tenantId       String @db.Uuid
+  evidenceItemId String @db.Uuid
+  /// Lowercased header name for lookup.
+  name           String
+  /// Original header name casing.
+  rawName        String
+  value          String
+  position       Int
+
+  evidenceItem EvidenceItem @relation(fields: [evidenceItemId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([evidenceItemId, position])
+  @@index([tenantId, name])
+  @@map("headers")
+}
+
+model DriveMetadata {
+  id                   String  @id @default(uuid()) @db.Uuid
+  tenantId             String  @db.Uuid
+  evidenceItemId       String  @unique @db.Uuid
+  driveId              String  @default("")
+  driveName            String  @default("")
+  path                 String  @default("")
+  parentProviderId     String  @default("")
+  webUrl               String  @default("")
+  owners               Json    @default("[]")
+  permissionsSummary   Json    @default("[]")
+  sharedWithSummary    Json    @default("[]")
+  isTrashed            Boolean @default(false)
+  isSharedDrive        Boolean @default(false)
+  /// Google-native source MIME when the stored native is an API export.
+  sourceNativeMimeType String  @default("")
+  exportFormat         String  @default("")
+  revisionCount        Int     @default(0)
+
+  evidenceItem EvidenceItem @relation(fields: [evidenceItemId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("drive_metadata")
+}
+
+// ---------------------------------------------------------------------------
+// Processing artifacts (derivatives — never replace originals)
+// ---------------------------------------------------------------------------
+
+model ExtractedText {
+  id               String   @id @default(uuid()) @db.Uuid
+  tenantId         String   @db.Uuid
+  evidenceItemId   String   @db.Uuid
+  kind             TextKind
+  /// Object key of the stored text derivative.
+  objectKey        String
+  sha256           String
+  charCount        Int      @default(0)
+  extractorName    String
+  extractorVersion String
+  version          Int      @default(1)
+  createdAt        DateTime @default(now())
+
+  evidenceItem EvidenceItem @relation(fields: [evidenceItemId], references: [id], onDelete: Cascade)
+
+  @@unique([evidenceItemId, kind, version])
+  @@index([tenantId])
+  @@map("extracted_texts")
+}
+
+enum TextKind {
+  body_plain
+  body_html_to_text
+  file_text
+  ocr_text
+  media_metadata
+}
+
+model OcrPage {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @db.Uuid
+  evidenceItemId String   @db.Uuid
+  pageNumber     Int
+  text           String
+  confidence     Float    @default(0)
+  /// Word bounding boxes when available: [{text, conf, x, y, w, h}].
+  boxes          Json     @default("[]")
+  engineName     String
+  engineVersion  String
+  createdAt      DateTime @default(now())
+
+  evidenceItem EvidenceItem @relation(fields: [evidenceItemId], references: [id], onDelete: Cascade)
+
+  @@unique([evidenceItemId, pageNumber])
+  @@index([tenantId])
+  @@map("ocr_pages")
+}
+
+model Preview {
+  id               String      @id @default(uuid()) @db.Uuid
+  tenantId         String      @db.Uuid
+  evidenceItemId   String      @db.Uuid
+  kind             PreviewKind
+  objectKey        String
+  mimeType         String
+  pageCount        Int         @default(0)
+  version          Int         @default(1)
+  generatorName    String
+  generatorVersion String
+  createdAt        DateTime    @default(now())
+
+  evidenceItem EvidenceItem @relation(fields: [evidenceItemId], references: [id], onDelete: Cascade)
+
+  @@unique([evidenceItemId, kind, version])
+  @@index([tenantId])
+  @@map("previews")
+}
+
+enum PreviewKind {
+  safe_html
+  text
+  pdf
+  thumbnail
+  page_images
+}
+
+model MalwareScan {
+  id               String        @id @default(uuid()) @db.Uuid
+  tenantId         String        @db.Uuid
+  evidenceItemId   String        @db.Uuid
+  engineName       String
+  engineVersion    String
+  signatureVersion String
+  result           MalwareStatus
+  signatureName    String        @default("")
+  scannedAt        DateTime      @default(now())
+
+  evidenceItem EvidenceItem @relation(fields: [evidenceItemId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([evidenceItemId])
+  @@map("malware_scans")
+}
+
+// ---------------------------------------------------------------------------
+// Review: tags, saved searches, cases, redactions, annotations
+// ---------------------------------------------------------------------------
+
+model Tag {
+  id             String            @id @default(uuid()) @db.Uuid
+  tenantId       String            @db.Uuid
+  name           String
+  color          String            @default("#6b7280")
+  description    String            @default("")
+  isPrivileged   Boolean           @default(false)
+  isConfidential Boolean           @default(false)
+  isHidden       Boolean           @default(false)
+  /// none | apply_to_family | apply_to_descendants
+  familyBehavior TagFamilyBehavior @default(none)
+  createdById    String?           @db.Uuid
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  version        Int               @default(1)
+
+  tenant      Tenant          @relation(fields: [tenantId], references: [id])
+  assignments TagAssignment[]
+
+  @@unique([tenantId, name])
+  @@map("tags")
+}
+
+enum TagFamilyBehavior {
+  none
+  apply_to_family
+  apply_to_descendants
+}
+
+model TagAssignment {
+  id               String   @id @default(uuid()) @db.Uuid
+  tenantId         String   @db.Uuid
+  tagId            String   @db.Uuid
+  evidenceItemId   String   @db.Uuid
+  /// Set when the assignment was propagated by family behavior.
+  propagatedFromId String?  @db.Uuid
+  assignedById     String?  @db.Uuid
+  createdAt        DateTime @default(now())
+
+  tag          Tag          @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  evidenceItem EvidenceItem @relation(fields: [evidenceItemId], references: [id], onDelete: Cascade)
+  notes        TagNote[]
+
+  @@unique([tagId, evidenceItemId])
+  @@index([tenantId])
+  @@index([evidenceItemId])
+  @@map("tag_assignments")
+}
+
+model TagNote {
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @db.Uuid
+  tagAssignmentId String   @db.Uuid
+  authorId        String?  @db.Uuid
+  text            String
+  createdAt       DateTime @default(now())
+
+  tagAssignment TagAssignment @relation(fields: [tagAssignmentId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("tag_notes")
+}
+
+model SavedSearch {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @db.Uuid
+  caseId      String?  @db.Uuid
+  name        String
+  /// Validated query AST JSON (never a raw engine query).
+  queryAst    Json
+  queryText   String   @default("")
+  createdById String?  @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  version     Int      @default(1)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  case   Case?  @relation(fields: [caseId], references: [id])
+
+  @@index([tenantId])
+  @@map("saved_searches")
+}
+
+model Case {
+  id               String     @id @default(uuid()) @db.Uuid
+  tenantId         String     @db.Uuid
+  name             String
+  matterNumber     String     @default("")
+  client           String     @default("")
+  description      String     @default("")
+  status           CaseStatus @default(open)
+  legalHold        Boolean    @default(false)
+  legalHoldSetAt   DateTime?
+  legalHoldSetById String?    @db.Uuid
+  createdById      String?    @db.Uuid
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+  version          Int        @default(1)
+
+  tenant        Tenant        @relation(fields: [tenantId], references: [id])
+  members       CaseMember[]
+  items         CaseItem[]
+  notes         CaseNote[]
+  savedSearches SavedSearch[]
+  exports       Export[]
+  productions   Production[]
+
+  @@index([tenantId, status])
+  @@map("cases")
+}
+
+enum CaseStatus {
+  open
+  closed
+  archived
+}
+
+model CaseMember {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @db.Uuid
+  caseId       String   @db.Uuid
+  membershipId String   @db.Uuid
+  role         CaseRole @default(reviewer)
+  createdAt    DateTime @default(now())
+
+  case       Case       @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  membership Membership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+
+  @@unique([caseId, membershipId])
+  @@index([tenantId])
+  @@map("case_members")
+}
+
+enum CaseRole {
+  case_manager
+  reviewer
+  read_only
+  production_manager
+}
+
+/// Reference-only case membership of evidence; never copies bytes.
+model CaseItem {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @db.Uuid
+  caseId         String   @db.Uuid
+  evidenceItemId String   @db.Uuid
+  addedById      String?  @db.Uuid
+  /// tag | search | manual | family — how the item entered the case.
+  addedVia       String   @default("manual")
+  createdAt      DateTime @default(now())
+
+  case         Case         @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  evidenceItem EvidenceItem @relation(fields: [evidenceItemId], references: [id])
+
+  @@unique([caseId, evidenceItemId])
+  @@index([tenantId])
+  @@index([evidenceItemId])
+  @@map("case_items")
+}
+
+model CaseNote {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @db.Uuid
+  caseId    String   @db.Uuid
+  authorId  String?  @db.Uuid
+  text      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  version   Int      @default(1)
+
+  case Case @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("case_notes")
+}
+
+model Redaction {
+  id             String         @id @default(uuid()) @db.Uuid
+  tenantId       String         @db.Uuid
+  evidenceItemId String         @db.Uuid
+  caseId         String?        @db.Uuid
+  /// preview redactions can be iterated; final redactions burn into output.
+  stage          RedactionStage @default(preview)
+  pageNumber     Int
+  /// Normalized rectangle 0..1 relative to page: {x, y, w, h}.
+  rect           Json
+  color          String         @default("#000000")
+  label          String         @default("")
+  reason         String         @default("")
+  createdById    String?        @db.Uuid
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  version        Int            @default(1)
+
+  evidenceItem EvidenceItem @relation(fields: [evidenceItemId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([evidenceItemId, stage])
+  @@map("redactions")
+}
+
+enum RedactionStage {
+  preview
+  final
+}
+
+model Annotation {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @db.Uuid
+  evidenceItemId String   @db.Uuid
+  pageNumber     Int      @default(0)
+  rect           Json     @default("{}")
+  text           String
+  authorId       String?  @db.Uuid
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  version        Int      @default(1)
+
+  evidenceItem EvidenceItem @relation(fields: [evidenceItemId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("annotations")
+}
+
+// ---------------------------------------------------------------------------
+// Exports
+// ---------------------------------------------------------------------------
+
+model Export {
+  id             String       @id @default(uuid()) @db.Uuid
+  tenantId       String       @db.Uuid
+  caseId         String?      @db.Uuid
+  kind           ExportKind
+  name           String
+  /// Frozen selection + options JSON at creation.
+  parameters     Json
+  status         ExportStatus @default(queued)
+  statusDetail   String       @default("")
+  idempotencyKey String
+  itemCount      Int          @default(0)
+  totalBytes     BigInt       @default(0)
+  /// Object key prefix of produced archive parts + manifests.
+  outputPrefix   String       @default("")
+  manifestSha256 String       @default("")
+  verifiedAt     DateTime?
+  createdById    String?      @db.Uuid
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  expiresAt      DateTime?
+
+  tenant Tenant       @relation(fields: [tenantId], references: [id])
+  case   Case?        @relation(fields: [caseId], references: [id])
+  items  ExportItem[]
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, status])
+  @@map("exports")
+}
+
+enum ExportKind {
+  native
+  csv
+}
+
+enum ExportStatus {
+  queued
+  running
+  verifying
+  ready
+  failed
+  cancelled
+}
+
+model ExportItem {
+  id             String          @id @default(uuid()) @db.Uuid
+  tenantId       String          @db.Uuid
+  exportId       String          @db.Uuid
+  evidenceItemId String          @db.Uuid
+  /// Path of this item inside the export archive.
+  archivePath    String          @default("")
+  sha256         String          @default("")
+  verified       Boolean         @default(false)
+  state          ExportItemState @default(pending)
+  error          String          @default("")
+
+  export       Export       @relation(fields: [exportId], references: [id], onDelete: Cascade)
+  evidenceItem EvidenceItem @relation(fields: [evidenceItemId], references: [id])
+
+  @@unique([exportId, evidenceItemId])
+  @@index([tenantId])
+  @@map("export_items")
+}
+
+enum ExportItemState {
+  pending
+  written
+  verified
+  failed
+  skipped
+}
+
+// ---------------------------------------------------------------------------
+// Productions
+// ---------------------------------------------------------------------------
+
+model Production {
+  id              String           @id @default(uuid()) @db.Uuid
+  tenantId        String           @db.Uuid
+  caseId          String?          @db.Uuid
+  name            String
+  description     String           @default("")
+  status          ProductionStatus @default(draft)
+  /// Complete wizard parameter JSON; frozen at submission into the run.
+  draftParameters Json             @default("{}")
+  idempotencyKey  String
+  createdById     String?          @db.Uuid
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  version         Int              @default(1)
+
+  tenant     Tenant                @relation(fields: [tenantId], references: [id])
+  case       Case?                 @relation(fields: [caseId], references: [id])
+  selections ProductionSelection[]
+  runs       ProductionRun[]
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, status])
+  @@map("productions")
+}
+
+enum ProductionStatus {
+  draft
+  validating
+  submitted
+  released
+  superseded
+}
+
+model ProductionSelection {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @db.Uuid
+  productionId String   @db.Uuid
+  /// tag | saved_search | manual | previously_produced_exclusion
+  kind         String
+  /// Reference id (tagId/savedSearchId/productionId) or inline list.
+  reference    String   @default("")
+  inverted     Boolean  @default(false)
+  detail       Json     @default("{}")
+  createdAt    DateTime @default(now())
+
+  production Production @relation(fields: [productionId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("production_selections")
+}
+
+/// Reusable output configuration (image format, load file dialect, stamps...).
+model ProductionProfile {
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @db.Uuid
+  name          String
+  configuration Json
+  createdById   String?  @db.Uuid
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([tenantId, name])
+  @@map("production_profiles")
+}
+
+/// Immutable execution of a production. Config changes = new run.
+model ProductionRun {
+  id                      String              @id @default(uuid()) @db.Uuid
+  tenantId                String              @db.Uuid
+  productionId            String              @db.Uuid
+  runNumber               Int
+  /// Frozen wizard parameters + selection snapshot hash.
+  frozenParameters        Json
+  selectionSnapshotKey    String              @default("")
+  selectionSnapshotSha256 String              @default("")
+  status                  ProductionRunStatus @default(queued)
+  statusDetail            String              @default("")
+  progress                Json                @default("{}")
+  /// Acknowledged validation warnings: [{code, ackById, ackAt, secondConfirm}].
+  acknowledgedWarnings    Json                @default("[]")
+  outputPrefix            String              @default("")
+  manifestSha256          String              @default("")
+  batesStart              String              @default("")
+  batesEnd                String              @default("")
+  startedAt               DateTime?
+  finishedAt              DateTime?
+  createdById             String?             @db.Uuid
+  createdAt               DateTime            @default(now())
+
+  production        Production            @relation(fields: [productionId], references: [id], onDelete: Cascade)
+  items             ProductionItem[]
+  exceptions        ProductionException[]
+  batesReservations BatesReservation[]
+
+  @@unique([productionId, runNumber])
+  @@index([tenantId, status])
+  @@map("production_runs")
+}
+
+enum ProductionRunStatus {
+  queued
+  rendering
+  stamping
+  verifying
+  ready
+  released
+  failed
+  cancelled
+}
+
+model ProductionItem {
+  id                String               @id @default(uuid()) @db.Uuid
+  tenantId          String               @db.Uuid
+  productionRunId   String               @db.Uuid
+  evidenceItemId    String               @db.Uuid
+  sortIndex         Int
+  begBates          String               @default("")
+  endBates          String               @default("")
+  begAttach         String               @default("")
+  endAttach         String               @default("")
+  pageCount         Int                  @default(0)
+  outputKind        ProductionOutputKind
+  imagePaths        String[]             @default([])
+  nativePath        String               @default("")
+  textPath          String               @default("")
+  placeholderReason String               @default("")
+  state             ProductionItemState  @default(pending)
+  error             String               @default("")
+
+  productionRun ProductionRun @relation(fields: [productionRunId], references: [id], onDelete: Cascade)
+  evidenceItem  EvidenceItem  @relation(fields: [evidenceItemId], references: [id])
+
+  @@unique([productionRunId, evidenceItemId])
+  @@index([tenantId])
+  @@map("production_items")
+}
+
+enum ProductionOutputKind {
+  image
+  native
+  image_and_native
+  placeholder
+  text_only
+}
+
+enum ProductionItemState {
+  pending
+  rendered
+  stamped
+  verified
+  failed
+  placeholder
+}
+
+model ProductionException {
+  id                     String                      @id @default(uuid()) @db.Uuid
+  tenantId               String                      @db.Uuid
+  productionRunId        String                      @db.Uuid
+  evidenceItemId         String?                     @db.Uuid
+  code                   String
+  severity               ProductionExceptionSeverity @default(warning)
+  message                String
+  detail                 Json                        @default("{}")
+  overriddenById         String?                     @db.Uuid
+  overriddenAt           DateTime?
+  secondConfirmationById String?                     @db.Uuid
+  createdAt              DateTime                    @default(now())
+
+  productionRun ProductionRun @relation(fields: [productionRunId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([productionRunId, severity])
+  @@map("production_exceptions")
+}
+
+enum ProductionExceptionSeverity {
+  info
+  warning
+  blocking
+  security_critical
+}
+
+/// Atomic Bates range reservation; unique range per tenant+prefix prevents
+/// collisions across concurrent runs (serializable insert with range check).
+model BatesReservation {
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @db.Uuid
+  productionRunId String   @db.Uuid
+  prefix          String
+  suffix          String   @default("")
+  digits          Int
+  startNumber     BigInt
+  endNumber       BigInt
+  createdAt       DateTime @default(now())
+
+  productionRun ProductionRun @relation(fields: [productionRunId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, prefix])
+  @@map("bates_reservations")
+}
+
+// ---------------------------------------------------------------------------
+// Governance
+// ---------------------------------------------------------------------------
+
+model RetentionPolicy {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @db.Uuid
+  name        String
+  description String   @default("")
+  retainDays  Int
+  appliesTo   String   @default("all") // all | collections | exports | productions
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, name])
+  @@map("retention_policies")
+}
+
+/// Two-phase defensible deletion: requested → approved → executed, blocked by
+/// legal holds and Object Lock; produces a deletion manifest.
+model DeletionRequest {
+  id             String         @id @default(uuid()) @db.Uuid
+  tenantId       String         @db.Uuid
+  scope          Json
+  reason         String
+  status         DeletionStatus @default(requested)
+  requestedById  String?        @db.Uuid
+  approvedById   String?        @db.Uuid
+  requestedAt    DateTime       @default(now())
+  approvedAt     DateTime?
+  executedAt     DateTime?
+  blockedReason  String         @default("")
+  manifestKey    String         @default("")
+  manifestSha256 String         @default("")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId, status])
+  @@map("deletion_requests")
+}
+
+enum DeletionStatus {
+  requested
+  approved
+  blocked
+  executed
+  rejected
+  cancelled
+}
+
+// ---------------------------------------------------------------------------
+// Audit (append-only, hash-chained) and outbox
+// ---------------------------------------------------------------------------
+
+model AuditEvent {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @db.Uuid
+  /// Per-tenant strictly increasing sequence; serialized via advisory lock.
+  sequence       BigInt
+  actorUserId    String   @default("")
+  actorDisplay   String   @default("")
+  effectiveRoles String[] @default([])
+  action         String
+  targetType     String   @default("")
+  targetId       String   @default("")
+  requestId      String   @default("")
+  ipAddress      String   @default("")
+  userAgent      String   @default("")
+  /// Compact before/after summary where appropriate; never raw evidence bodies.
+  summary        Json     @default("{}")
+  occurredAt     DateTime @default(now())
+  prevEventHash  String
+  eventHash      String
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, sequence])
+  @@index([tenantId, occurredAt])
+  @@index([tenantId, action])
+  @@map("audit_events")
+}
+
+model OutboxEvent {
+  id           String       @id @default(uuid()) @db.Uuid
+  tenantId     String       @db.Uuid
+  topic        String
+  /// Deterministic job dedup key (BullMQ jobId).
+  dedupKey     String
+  payload      Json
+  status       OutboxStatus @default(pending)
+  attempts     Int          @default(0)
+  lastError    String       @default("")
+  createdAt    DateTime     @default(now())
+  dispatchedAt DateTime?
+
+  @@unique([topic, dedupKey])
+  @@index([status, createdAt])
+  @@index([tenantId])
+  @@map("outbox_events")
+}
+
+enum OutboxStatus {
+  pending
+  dispatched
+  failed
+}
