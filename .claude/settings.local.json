@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm --version)",
+      "Bash(docker --version)",
+      "Bash(git --version)",
+      "Bash(ls /opt/homebrew/bin 2>/dev/null | head -30; echo \"---nvm---\"; ls ~/.nvm 2>/dev/null | head; echo \"---volta---\"; ls ~/.volta 2>/dev/null | head; echo \"---mise---\"; ls ~/.local/share/mise 2>/dev/null | head; echo \"---asdf---\"; ls ~/.asdf 2>/dev/null | head; echo \"---usrlocal---\"; ls /usr/local/bin 2>/dev/null | grep -iE 'node|npm|pnpm|docker' ; echo \"---apps---\"; ls /Applications 2>/dev/null | grep -iE 'docker|orbstack|podman')",
+      "Bash(/opt/homebrew/bin/brew install *)",
+      "Bash(git init *)",
+      "Bash(/opt/homebrew/bin/brew link *)",
+      "Bash(pnpm add *)",
+      "Bash(pnpm --filter @evidencevault/config add zod)",
+      "Bash(pnpm --filter @evidencevault/config add -D typescript vitest eslint)",
+      "Bash(pnpm install *)",
+      "Bash(pnpm build *)",
+      "Bash(pnpm test *)",
+      "Bash(node -e ' *)",
+      "Bash(perl -pi -e \"s/booleanString\\\\.default\\\\\\('\\(true|false\\)'\\\\\\)/booleanString\\('\\\\$1'\\)/g\" src/schema.ts)",
+      "Bash(pnpm --filter @evidencevault/config add -D @types/node)",
+      "Bash(pnpm lint *)",
+      "Bash(pnpm --filter @evidencevault/config build)",
+      "Bash(pnpm --filter @evidencevault/config lint)",
+      "Bash(grep -vE '^\\\\s*$')",
+      "Bash(node_modules/.bin/tsc --version)",
+      "Bash(pnpm --filter @evidencevault/config add -D typescript@5.9)",
+      "Bash(pnpm format *)",
+      "Bash(git add *)",
+      "Bash(git commit -q -m 'M1: planning docs, ADRs, monorepo scaffold, typed config, CI *)"
+    ]
+  }
+}

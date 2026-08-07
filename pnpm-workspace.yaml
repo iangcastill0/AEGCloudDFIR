@@ -1,0 +1,16 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+savePrefix: ''
+allowBuilds:
+  esbuild: true
+  '@prisma/client': true
+  '@prisma/engines': true
+  prisma: true
+  sharp: true
+  esbuild-register: true
+  '@nestjs/core': true
+  protobufjs: true
+  cbor-extract: true
+  msgpackr-extract: true
+  unrs-resolver: true

@@ -1,0 +1,32 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# builds
+dist/
+.next/
+.turbo/
+*.tsbuildinfo
+coverage/
+
+# environment — never commit real secrets
+.env
+.env.*
+!.env.example
+
+# databases / local data
+*.sqlite
+minio-data/
+postgres-data/
+
+# OS / editor
+.DS_Store
+*.log
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# test artifacts
+playwright-report/
+test-results/
+sbom/*.json
