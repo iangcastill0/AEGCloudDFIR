@@ -1,0 +1,7 @@
+{
+  "value": [
+    { "id": "u-1", "mail": "avery.chen@example.com", "displayName": "Avery Chen", "userPrincipalName": "avery.chen@example.com" },
+    { "id": "u-2", "mail": null, "displayName": "Jordan Lee", "userPrincipalName": "jordan.lee@example.com" }
+  ],
+  "@odata.nextLink": "{{BASE}}/graph/users?page=2"
+}

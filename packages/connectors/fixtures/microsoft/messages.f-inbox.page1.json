@@ -1,0 +1,15 @@
+{
+  "value": [
+    {
+      "id": "m-001",
+      "internetMessageId": "<msg-001@example.com>",
+      "conversationId": "conv-1",
+      "receivedDateTime": "2024-03-05T10:15:00Z",
+      "hasAttachments": true,
+      "categories": ["Litigation Hold"],
+      "flag": { "flagStatus": "notFlagged" },
+      "isRead": true
+    }
+  ],
+  "@odata.nextLink": "{{BASE}}/graph/me/mailFolders/f-inbox/messages?page=2"
+}

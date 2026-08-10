@@ -1,0 +1,7 @@
+{
+  "users": [
+    { "id": "gu-1", "primaryEmail": "avery.chen@example.com", "name": { "fullName": "Avery Chen" } },
+    { "id": "gu-2", "primaryEmail": "jordan.lee@example.com", "name": { "fullName": "Jordan Lee" } }
+  ],
+  "nextPageToken": "page2"
+}

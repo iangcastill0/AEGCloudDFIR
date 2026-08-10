@@ -1,0 +1,28 @@
+{
+  "id": "m-001",
+  "subject": "Q3 vendor contract - revised terms",
+  "from": { "emailAddress": { "name": "Avery Chen", "address": "avery.chen@example.com" } },
+  "sender": { "emailAddress": { "name": "Avery Chen", "address": "avery.chen@example.com" } },
+  "toRecipients": [ { "emailAddress": { "name": "Jordan Lee", "address": "jordan.lee@example.com" } } ],
+  "ccRecipients": [ { "emailAddress": { "name": "Sam Rivera", "address": "sam.rivera@example.com" } } ],
+  "bccRecipients": [ { "emailAddress": { "name": "Quinn Park", "address": "quinn.park@example.com" } } ],
+  "replyTo": [],
+  "sentDateTime": "2024-03-05T10:14:30Z",
+  "receivedDateTime": "2024-03-05T10:15:00Z",
+  "categories": ["Litigation Hold"],
+  "flag": { "flagStatus": "notFlagged" },
+  "isRead": true,
+  "conversationId": "conv-1",
+  "parentFolderId": "f-inbox",
+  "hasAttachments": true,
+  "internetMessageId": "<msg-001@example.com>",
+  "internetMessageHeaders": [
+    { "name": "Message-ID", "value": "<msg-001@example.com>" },
+    { "name": "X-Mailer", "value": "ExampleMailer/1.0" }
+  ],
+  "body": { "contentType": "html", "content": "<p>sanitized</p>" },
+  "attachments": [
+    { "id": "att-1", "name": "terms.txt", "contentType": "text/plain", "size": 58, "isInline": false, "contentId": null },
+    { "id": "att-2", "name": "logo.png", "contentType": "image/png", "size": 120, "isInline": true, "contentId": "logo-cid@example.com" }
+  ]
+}

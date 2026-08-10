@@ -1,0 +1,14 @@
+{
+  "value": [
+    {
+      "id": "m-002",
+      "internetMessageId": "<msg-002@example.com>",
+      "conversationId": "conv-2",
+      "receivedDateTime": "2024-03-06T09:00:00Z",
+      "hasAttachments": false,
+      "categories": [],
+      "flag": { "flagStatus": "notFlagged" },
+      "isRead": false
+    }
+  ]
+}

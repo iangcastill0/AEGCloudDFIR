@@ -1,0 +1,18 @@
+{
+  "value": [
+    {
+      "id": "item-onenote1",
+      "name": "Meeting Notes",
+      "size": 1024,
+      "package": { "type": "oneNote" },
+      "parentReference": { "driveId": "d-1", "id": "item-root", "path": "/drive/root:" }
+    },
+    {
+      "id": "item-gone1",
+      "name": "old.txt",
+      "deleted": { "state": "deleted" },
+      "parentReference": { "driveId": "d-1", "id": "item-root" }
+    }
+  ],
+  "@odata.deltaLink": "{{BASE}}/graph/drives/d-1/root/delta?token=dd-2"
+}

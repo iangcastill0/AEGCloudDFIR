@@ -1,0 +1,28 @@
+MIME-Version: 1.0
+Date: Tue, 05 Mar 2024 10:14:30 +0000
+Message-ID: <msg-001@example.com>
+Subject: Q3 vendor contract - revised terms
+From: Avery Chen <avery.chen@example.com>
+To: Jordan Lee <jordan.lee@example.com>
+Cc: Sam Rivera <sam.rivera@example.com>
+Bcc: Quinn Park <quinn.park@example.com>
+Content-Type: multipart/mixed; boundary="mixed-boundary-001"
+
+--mixed-boundary-001
+Content-Type: multipart/alternative; boundary="alt-boundary-001"
+
+--alt-boundary-001
+Content-Type: text/plain; charset="utf-8"
+
+Jordan - revised contract terms attached. Please review section 4.
+--alt-boundary-001
+Content-Type: text/html; charset="utf-8"
+
+<html><body><p>Jordan - revised contract terms attached. Please review <b>section 4</b>.</p></body></html>
+--alt-boundary-001--
+--mixed-boundary-001
+Content-Type: text/plain; charset="utf-8"; name="terms.txt"
+Content-Disposition: attachment; filename="terms.txt"
+
+Section 4: Payment due within 30 days of invoice receipt.
+--mixed-boundary-001--

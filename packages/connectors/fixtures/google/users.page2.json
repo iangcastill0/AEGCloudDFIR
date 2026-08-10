@@ -1,0 +1,5 @@
+{
+  "users": [
+    { "id": "gu-3", "primaryEmail": "sam.rivera@example.com", "name": { "fullName": "Sam Rivera" } }
+  ]
+}

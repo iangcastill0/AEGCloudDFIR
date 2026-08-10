@@ -1,0 +1,29 @@
+{
+  "files": [
+    {
+      "id": "gd-folder1",
+      "name": "Cases",
+      "mimeType": "application/vnd.google-apps.folder",
+      "parents": ["gd-root"],
+      "createdTime": "2024-01-02T08:00:00Z",
+      "modifiedTime": "2024-01-02T08:00:00Z",
+      "trashed": false
+    },
+    {
+      "id": "gd-file1",
+      "name": "evidence.txt",
+      "mimeType": "text/plain",
+      "md5Checksum": "9e107d9d372bb6826bd81d3542a419d6",
+      "sha256Checksum": "d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592",
+      "size": "44",
+      "parents": ["gd-folder1"],
+      "owners": [ { "displayName": "Avery Chen", "emailAddress": "avery.chen@example.com" } ],
+      "permissions": [ { "id": "perm-1", "type": "user", "role": "owner", "emailAddress": "avery.chen@example.com" } ],
+      "createdTime": "2024-02-01T08:00:00Z",
+      "modifiedTime": "2024-02-03T08:00:00Z",
+      "trashed": false,
+      "version": "7"
+    }
+  ],
+  "nextPageToken": "page2"
+}

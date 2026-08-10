@@ -1,0 +1,22 @@
+{
+  "id": "m-002",
+  "subject": "Deposition prep",
+  "from": { "emailAddress": { "name": "Jordan Lee", "address": "jordan.lee@example.com" } },
+  "sender": { "emailAddress": { "name": "Jordan Lee", "address": "jordan.lee@example.com" } },
+  "toRecipients": [ { "emailAddress": { "name": "Avery Chen", "address": "avery.chen@example.com" } } ],
+  "ccRecipients": [],
+  "bccRecipients": [],
+  "replyTo": [],
+  "sentDateTime": "2024-03-06T08:59:30Z",
+  "receivedDateTime": "2024-03-06T09:00:00Z",
+  "categories": [],
+  "flag": { "flagStatus": "notFlagged" },
+  "isRead": false,
+  "conversationId": "conv-2",
+  "parentFolderId": "f-inbox",
+  "hasAttachments": false,
+  "internetMessageId": "<msg-002@example.com>",
+  "internetMessageHeaders": [ { "name": "Message-ID", "value": "<msg-002@example.com>" } ],
+  "body": { "contentType": "text", "content": "sanitized" },
+  "attachments": []
+}

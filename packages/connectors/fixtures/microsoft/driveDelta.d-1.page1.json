@@ -1,0 +1,32 @@
+{
+  "value": [
+    {
+      "id": "item-folder1",
+      "name": "Reports",
+      "size": 0,
+      "folder": { "childCount": 1 },
+      "parentReference": { "driveId": "d-1", "id": "item-root", "path": "/drive/root:" },
+      "createdDateTime": "2024-01-10T09:00:00Z",
+      "lastModifiedDateTime": "2024-02-01T09:00:00Z",
+      "createdBy": { "user": { "displayName": "Avery Chen", "email": "avery.chen@example.com" } },
+      "lastModifiedBy": { "user": { "displayName": "Avery Chen", "email": "avery.chen@example.com" } }
+    },
+    {
+      "id": "item-file1",
+      "name": "report.docx",
+      "size": 42,
+      "eTag": "v1",
+      "file": {
+        "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "hashes": { "quickXorHash": "QUICKXORHASHBASE64==", "sha256Hash": "AB12CD34EF56" }
+      },
+      "parentReference": { "driveId": "d-1", "id": "item-folder1", "path": "/drive/root:/Reports" },
+      "createdDateTime": "2024-01-15T09:00:00Z",
+      "lastModifiedDateTime": "2024-02-02T10:00:00Z",
+      "createdBy": { "user": { "displayName": "Avery Chen", "email": "avery.chen@example.com" } },
+      "lastModifiedBy": { "user": { "displayName": "Jordan Lee", "email": "jordan.lee@example.com" } },
+      "shared": { "scope": "users" }
+    }
+  ],
+  "@odata.nextLink": "{{BASE}}/graph/drives/d-1/root/delta?page=2"
+}

@@ -1,0 +1,4 @@
+{
+  "value": [],
+  "@odata.deltaLink": "{{BASE}}/graph/me/mailFolders/f-inbox/messages/delta?token=delta-3"
+}

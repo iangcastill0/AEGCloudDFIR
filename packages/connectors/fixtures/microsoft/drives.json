@@ -1,0 +1,6 @@
+{
+  "value": [
+    { "id": "d-1", "name": "OneDrive", "driveType": "business" },
+    { "id": "d-2", "name": "Legal Site Documents", "driveType": "documentLibrary" }
+  ]
+}

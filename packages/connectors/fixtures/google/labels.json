@@ -1,0 +1,8 @@
+{
+  "labels": [
+    { "id": "INBOX", "name": "INBOX", "type": "system", "messagesTotal": 2 },
+    { "id": "SPAM", "name": "SPAM", "type": "system" },
+    { "id": "TRASH", "name": "TRASH", "type": "system" },
+    { "id": "Label_7", "name": "Cases/Acme", "type": "user", "messagesTotal": 5 }
+  ]
+}

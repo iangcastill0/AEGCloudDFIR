@@ -1,0 +1,15 @@
+{
+  "files": [
+    {
+      "id": "gd-doc1",
+      "name": "Case Summary",
+      "mimeType": "application/vnd.google-apps.document",
+      "parents": ["gd-folder1"],
+      "owners": [ { "displayName": "Jordan Lee", "emailAddress": "jordan.lee@example.com" } ],
+      "createdTime": "2024-02-05T08:00:00Z",
+      "modifiedTime": "2024-02-06T08:00:00Z",
+      "trashed": false,
+      "version": "3"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "history": [
+    {
+      "id": "h101",
+      "messagesAdded": [ { "message": { "id": "g-003", "threadId": "t-3", "labelIds": ["INBOX"] } } ]
+    }
+  ],
+  "nextPageToken": "page2",
+  "historyId": "h250"
+}
