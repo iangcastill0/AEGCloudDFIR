@@ -1,5 +1,5 @@
 {
-  "name": "@evidencevault/evidence",
+  "name": "@evidencevault/connectors",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./fake": {
+      "types": "./dist/fake-server.d.ts",
+      "default": "./dist/fake-server.js"
     }
   },
   "scripts": {
@@ -18,14 +22,11 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "3.1105.0",
-    "@aws-sdk/lib-storage": "3.1105.0",
-    "@aws-sdk/s3-request-presigner": "3.1105.0",
-    "@evidencevault/config": "workspace:*"
+    "jose": "6.2.8",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "26.1.2",
-    "aws-sdk-client-mock": "4.1.0",
     "eslint": "^10.8.0",
     "typescript": "~5.9.3",
     "vitest": "^4.1.10"

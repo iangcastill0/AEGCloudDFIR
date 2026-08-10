@@ -1,5 +1,5 @@
 {
-  "name": "@evidencevault/evidence",
+  "name": "@evidencevault/production",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -18,15 +18,16 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "3.1105.0",
-    "@aws-sdk/lib-storage": "3.1105.0",
-    "@aws-sdk/s3-request-presigner": "3.1105.0",
-    "@evidencevault/config": "workspace:*"
+    "archiver": "8.0.0",
+    "pdf-lib": "1.17.1",
+    "sharp": "0.35.3",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@types/archiver": "8.0.0",
     "@types/node": "26.1.2",
-    "aws-sdk-client-mock": "4.1.0",
     "eslint": "^10.8.0",
+    "pdfjs-dist": "6.2.108",
     "typescript": "~5.9.3",
     "vitest": "^4.1.10"
   }
