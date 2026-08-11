@@ -1,0 +1,63 @@
+# Authentik blueprint: EvidenceVault OIDC application.
+# Mounted at /blueprints/custom in the compose stack; Authentik applies it on
+# startup. The client secret is read from the AUTHENTIK bootstrap env var
+# EV_OIDC_CLIENT_SECRET_BOOTSTRAP if set, else generate one in the UI and copy
+# it into EvidenceVault's EV_OIDC_CLIENT_SECRET.
+version: 1
+metadata:
+  name: evidencevault
+  labels:
+    blueprints.goauthentik.io/description: "EvidenceVault OIDC provider + application"
+entries:
+  - model: authentik_providers_oauth2.oauth2provider
+    identifiers:
+      name: evidencevault
+    attrs:
+      name: evidencevault
+      client_type: confidential
+      client_id: evidencevault
+      client_secret: !Env [EV_OIDC_CLIENT_SECRET_BOOTSTRAP, "changeme-local-only"]
+      authorization_flow:
+        !Find [
+          authentik_flows.flow,
+          [slug, default-provider-authorization-implicit-consent],
+        ]
+      invalidation_flow:
+        !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+      redirect_uris:
+        - matching_mode: strict
+          url: http://localhost:4000/auth/callback
+      signing_key:
+        !Find [
+          authentik_crypto.certificatekeypair,
+          [name, authentik Self-signed Certificate],
+        ]
+      access_code_validity: minutes=1
+      access_token_validity: minutes=10
+      refresh_token_validity: days=1
+      sub_mode: hashed_user_id # stable pairwise-ish sub; EvidenceVault keys on (issuer, sub)
+      include_claims_in_id_token: true
+      property_mappings:
+        - !Find [authentik_providers_oauth2.scopemapping, [name, "authentik default OAuth Mapping: OpenID 'openid'"]]
+        - !Find [authentik_providers_oauth2.scopemapping, [name, "authentik default OAuth Mapping: OpenID 'email'"]]
+        - !Find [authentik_providers_oauth2.scopemapping, [name, "authentik default OAuth Mapping: OpenID 'profile'"]]
+  - model: authentik_core.application
+    identifiers:
+      slug: evidencevault
+    attrs:
+      name: EvidenceVault
+      slug: evidencevault
+      provider: !KeyOf evidencevault
+      policy_engine_mode: any
+      meta_description: "eDiscovery evidence archive"
+  # Optional groups used for group→role mapping (EV_OIDC_GROUP_CLAIM=groups,
+  # EV_OIDC_GROUP_ROLE_MAP=ev-org-admins:org_admin,ev-reviewers:reviewer,...)
+  - model: authentik_core.group
+    identifiers: { name: ev-org-admins }
+    attrs: { name: ev-org-admins }
+  - model: authentik_core.group
+    identifiers: { name: ev-reviewers }
+    attrs: { name: ev-reviewers }
+  - model: authentik_core.group
+    identifiers: { name: ev-case-managers }
+    attrs: { name: ev-case-managers }

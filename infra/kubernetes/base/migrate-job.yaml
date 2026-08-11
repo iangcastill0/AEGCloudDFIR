@@ -1,0 +1,32 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-migrate
+  annotations:
+    kustomize.config.k8s.io/behavior: replace
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: migrate
+          image: ghcr.io/OWNER/evidencevault-api:0.1.0
+          command: ["npx", "prisma", "migrate", "deploy", "--schema", "node_modules/@evidencevault/database/prisma/schema.prisma"]
+          envFrom:
+            - configMapRef: { name: evidencevault-config }
+            - secretRef: { name: evidencevault-secrets }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: {}

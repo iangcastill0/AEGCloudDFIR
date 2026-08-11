@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  labels: { app: evidencevault, component: api }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: evidencevault, component: api }
+  template:
+    metadata:
+      labels: { app: evidencevault, component: api }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9464"
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: api
+          image: ghcr.io/OWNER/evidencevault-api:0.1.0 # pin digests in production
+          ports:
+            - { containerPort: 4000, name: http }
+            - { containerPort: 9464, name: metrics }
+          envFrom:
+            - configMapRef: { name: evidencevault-config }
+            - secretRef: { name: evidencevault-secrets }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+          resources:
+            requests: { cpu: 250m, memory: 512Mi }
+            limits: { cpu: "1", memory: 1Gi }
+          startupProbe:
+            httpGet: { path: /startupz, port: http }
+            failureThreshold: 30
+            periodSeconds: 2
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 20
+      volumes:
+        - name: tmp
+          emptyDir: { medium: Memory, sizeLimit: 256Mi }

@@ -1,0 +1,15 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: evidencevault
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - api-deployment.yaml
+  - api-service.yaml
+  - worker-deployment.yaml
+  - web-deployment.yaml
+  - web-service.yaml
+  - ingress.yaml
+  - migrate-job.yaml
+  - networkpolicy.yaml
+  - hpa.yaml

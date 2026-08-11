@@ -1,0 +1,61 @@
+# Default-deny plus explicit flows. Adjust datastore namespaces/labels.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: web-flows
+spec:
+  podSelector:
+    matchLabels: { component: web }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from: [{ namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: ingress-nginx } } }]
+  egress:
+    - to: [{ podSelector: { matchLabels: { component: api } } }]
+    - to: [{ namespaceSelector: {}, podSelector: { matchLabels: { k8s-app: kube-dns } } }]
+      ports: [{ protocol: UDP, port: 53 }, { protocol: TCP, port: 53 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: api-flows
+spec:
+  podSelector:
+    matchLabels: { component: api }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from: [{ namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: ingress-nginx } } }]
+    - from: [{ podSelector: { matchLabels: { component: web } } }]
+  egress:
+    - to: [{ namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: data } } }]
+    # Wasabi + Authentik + provider APIs over TLS; restrict further with
+    # FQDN-aware policies (Cilium/Calico) if available.
+    - ports: [{ protocol: TCP, port: 443 }]
+    - to: [{ namespaceSelector: {}, podSelector: { matchLabels: { k8s-app: kube-dns } } }]
+      ports: [{ protocol: UDP, port: 53 }, { protocol: TCP, port: 53 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: worker-flows
+spec:
+  podSelector:
+    matchLabels: { component: worker }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from: [] # health probes from kubelet only
+  egress:
+    - to: [{ namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: data } } }]
+    # graph.microsoft.com, login.microsoftonline.com, *.googleapis.com,
+    # oauth2.googleapis.com, Wasabi endpoint — TLS only. Use FQDN policies
+    # (Cilium) to pin these hostnames where supported.
+    - ports: [{ protocol: TCP, port: 443 }]
+    - to: [{ namespaceSelector: {}, podSelector: { matchLabels: { k8s-app: kube-dns } } }]
+      ports: [{ protocol: UDP, port: 53 }, { protocol: TCP, port: 53 }]

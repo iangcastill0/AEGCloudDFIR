@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  labels: { app: evidencevault, component: web }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: evidencevault, component: web }
+  template:
+    metadata:
+      labels: { app: evidencevault, component: web }
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: web
+          image: ghcr.io/OWNER/evidencevault-web:0.1.0
+          ports:
+            - { containerPort: 3000, name: http }
+          env:
+            - name: NEXT_PUBLIC_API_URL
+              value: "https://api.evidencevault.example.com"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: 500m, memory: 512Mi }
+          readinessProbe:
+            httpGet: { path: /, port: http }
+            periodSeconds: 10
+      volumes:
+        - name: tmp
+          emptyDir: { medium: Memory, sizeLimit: 128Mi }
