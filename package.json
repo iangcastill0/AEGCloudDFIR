@@ -19,7 +19,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "audit:verify": "tsx scripts/audit-verify.ts",
-    "sbom": "tsx scripts/generate-sbom.ts"
+    "sbom:generate": "tsx scripts/generate-sbom.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

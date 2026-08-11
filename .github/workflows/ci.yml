@@ -104,7 +104,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm sbom
+      - run: pnpm run sbom:generate
       - uses: actions/upload-artifact@v4
         with:
           name: sbom
