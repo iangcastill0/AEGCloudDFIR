@@ -23,6 +23,7 @@ $$;
 
 -- Schema ownership and grants (run inside the evidencevault database).
 GRANT CONNECT ON DATABASE evidencevault TO evidencevault, evidencevault_migrator;
+GRANT CREATE ON DATABASE evidencevault TO evidencevault_migrator;
 ALTER SCHEMA public OWNER TO evidencevault_migrator;
 GRANT USAGE ON SCHEMA public TO evidencevault;
 

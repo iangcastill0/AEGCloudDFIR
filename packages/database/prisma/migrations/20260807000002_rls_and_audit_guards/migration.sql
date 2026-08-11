@@ -38,8 +38,8 @@ BEGIN
     EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', t);
     EXECUTE format(
       'CREATE POLICY tenant_isolation ON %I '
-      || 'USING ("tenantId" = current_setting(''app.tenant_id'', true)::uuid) '
-      || 'WITH CHECK ("tenantId" = current_setting(''app.tenant_id'', true)::uuid)',
+      || 'USING ("tenantId" = NULLIF(current_setting(''app.tenant_id'', true), '''')::uuid) '
+      || 'WITH CHECK ("tenantId" = NULLIF(current_setting(''app.tenant_id'', true), '''')::uuid)',
       t
     );
   END LOOP;
@@ -54,8 +54,8 @@ $$;
 ALTER TABLE "tenants" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "tenants" FORCE ROW LEVEL SECURITY;
 CREATE POLICY tenant_self ON "tenants"
-  USING (id = current_setting('app.tenant_id', true)::uuid)
-  WITH CHECK (id = current_setting('app.tenant_id', true)::uuid);
+  USING (id = NULLIF(current_setting('app.tenant_id', true), '')::uuid)
+  WITH CHECK (id = NULLIF(current_setting('app.tenant_id', true), '')::uuid);
 CREATE POLICY tenant_platform ON "tenants"
   USING (current_setting('app.platform', true) = 'true');
 -- Platform context may create tenants (onboarding).
@@ -70,7 +70,7 @@ CREATE POLICY tenant_platform_insert ON "tenants"
 -- ---------------------------------------------------------------------------
 CREATE POLICY self_memberships ON "memberships"
   FOR SELECT
-  USING ("userId" = current_setting('app.user_id', true)::uuid);
+  USING ("userId" = NULLIF(current_setting('app.user_id', true), '')::uuid);
 
 CREATE POLICY self_role_assignments ON "role_assignments"
   FOR SELECT
@@ -78,7 +78,7 @@ CREATE POLICY self_role_assignments ON "role_assignments"
     EXISTS (
       SELECT 1 FROM "memberships" m
       WHERE m.id = "role_assignments"."membershipId"
-        AND m."userId" = current_setting('app.user_id', true)::uuid
+        AND m."userId" = NULLIF(current_setting('app.user_id', true), '')::uuid
     )
   );
 
@@ -89,7 +89,7 @@ CREATE POLICY tenant_member_select ON "tenants"
     EXISTS (
       SELECT 1 FROM "memberships" m
       WHERE m."tenantId" = "tenants".id
-        AND m."userId" = current_setting('app.user_id', true)::uuid
+        AND m."userId" = NULLIF(current_setting('app.user_id', true), '')::uuid
     )
   );
 

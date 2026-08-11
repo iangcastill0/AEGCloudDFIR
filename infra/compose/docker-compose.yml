@@ -86,7 +86,8 @@ services:
       MINIO_ROOT_PASSWORD: ${EV_LOCAL_MINIO_PASSWORD:-minioadmin-local-only}
 
   clamav:
-    image: clamav/clamav:1.4
+    # clamav-debian is the multi-arch (amd64+arm64) distribution of the same release
+    image: clamav/clamav-debian:1.4
     volumes:
       - clamav-data:/var/lib/clamav
     ports:

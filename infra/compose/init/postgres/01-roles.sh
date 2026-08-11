@@ -11,6 +11,8 @@ CREATE ROLE evidencevault LOGIN PASSWORD 'changeme-local-only'
   NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
 
 GRANT CONNECT ON DATABASE evidencevault TO evidencevault, evidencevault_migrator;
+-- CREATE SCHEMA IF NOT EXISTS in migrations checks CREATE even when it exists.
+GRANT CREATE ON DATABASE evidencevault TO evidencevault_migrator;
 ALTER SCHEMA public OWNER TO evidencevault_migrator;
 GRANT USAGE ON SCHEMA public TO evidencevault;
 

@@ -60,6 +60,7 @@ jobs:
           CREATE ROLE evidencevault_migrator LOGIN PASSWORD 'ci-only' NOSUPERUSER NOCREATEDB NOCREATEROLE;
           CREATE ROLE evidencevault LOGIN PASSWORD 'ci-only' NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
           GRANT CONNECT ON DATABASE evidencevault TO evidencevault, evidencevault_migrator;
+          GRANT CREATE ON DATABASE evidencevault TO evidencevault_migrator;
           ALTER SCHEMA public OWNER TO evidencevault_migrator;
           GRANT USAGE ON SCHEMA public TO evidencevault;
           ALTER DEFAULT PRIVILEGES FOR ROLE evidencevault_migrator IN SCHEMA public
