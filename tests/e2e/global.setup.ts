@@ -13,10 +13,10 @@ setup('authenticate via Authentik', async ({ page }) => {
   mkdirSync('tests/e2e/.auth', { recursive: true });
 
   await page.goto(`${API}/auth/login?redirectTo=/`);
-  // Authentik identification stage
-  await page.getByLabel(/username|email/i).fill(AUTHENTIK_USER);
+  // Authentik identification stage (labels are visual only, so use roles)
+  await page.getByRole('textbox', { name: /email or username|username/i }).fill(AUTHENTIK_USER);
   await page.getByRole('button', { name: /log in|continue/i }).click();
-  const passwordField = page.getByLabel(/password/i);
+  const passwordField = page.getByRole('textbox', { name: /password/i });
   await passwordField.waitFor({ state: 'visible', timeout: 15_000 });
   await passwordField.fill(AUTHENTIK_PASSWORD);
   await page.getByRole('button', { name: /log in|continue/i }).click();

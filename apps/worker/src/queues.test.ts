@@ -34,6 +34,8 @@ describe('sanitizeJobId', () => {
   it('rejects empty and oversized keys', () => {
     expect(() => sanitizeJobId('')).toThrow();
     expect(() => sanitizeJobId('x'.repeat(513))).toThrow();
-    expect(sanitizeJobId('ok:1')).toBe('ok:1');
+    // Colons are remapped because BullMQ custom job ids may not contain ':'.
+    expect(sanitizeJobId('ok:1')).toBe('ok__1');
+    expect(sanitizeJobId('discover:abc')).toBe('discover__abc');
   });
 });

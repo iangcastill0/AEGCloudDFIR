@@ -214,16 +214,44 @@ function normalizeFullResult(raw: unknown): ParsedEmail {
     throw new TypeError('full parser returned a non-object result');
   }
   const r = raw as Record<string, unknown>;
-  const headers = Array.isArray(r['headers'])
-    ? (r['headers'] as unknown[])
-        .map((h) => {
-          if (typeof h !== 'object' || h === null) return null;
-          const hr = h as Record<string, unknown>;
-          if (typeof hr['name'] !== 'string' || typeof hr['value'] !== 'string') return null;
-          return { name: hr['name'], value: hr['value'] };
-        })
-        .filter((h): h is { name: string; value: string } => h !== null)
-    : [];
+  // The evidence parser exposes ordered headers as `rawHeaders`
+  // ({name, rawName, value, position}); tolerate a plain `headers` alias too.
+  const headerSource = Array.isArray(r['rawHeaders'])
+    ? (r['rawHeaders'] as unknown[])
+    : Array.isArray(r['headers'])
+      ? (r['headers'] as unknown[])
+      : [];
+  const headers = headerSource
+    .map((h) => {
+      if (typeof h !== 'object' || h === null) return null;
+      const hr = h as Record<string, unknown>;
+      const name = typeof hr['rawName'] === 'string' ? hr['rawName'] : hr['name'];
+      if (typeof name !== 'string' || typeof hr['value'] !== 'string') return null;
+      return { name, value: hr['value'] };
+    })
+    .filter((h): h is { name: string; value: string } => h !== null);
+
+  // The evidence parser exposes participants as a single role-tagged list;
+  // regroup them into the per-role arrays this adapter's callers expect.
+  const participantsByRole = (role: string): ParsedAddress[] => {
+    if (!Array.isArray(r['participants'])) return normalizeAddressList(r[role]);
+    const out: ParsedAddress[] = [];
+    for (const p of r['participants'] as unknown[]) {
+      if (typeof p !== 'object' || p === null) continue;
+      const pr = p as Record<string, unknown>;
+      if (pr['role'] !== role) continue;
+      const address =
+        typeof pr['normalizedAddress'] === 'string' && pr['normalizedAddress'] !== ''
+          ? pr['normalizedAddress']
+          : typeof pr['rawAddress'] === 'string'
+            ? pr['rawAddress']
+            : undefined;
+      const name =
+        typeof pr['rawName'] === 'string' && pr['rawName'] !== '' ? pr['rawName'] : undefined;
+      if (address !== undefined || name !== undefined) out.push({ address, name });
+    }
+    return out;
+  };
   const attachments = Array.isArray(r['attachments'])
     ? (r['attachments'] as unknown[])
         .map((a): ParsedAttachment | null => {
@@ -252,12 +280,12 @@ function normalizeFullResult(raw: unknown): ParsedEmail {
     rawDateHeader: str(r['rawDateHeader']),
     date: typeof r['date'] === 'string' ? r['date'] : undefined,
     headers,
-    from: normalizeAddressList(r['from']),
-    sender: normalizeAddressList(r['sender']),
-    to: normalizeAddressList(r['to']),
-    cc: normalizeAddressList(r['cc']),
-    bcc: normalizeAddressList(r['bcc']),
-    replyTo: normalizeAddressList(r['replyTo']),
+    from: participantsByRole('from'),
+    sender: participantsByRole('sender'),
+    to: participantsByRole('to'),
+    cc: participantsByRole('cc'),
+    bcc: participantsByRole('bcc'),
+    replyTo: participantsByRole('reply_to'),
     bodyPlain: str(r['bodyPlain']),
     bodyHtml: typeof r['bodyHtml'] === 'string' ? r['bodyHtml'] : undefined,
     attachments,

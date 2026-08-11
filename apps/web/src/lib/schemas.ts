@@ -51,9 +51,10 @@ export const connectorSummary = z.object({
   id: z.string(),
   provider: z.enum(['microsoft', 'google']),
   mode: z.enum(['delegated', 'organization']),
-  displayName: z.string().default(''),
-  accountEmail: z.string().nullable().default(null),
+  label: z.string().default(''),
+  externalIdentity: z.string().default(''),
   status: z.string().default('unknown'),
+  statusDetail: z.string().default(''),
   createdAt: z.string().optional(),
 });
 export type ConnectorSummary = z.infer<typeof connectorSummary>;

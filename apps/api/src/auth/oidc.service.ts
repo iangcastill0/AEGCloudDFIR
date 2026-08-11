@@ -29,10 +29,16 @@ export class OidcService {
 
   private async getConfiguration(): Promise<client.Configuration> {
     try {
+      const issuerUrl = new URL(this.appConfig.EV_OIDC_ISSUER);
+      // openid-client v6 refuses plain-HTTP issuers unless explicitly allowed.
+      // Permit it only outside production (local Authentik in the compose stack).
+      const allowHttp = issuerUrl.protocol === 'http:' && this.appConfig.NODE_ENV !== 'production';
       this.configPromise ??= client.discovery(
-        new URL(this.appConfig.EV_OIDC_ISSUER),
+        issuerUrl,
         this.appConfig.EV_OIDC_CLIENT_ID,
         this.appConfig.EV_OIDC_CLIENT_SECRET,
+        undefined,
+        allowHttp ? { execute: [client.allowInsecureRequests] } : undefined,
       );
       return await this.configPromise;
     } catch (err) {

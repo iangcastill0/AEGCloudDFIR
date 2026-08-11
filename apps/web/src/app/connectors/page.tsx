@@ -130,7 +130,7 @@ export default function ConnectorsPage() {
                     <tr key={c.id}>
                       <td>{c.provider}</td>
                       <td>{c.mode}</td>
-                      <td>{c.accountEmail ?? c.displayName ?? '—'}</td>
+                      <td>{c.externalIdentity ?? c.label ?? '—'}</td>
                       <td>
                         <StatusPill status={c.status} />
                       </td>
@@ -148,7 +148,7 @@ export default function ConnectorsPage() {
                             small
                             variant="danger"
                             onClick={() =>
-                              setRevokeTarget({ id: c.id, name: c.accountEmail ?? c.provider })
+                              setRevokeTarget({ id: c.id, name: c.externalIdentity ?? c.provider })
                             }
                           >
                             Revoke

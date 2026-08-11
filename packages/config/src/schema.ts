@@ -112,6 +112,7 @@ export const configSchema = z.object({
   EV_LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error']).default('info'),
   EV_OTEL_EXPORTER_OTLP_ENDPOINT: z.string().default(''),
   EV_METRICS_PORT: port.default(9464),
+  EV_WORKER_HEALTH_PORT: port.default(5100),
 });
 
 export type AppConfig = z.infer<typeof configSchema>;

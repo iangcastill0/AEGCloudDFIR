@@ -58,9 +58,19 @@ export async function startFakeProviderServer(
     }
   };
 
-  const sendJsonFile = async (res: ServerResponse, relative: string): Promise<void> => {
+  const sendJsonFile = async (
+    res: ServerResponse,
+    relative: string,
+    /** Listing routes: a missing fixture means an empty collection, not 404. */
+    emptyOnMissing = false,
+  ): Promise<void> => {
     const buf = await readFixture(relative);
     if (buf === undefined) {
+      if (emptyOnMissing) {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ value: [] }));
+        return;
+      }
       sendError(res, 404, 'itemNotFound', `no fixture ${relative}`);
       return;
     }
@@ -199,7 +209,7 @@ export async function startFakeProviderServer(
       }
       m = /^\/me\/mailFolders\/([^/]+)\/messages$/.exec(seg);
       if (m !== null) {
-        await sendJsonFile(res, `microsoft/messages.${m[1]}.${graphSuffix(q)}.json`);
+        await sendJsonFile(res, `microsoft/messages.${m[1]}.${graphSuffix(q)}.json`, true);
         return;
       }
       m = /^\/me\/messages\/([^/]+)\/\$value$/.exec(seg);
@@ -265,7 +275,7 @@ export async function startFakeProviderServer(
         return;
       }
       if (g === '/messages') {
-        await sendJsonFile(res, `google/messages.${googleSuffix(q)}.json`);
+        await sendJsonFile(res, `google/messages.${googleSuffix(q)}.json`, true);
         return;
       }
       m = /^\/messages\/([^/]+)$/.exec(g);

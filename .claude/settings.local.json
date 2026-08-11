@@ -108,7 +108,16 @@
       "Bash(node -e \"const b=require\\('./sbom/sbom.cdx.json'\\); console.log\\('SBOM components:', b.components?.length ?? 0, 'format:', b.bomFormat, b.specVersion\\)\")",
       "Bash(perl -pi -e 's/^\\(\\\\s+\\)- run: pnpm sbom$/$1- run: pnpm run sbom:generate/' .github/workflows/ci.yml)",
       "Bash(pnpm run *)",
-      "Bash(git commit -q -m 'sbom: use pnpm native CycloneDX generator + license report \\(581 components\\) *)"
+      "Bash(git commit -q -m 'sbom: use pnpm native CycloneDX generator + license report \\(581 components\\) *)",
+      "Bash(docker exec *)",
+      "Bash(curl -s -o /dev/null -w '%{http_code}\\\\n' \"http://localhost:4010/graph/me/mailFolders/f-inbox/messages\")",
+      "Bash(curl -s \"http://localhost:4010/graph/me/mailFolders/f-inbox/messages\")",
+      "Bash(python3 -)",
+      "Bash(curl -s \"http://localhost:9200/evidencevault-evidence/_count\")",
+      "Bash(curl -s -X POST \"http://localhost:9200/evidencevault-evidence/_search\" -H 'content-type: application/json' -d '{\"size\":0,\"aggs\":{\"f\":{\"terms\":{\"field\":\"email.from.domain\"}}}}')",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('agg:', d.get\\('aggregations',{}\\)\\)\")",
+      "Bash(node_modules/.bin/playwright test *)",
+      "Bash(git commit -q -m 'M13: live-stack fixes — BullMQ jobid delimiter, parse participant/header mapping, empty-folder listing, insecure-OIDC for local, E2E green *)"
     ]
   }
 }

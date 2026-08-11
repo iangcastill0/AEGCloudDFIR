@@ -37,10 +37,14 @@ export class BullMqEnqueuer implements JobEnqueuer {
   }
 }
 
-/** BullMQ jobIds must not contain ':' delimiter problems? They may, but must not be empty or huge. */
+/**
+ * BullMQ custom job ids may not contain ':' (it delimits internal Redis keys),
+ * so map our colon-delimited dedup keys to '__'. The mapping is a stable
+ * bijection over our key alphabet, so idempotent redelivery still collapses.
+ */
 export function sanitizeJobId(dedupKey: string): string {
   if (!dedupKey || dedupKey.length > 512) {
     throw new Error('dedup key must be 1..512 chars');
   }
-  return dedupKey;
+  return dedupKey.replaceAll(':', '__');
 }

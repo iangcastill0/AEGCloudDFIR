@@ -42,7 +42,7 @@ async function main(): Promise<void> {
   outboxSampler.unref();
 
   const abort = new AbortController();
-  const health = startHealthServer(config.EV_API_PORT + 1000, {
+  const health = startHealthServer(config.EV_WORKER_HEALTH_PORT, {
     ready: async () => {
       const checks: Record<string, boolean> = {};
       try {

@@ -15,11 +15,20 @@ const API = process.env.EV_E2E_API_URL ?? 'http://localhost:4000';
 test.describe('cross-tenant isolation (scenario 6)', () => {
   test.beforeEach(async ({ page }) => {
     // Select the demo tenant so requests carry tenant context.
-    await page.goto('/auth/tenant');
-    const demoTenant = page.getByRole('button', { name: /demo matter workspace/i }).first();
-    if (await demoTenant.isVisible().catch(() => false)) {
-      await demoTenant.click();
-    }
+    await page.goto('/');
+    const tenantsRes = await page.request.get(`${API}/auth/tenants`);
+    expect(tenantsRes.ok()).toBeTruthy();
+    const tenants = (await tenantsRes.json()) as {
+      tenants: { tenantId: string; name: string }[];
+    };
+    const list = tenants.tenants ?? [];
+    const demo = list.find((t) => /demo matter/i.test(t.name)) ?? list[0];
+    expect(demo).toBeTruthy();
+    const select = await page.request.post(`${API}/auth/select-tenant`, {
+      data: { tenantId: demo!.tenantId },
+      headers: { 'x-csrf-token': await csrf(page) },
+    });
+    expect(select.ok()).toBeTruthy();
   });
 
   const foreignId = randomUUID();

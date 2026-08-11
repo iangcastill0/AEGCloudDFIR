@@ -1,0 +1,45 @@
+{
+  "cookies": [
+    {
+      "name": "authentik_csrf",
+      "value": "2abY5fAZfnwPkvMXrBiLGa39ucS8WHNd",
+      "domain": "localhost",
+      "path": "/",
+      "expires": 1817928557.29186,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "authentik_session",
+      "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzaWQiOiJuZ245dGxzMXE1NGI2aGd3MWx4OXFta2owcDh1MW12eiIsImlzcyI6ImF1dGhlbnRpayIsInN1YiI6ImM0ZjZjNjU4ZGRhNjM5ZjNlNTY1MmY3NDFjNjQ5MzAyOGRmYzI5NThiZWMzYTYyZDVjOWRkOThhYWMwZmZkZDEiLCJhdXRoZW50aWNhdGVkIjp0cnVlLCJhY3IiOiJnb2F1dGhlbnRpay5pby9jb3JlL2RlZmF1bHQifQ.d2kNpPPZfWKP1SWU3zzlCxzTFsAGN6JY0y7w68m-bEA",
+      "domain": "localhost",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": true,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "ev_session",
+      "value": "DfxA5gUYki6NJf8RRZslAp0uWZFKEYPpYTgoYdr_8bya7ZZQ9X3MEcJKg1BjhYIgodqgQpfXYjNEhdf_JADeA-ywQL15T_bMSbo4Uq03Uamhnq6XsLXFoxmuuxG_3EUtizYQx8ObuFMDZqw3mp8E8PXtTEhW",
+      "domain": "localhost",
+      "path": "/",
+      "expires": 1786507757.575868,
+      "httpOnly": true,
+      "secure": false,
+      "sameSite": "Lax"
+    }
+  ],
+  "origins": [
+    {
+      "origin": "http://localhost:9443",
+      "localStorage": [
+        {
+          "name": "authentik-remember-me-session",
+          "value": ""
+        }
+      ]
+    }
+  ]
+}

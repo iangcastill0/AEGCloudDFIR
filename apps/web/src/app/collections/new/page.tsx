@@ -248,7 +248,7 @@ function AccountStep({ state, dispatch }: StepProps) {
               }}
               options={usable.map((c) => ({
                 value: c.id,
-                label: `${c.accountEmail ?? c.displayName ?? c.id} (${c.mode})`,
+                label: `${c.externalIdentity ?? c.label ?? c.id} (${c.mode})`,
                 description:
                   c.mode === 'delegated'
                     ? 'Personal connection — collects only what this identity can access.'

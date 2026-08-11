@@ -22,7 +22,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 COPY --from=builder /out .
 USER ev
-EXPOSE 5000
+EXPOSE 5100
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["node", "dist/main.js"]
 # Sandboxing (orchestration level): read_only rootfs, tmpfs /tmp with size
