@@ -3,8 +3,10 @@ import { createPrismaClient } from '@evidencevault/database';
 import { Redis } from 'ioredis';
 import { pino } from 'pino';
 import { BullMqEnqueuer } from './bullmq-enqueuer.js';
+import { buildWorkerContext } from './context.js';
 import { startHealthServer } from './health.js';
 import { OutboxDispatcher } from './outbox/dispatcher.js';
+import { createWorkers } from './workers.js';
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -21,6 +23,9 @@ async function main(): Promise<void> {
   const redis = new Redis(config.EV_REDIS_URL, { maxRetriesPerRequest: null });
   const enqueuer = new BullMqEnqueuer(redis);
   const dispatcher = new OutboxDispatcher(prisma, enqueuer, log);
+  const ctx = buildWorkerContext(config, { prisma, redis, log, enqueuer });
+  const workers = createWorkers(ctx, redis);
+  log.info({ workerCount: workers.length }, 'queue workers started');
 
   const abort = new AbortController();
   const health = startHealthServer(config.EV_API_PORT + 1000, {
@@ -42,6 +47,8 @@ async function main(): Promise<void> {
     log.info({ signal }, 'worker shutting down');
     abort.abort();
     health.close();
+    // Close queue workers BEFORE the connections they depend on.
+    await Promise.all(workers.map((w) => w.close())).catch(() => undefined);
     await enqueuer.close();
     await redis.quit().catch(() => undefined);
     await prisma.$disconnect();

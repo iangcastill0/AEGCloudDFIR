@@ -114,7 +114,7 @@ export class OutboxDispatcher {
     this.running = true;
     this.log.info({}, 'outbox dispatcher started');
     while (!signal.aborted) {
-      let handled = 0;
+      let handled: number;
       try {
         handled = await this.dispatchOnce();
       } catch (err) {
