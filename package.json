@@ -24,8 +24,11 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@evidencevault/config": "workspace:*",
+    "@evidencevault/connectors": "workspace:*",
     "@evidencevault/database": "workspace:*",
+    "@evidencevault/evidence": "workspace:*",
     "@evidencevault/search": "workspace:*",
+    "@playwright/test": "1.62.1",
     "@types/node": "26.1.2",
     "eslint": "^10.8.0",
     "prettier": "^3.9.6",
