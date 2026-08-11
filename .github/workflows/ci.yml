@@ -78,9 +78,20 @@ jobs:
             "SELECT count(*) FROM tenants" | grep -qx 0
 
   integration:
-    name: Integration tests (Testcontainers)
+    name: Integration tests (live services)
     runs-on: ubuntu-latest
     needs: verify
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: evidencevault
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-timeout 3s --health-retries 20
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -90,7 +101,25 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
+      - name: Bootstrap roles and apply migrations
+        run: |
+          PGPASSWORD=ci-only psql -h localhost -U postgres -d evidencevault <<'SQL'
+          CREATE ROLE evidencevault_migrator LOGIN PASSWORD 'ci-only' NOSUPERUSER NOCREATEDB NOCREATEROLE;
+          CREATE ROLE evidencevault LOGIN PASSWORD 'ci-only' NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+          GRANT CONNECT ON DATABASE evidencevault TO evidencevault, evidencevault_migrator;
+          GRANT CREATE ON DATABASE evidencevault TO evidencevault_migrator;
+          ALTER SCHEMA public OWNER TO evidencevault_migrator;
+          GRANT USAGE ON SCHEMA public TO evidencevault;
+          ALTER DEFAULT PRIVILEGES FOR ROLE evidencevault_migrator IN SCHEMA public
+            GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO evidencevault;
+          ALTER DEFAULT PRIVILEGES FOR ROLE evidencevault_migrator IN SCHEMA public
+            GRANT USAGE, SELECT ON SEQUENCES TO evidencevault;
+          SQL
+          EV_DATABASE_MIGRATION_URL=postgresql://evidencevault_migrator:ci-only@localhost:5432/evidencevault \
+            pnpm --filter @evidencevault/database exec prisma migrate deploy
       - run: pnpm test:integration
+        env:
+          EV_IT_DATABASE_URL: postgresql://evidencevault:ci-only@localhost:5432/evidencevault
 
   sbom:
     name: SBOM and license report

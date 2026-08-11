@@ -18,7 +18,8 @@
     "test": "vitest run",
     "prisma:generate": "prisma generate",
     "migrate:deploy": "prisma migrate deploy",
-    "migrate:status": "prisma migrate status"
+    "migrate:status": "prisma migrate status",
+    "test:integration": "vitest run src/rls.integration.test.ts"
   },
   "dependencies": {
     "@prisma/client": "6.19.3"
