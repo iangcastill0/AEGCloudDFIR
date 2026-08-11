@@ -182,7 +182,12 @@ const MINIMAL_PARSER: EmailParser = {
 interface FullParserModule {
   parseEmail: (rfc822: Uint8Array) => Promise<unknown>;
   htmlToText?: (html: string) => string;
-  buildSafeEmailPreview?: (html: string, resolveCid: (contentId: string) => string) => string;
+  /**
+   * evidence API: (html, {allowedCidResolver}) -> { html, ... }.
+   * Typed loosely here because this package must not hard-depend on the
+   * evidence module's types.
+   */
+  buildSafeEmailPreview?: (html: string, opts: unknown) => unknown;
 }
 
 function hasFullParser(
@@ -316,7 +321,19 @@ export function loadEmailParser(): Promise<EmailParser> {
         };
         if (typeof full.buildSafeEmailPreview === 'function') {
           const buildPreview = full.buildSafeEmailPreview;
-          parser.buildSafePreview = (html, resolveCid) => buildPreview(html, resolveCid);
+          // The evidence API is buildSafeEmailPreview(html, {allowedCidResolver})
+          // and returns { html, blockedRemoteResources, removedActiveContent }.
+          parser.buildSafePreview = (html, resolveCid) => {
+            const result = buildPreview(html, {
+              allowedCidResolver: (cid: string) => resolveCid(cid) || null,
+            });
+            if (typeof result === 'string') return result;
+            if (result !== null && typeof result === 'object' && 'html' in result) {
+              const h = (result as { html: unknown }).html;
+              return typeof h === 'string' ? h : '';
+            }
+            return '';
+          };
         }
         return parser;
       }

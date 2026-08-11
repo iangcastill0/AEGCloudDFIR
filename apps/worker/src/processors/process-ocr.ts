@@ -300,7 +300,7 @@ async function enqueueIndex(
       {
         tenantId,
         topic: QUEUES.searchIndex,
-        dedupKey: dedupKeys.searchIndex(evidenceItemId, version),
+        dedupKey: dedupKeys.searchIndex(evidenceItemId, version, 'ocr'),
         payload: { tenantId, evidenceItemId, version },
       },
     ],

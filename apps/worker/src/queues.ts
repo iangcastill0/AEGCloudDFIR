@@ -73,7 +73,14 @@ export const dedupKeys = {
   collectionFinalize: (collectionId: string) => `finalize:${collectionId}`,
   processStage: (stage: string, evidenceItemId: string, version: number) =>
     `${stage}:${evidenceItemId}:v${version}`,
-  searchIndex: (evidenceItemId: string, version: number) => `index:${evidenceItemId}:v${version}`,
+  /**
+   * Each pipeline stage that enriches an item re-indexes it from current DB
+   * truth. The stage is part of the dedup key so a later stage's re-index is
+   * not collapsed against an earlier (less complete) one; the index write
+   * itself is an idempotent upsert keyed by evidence id.
+   */
+  searchIndex: (evidenceItemId: string, version: number, stage = 'final') =>
+    `index:${evidenceItemId}:v${version}:${stage}`,
   exportRun: (exportId: string) => `export:${exportId}`,
   productionRun: (productionRunId: string) => `production-run:${productionRunId}`,
   deletionRun: (deletionRequestId: string) => `deletion:${deletionRequestId}`,

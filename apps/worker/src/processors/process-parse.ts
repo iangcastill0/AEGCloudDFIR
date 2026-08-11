@@ -120,9 +120,11 @@ export async function processParse(
   const stagedAttachments: StagedAttachment[] = [];
   for (const attachment of parsed.attachments) {
     const childId = randomUUID();
+    // Readable.from(buffer) iterates bytes; wrap in an array to emit the
+    // whole attachment as a single chunk.
     const staged = await ctx.store.stageStream(
       tenantId,
-      Readable.from(Buffer.from(attachment.content)),
+      Readable.from([Buffer.from(attachment.content)]),
     );
     const promoted = await ctx.store.promoteToOriginal(
       tenantId,
@@ -359,7 +361,7 @@ export async function processParse(
         {
           tenantId,
           topic: QUEUES.searchIndex,
-          dedupKey: dedupKeys.searchIndex(attachment.id, 1),
+          dedupKey: dedupKeys.searchIndex(attachment.id, 1, 'parse-child'),
           payload: { tenantId, evidenceItemId: attachment.id, version: 1 },
         },
       );
@@ -395,7 +397,7 @@ export async function processParse(
         {
           tenantId,
           topic: QUEUES.searchIndex,
-          dedupKey: dedupKeys.searchIndex(evidenceItemId, version),
+          dedupKey: dedupKeys.searchIndex(evidenceItemId, version, 'parse'),
           payload: { tenantId, evidenceItemId, version },
         },
       ],
@@ -438,7 +440,7 @@ async function markException(
         {
           tenantId: payload.tenantId,
           topic: QUEUES.searchIndex,
-          dedupKey: dedupKeys.searchIndex(item.id, payload.version),
+          dedupKey: dedupKeys.searchIndex(item.id, payload.version, 'parse-child'),
           payload: {
             tenantId: payload.tenantId,
             evidenceItemId: item.id,

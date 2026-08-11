@@ -111,24 +111,34 @@ test.describe('collection → preservation → search → completeness (scenario
     expect(status2.manifest?.sha256, 'signed manifest produced').toBeTruthy();
   });
 
-  test('preserved evidence is searchable by From and subject', async ({ page }) => {
-    test.setTimeout(120_000);
+  test('preserved evidence is searchable across the forensic field set (scenario 2)', async ({
+    page,
+  }) => {
+    test.setTimeout(150_000);
     await selectDemoTenant(page);
     const token = await csrf(page);
+    const search = async (query: string): Promise<number> => {
+      const res = await page.request.post(`${API}/api/v1/search`, {
+        headers: { 'x-csrf-token': token },
+        data: { query, limit: 10 },
+      });
+      if (!res.ok()) return -1;
+      return ((await res.json()) as { total: number }).total;
+    };
 
-    // The corpus is indexed asynchronously; poll a broad match first.
+    // The corpus indexes asynchronously across pipeline stages; wait until the
+    // attachment full-text (last stage) is queryable, then assert the matrix.
     await expect
-      .poll(
-        async () => {
-          const res = await page.request.post(`${API}/api/v1/search`, {
-            headers: { 'x-csrf-token': token },
-            data: { query: 'from:example.com', limit: 10 },
-          });
-          if (!res.ok()) return 0;
-          return ((await res.json()) as { total: number }).total;
-        },
-        { timeout: 90_000, intervals: [3000] },
-      )
+      .poll(() => search('attachment:payment'), { timeout: 120_000, intervals: [3000] })
       .toBeGreaterThan(0);
+
+    expect(await search('from:example.com')).toBeGreaterThan(0);
+    expect(await search('to:jordan.lee@example.com')).toBeGreaterThan(0);
+    expect(await search('cc:sam.rivera@example.com')).toBeGreaterThan(0);
+    // BCC is searchable only because the acquired message actually carried it.
+    expect(await search('bcc:quinn.park@example.com')).toBeGreaterThan(0);
+    expect(await search('subject:deposition')).toBeGreaterThan(0);
+    expect(await search('header.mime-version:1.0')).toBeGreaterThan(0);
+    expect(await search('subject:vendor AND from:avery.chen@example.com')).toBeGreaterThan(0);
   });
 });

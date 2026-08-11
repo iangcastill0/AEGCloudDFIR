@@ -63,7 +63,7 @@ export async function processScan(
           {
             tenantId,
             topic: QUEUES.searchIndex,
-            dedupKey: dedupKeys.searchIndex(evidenceItemId, version),
+            dedupKey: dedupKeys.searchIndex(evidenceItemId, version, 'scan'),
             payload: { tenantId, evidenceItemId, version },
           },
         ],
@@ -197,7 +197,7 @@ export async function processScan(
         {
           tenantId,
           topic: QUEUES.searchIndex,
-          dedupKey: dedupKeys.searchIndex(evidenceItemId, version),
+          dedupKey: dedupKeys.searchIndex(evidenceItemId, version, 'scan'),
           payload: { tenantId, evidenceItemId, version },
         },
       ],

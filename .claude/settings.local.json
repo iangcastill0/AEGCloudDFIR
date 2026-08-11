@@ -117,7 +117,16 @@
       "Bash(curl -s -X POST \"http://localhost:9200/evidencevault-evidence/_search\" -H 'content-type: application/json' -d '{\"size\":0,\"aggs\":{\"f\":{\"terms\":{\"field\":\"email.from.domain\"}}}}')",
       "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('agg:', d.get\\('aggregations',{}\\)\\)\")",
       "Bash(node_modules/.bin/playwright test *)",
-      "Bash(git commit -q -m 'M13: live-stack fixes — BullMQ jobid delimiter, parse participant/header mapping, empty-folder listing, insecure-OIDC for local, E2E green *)"
+      "Bash(git commit -q -m 'M13: live-stack fixes — BullMQ jobid delimiter, parse participant/header mapping, empty-folder listing, insecure-OIDC for local, E2E green *)",
+      "Bash(pnpm format:check)",
+      "Bash(pnpm typecheck *)",
+      "Bash(awk '{for\\(i=1;i<=NF;i++\\) if\\($i==\"passed\"\\){print $\\(i-1\\)\" passed\"; s+=$\\(i-1\\)} } END{print \"TOTAL UNIT:\", s}')",
+      "Bash(curl -s \"http://localhost:9200/evidencevault-evidence/_search\" -H 'content-type: application/json' -d '{\"size\":1,\"query\":{\"exists\":{\"field\":\"email.to\"}},\"_source\":[\"email.from\",\"email.to\",\"email.cc\",\"email.bcc\",\"email.bccPresent\",\"email.subject\"]}')",
+      "Bash(python3 -m json.tool)",
+      "Bash(curl -s \"http://localhost:9200/evidencevault-evidence/_mapping\")",
+      "Bash(python3 -c ' *)",
+      "Bash(curl -s \"http://localhost:9200/evidencevault-evidence/_search\" -H 'content-type: application/json' -d '{\"size\":5,\"query\":{\"exists\":{\"field\":\"email.subject\"}},\"_source\":[\"email.subject\",\"email.to.address\",\"email.cc.address\",\"email.bcc.address\",\"email.bccPresent\",\"kind\"]}')",
+      "Bash(git commit -q -m 'M7/M8 pipeline correctness: safe-preview return shape, attachment streaming, stage-keyed reindex *)"
     ]
   }
 }

@@ -166,7 +166,7 @@ export async function processExtract(
         {
           tenantId,
           topic: QUEUES.searchIndex,
-          dedupKey: dedupKeys.searchIndex(evidenceItemId, version),
+          dedupKey: dedupKeys.searchIndex(evidenceItemId, version, 'extract'),
           payload: { tenantId, evidenceItemId, version },
         },
       ],
@@ -207,7 +207,7 @@ async function markExtractException(
         {
           tenantId: payload.tenantId,
           topic: QUEUES.searchIndex,
-          dedupKey: dedupKeys.searchIndex(item.id, payload.version),
+          dedupKey: dedupKeys.searchIndex(item.id, payload.version, 'extract-child'),
           payload: {
             tenantId: payload.tenantId,
             evidenceItemId: item.id,
