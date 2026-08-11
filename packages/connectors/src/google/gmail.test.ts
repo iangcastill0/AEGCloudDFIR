@@ -115,8 +115,8 @@ describe('GmailConnector.getMailDelta', () => {
   });
 
   it('refuses to run without a starting historyId', async () => {
-    await expect(
-      connector().getMailDelta('me', GMAIL_ACCOUNT_FOLDER),
-    ).rejects.toBeInstanceOf(ProviderApiError);
+    await expect(connector().getMailDelta('me', GMAIL_ACCOUNT_FOLDER)).rejects.toBeInstanceOf(
+      ProviderApiError,
+    );
   });
 });

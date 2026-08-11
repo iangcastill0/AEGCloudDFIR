@@ -31,9 +31,7 @@ interface SeenRequest {
   authorization: string | null;
 }
 
-function queuedFetch(
-  responses: (() => Response)[],
-): { fetchImpl: FetchLike; seen: SeenRequest[] } {
+function queuedFetch(responses: (() => Response)[]): { fetchImpl: FetchLike; seen: SeenRequest[] } {
   const seen: SeenRequest[] = [];
   let i = 0;
   const fetchImpl: FetchLike = (url, init) => {
@@ -98,8 +96,7 @@ describe('providerFetch', () => {
     ]);
     const events: { reason: string; waitMs: number; attempt: number }[] = [];
     const { opts, sleeps } = baseOpts(fetchImpl, {
-      onRateLimit: (info: { reason: string; waitMs: number; attempt: number }) =>
-        events.push(info),
+      onRateLimit: (info: { reason: string; waitMs: number; attempt: number }) => events.push(info),
     });
     const res = await providerFetch('https://api.example/x', { method: 'GET' }, opts);
     expect(res.status).toBe(200);

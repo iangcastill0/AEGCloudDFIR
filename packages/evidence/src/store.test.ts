@@ -63,9 +63,7 @@ describe('stageStream', () => {
 
     expect(result.sha256).toBe(HELLO_SHA);
     expect(result.size).toBe(11);
-    expect(result.stagingKey).toMatch(
-      new RegExp(`^tenants/${TENANT}/staging/[0-9a-f-]{36}$`),
-    );
+    expect(result.stagingKey).toMatch(new RegExp(`^tenants/${TENANT}/staging/[0-9a-f-]{36}$`));
 
     const puts = s3Mock.commandCalls(PutObjectCommand);
     expect(puts.length).toBe(1);
@@ -128,15 +126,11 @@ describe('promoteToOriginal', () => {
     );
 
     expect(result).toEqual({ objectKey: qKey, bucket: QUARANTINE_BUCKET });
-    expect(s3Mock.commandCalls(CopyObjectCommand)[0]!.args[0].input.Bucket).toBe(
-      QUARANTINE_BUCKET,
-    );
+    expect(s3Mock.commandCalls(CopyObjectCommand)[0]!.args[0].input.Bucket).toBe(QUARANTINE_BUCKET);
   });
 
   it('throws IntegrityError on size mismatch and does NOT delete staging', async () => {
-    s3Mock
-      .on(HeadObjectCommand, { Bucket: EVIDENCE_BUCKET, Key: destKey })
-      .rejects(notFound());
+    s3Mock.on(HeadObjectCommand, { Bucket: EVIDENCE_BUCKET, Key: destKey }).rejects(notFound());
     s3Mock
       .on(HeadObjectCommand, { Bucket: EVIDENCE_BUCKET, Key: srcKey })
       .resolves({ ContentLength: 999 });

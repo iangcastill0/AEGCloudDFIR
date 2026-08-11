@@ -53,7 +53,9 @@ describe('parseTsv', () => {
   });
 
   it('ignores malformed rows', () => {
-    const result = parseTsv(`${HEADER}\nnot\ta\tvalid\trow\n5\t1\t1\t1\t1\t1\t0\t0\t10\t10\t80\tok`);
+    const result = parseTsv(
+      `${HEADER}\nnot\ta\tvalid\trow\n5\t1\t1\t1\t1\t1\t0\t0\t10\t10\t80\tok`,
+    );
     expect(result.words.map((w) => w.text)).toEqual(['ok']);
   });
 });

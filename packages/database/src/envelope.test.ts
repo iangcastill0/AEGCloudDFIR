@@ -50,7 +50,11 @@ describe('envelope encryption', () => {
 
   it('refuses non-32-byte master keys', () => {
     expect(
-      () => new LocalAesKeyEncryptionProvider({ 'kek-1': Buffer.from('short').toString('base64') }, 'kek-1'),
+      () =>
+        new LocalAesKeyEncryptionProvider(
+          { 'kek-1': Buffer.from('short').toString('base64') },
+          'kek-1',
+        ),
     ).toThrow(/32 bytes/);
   });
 });

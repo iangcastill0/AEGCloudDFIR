@@ -74,10 +74,7 @@ export {
   buildTextPreview,
   filterStyleAttribute,
 } from './processing/safe-preview.js';
-export type {
-  SafeEmailPreview,
-  SafeEmailPreviewOptions,
-} from './processing/safe-preview.js';
+export type { SafeEmailPreview, SafeEmailPreviewOptions } from './processing/safe-preview.js';
 export { TikaClient } from './processing/tika-client.js';
 export type { TikaClientOptions } from './processing/tika-client.js';
 export { TesseractOcr, parseTsv, rasterizePdf, spawnRunner } from './processing/ocr.js';
@@ -90,11 +87,7 @@ export type {
   RunnerResult,
   TesseractOcrOptions,
 } from './processing/ocr.js';
-export {
-  ClamAvScanner,
-  parseScanResponse,
-  parseVersionResponse,
-} from './processing/clamav.js';
+export { ClamAvScanner, parseScanResponse, parseVersionResponse } from './processing/clamav.js';
 export type {
   ClamAvScannerOptions,
   ClamVersion,
@@ -103,8 +96,5 @@ export type {
 } from './processing/clamav.js';
 export { ExpansionGuard, gunzipCapped } from './processing/limits.js';
 export type { ArchiveScope, ExpansionGuardOptions } from './processing/limits.js';
-export {
-  PARSER_VERSIONS,
-  collectParserVersions,
-} from './processing/pipeline-versions.js';
+export { PARSER_VERSIONS, collectParserVersions } from './processing/pipeline-versions.js';
 export type { CollectParserVersionsInput } from './processing/pipeline-versions.js';

@@ -124,7 +124,10 @@ export function emailFolderIncluded(
   ) {
     return false;
   }
-  if (!emailScope.includeTrash && (name === 'deleted items' || folder.wellKnown === 'deleteditems')) {
+  if (
+    !emailScope.includeTrash &&
+    (name === 'deleted items' || folder.wellKnown === 'deleteditems')
+  ) {
     return false;
   }
   if (!emailScope.includeSpam && (name === 'junk email' || folder.wellKnown === 'junkemail')) {

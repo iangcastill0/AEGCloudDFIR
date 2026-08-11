@@ -17,14 +17,22 @@ spec:
       containers:
         - name: migrate
           image: ghcr.io/OWNER/evidencevault-api:0.1.0
-          command: ["npx", "prisma", "migrate", "deploy", "--schema", "node_modules/@evidencevault/database/prisma/schema.prisma"]
+          command:
+            [
+              'npx',
+              'prisma',
+              'migrate',
+              'deploy',
+              '--schema',
+              'node_modules/@evidencevault/database/prisma/schema.prisma',
+            ]
           envFrom:
             - configMapRef: { name: evidencevault-config }
             - secretRef: { name: evidencevault-secrets }
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
-            capabilities: { drop: ["ALL"] }
+            capabilities: { drop: ['ALL'] }
           volumeMounts:
             - { name: tmp, mountPath: /tmp }
       volumes:

@@ -183,7 +183,9 @@ describe('parseQuery', () => {
 
   it('parses a realistic combined query', () => {
     expect(
-      parseQuery('from:alice@example.com AND (subject:"quarterly report" OR ocr:"account number") NOT tag:reviewed'),
+      parseQuery(
+        'from:alice@example.com AND (subject:"quarterly report" OR ocr:"account number") NOT tag:reviewed',
+      ),
     ).toEqual({
       kind: 'and',
       children: [
@@ -307,9 +309,9 @@ describe('astFromBuilder', () => {
   });
 
   it('unwraps single-child groups like the string parser does', () => {
-    expect(
-      astFromBuilder({ op: 'and', children: [{ operator: 'contains', value: 'x' }] }),
-    ).toEqual({ kind: 'term', value: 'x' });
+    expect(astFromBuilder({ op: 'and', children: [{ operator: 'contains', value: 'x' }] })).toEqual(
+      { kind: 'term', value: 'x' },
+    );
   });
 
   it('preserves nested group structure', () => {
@@ -336,15 +338,15 @@ describe('astFromBuilder', () => {
     expect(() =>
       astFromBuilder({ op: 'and', children: [{ operator: 'regex', value: '.*' }] }),
     ).toThrow(QueryValidationError);
-    expect(() =>
-      astFromBuilder({ op: 'and', children: [{ operator: 'contains' }] }),
-    ).toThrow(QueryValidationError);
+    expect(() => astFromBuilder({ op: 'and', children: [{ operator: 'contains' }] })).toThrow(
+      QueryValidationError,
+    );
     expect(() =>
       astFromBuilder({ op: 'and', children: [{ operator: 'range', field: 'size' }] }),
     ).toThrow(QueryValidationError);
-    expect(() =>
-      astFromBuilder({ op: 'and', children: [{ operator: 'exists' }] }),
-    ).toThrow(QueryValidationError);
+    expect(() => astFromBuilder({ op: 'and', children: [{ operator: 'exists' }] })).toThrow(
+      QueryValidationError,
+    );
   });
 
   it('injects extra unknown keys nowhere (strict schema)', () => {

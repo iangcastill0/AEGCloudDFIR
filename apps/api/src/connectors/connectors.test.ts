@@ -1,0 +1,319 @@
+import { describe, expect, it, vi } from 'vitest';
+import { ConflictException } from '@nestjs/common';
+import {
+  ConnectorStatus,
+  LocalAesKeyEncryptionProvider,
+  SecretKind,
+  encryptSecret,
+} from '@evidencevault/database';
+import { TRUTHFULNESS_NOTICES } from '@evidencevault/contracts';
+import { TenantRole } from '@evidencevault/database';
+import { ConnectorsService } from './connectors.service.js';
+import { connectorSecretScope } from './token-provider.factory.js';
+import {
+  CONNECTOR_ID,
+  TENANT_ID,
+  TEST_KEK_BASE64,
+  fakeAudit,
+  fakePrisma,
+  fakeRequest,
+  jsonResponse,
+  makeAuth,
+  testConfig,
+} from '../testing/mocks.js';
+
+const kek = new LocalAesKeyEncryptionProvider({ 'kek-test': TEST_KEK_BASE64 }, 'kek-test');
+const auth = makeAuth([TenantRole.org_admin]);
+
+function baseAccount(overrides: Record<string, unknown> = {}) {
+  return {
+    id: CONNECTOR_ID,
+    tenantId: TENANT_ID,
+    provider: 'microsoft',
+    mode: 'delegated',
+    label: 'Mailbox',
+    externalIdentity: '',
+    externalTenantId: '',
+    allowedDomains: [] as string[],
+    status: ConnectorStatus.pending_auth,
+    statusDetail: '',
+    createdAt: new Date('2026-01-01T00:00:00Z'),
+    revokedAt: null,
+    secrets: [] as unknown[],
+    ...overrides,
+  };
+}
+
+function makeService(
+  models: Record<string, unknown>,
+  opts: {
+    config?: ReturnType<typeof testConfig>;
+    fetchImpl?: (url: string, init?: RequestInit) => Promise<Response>;
+  } = {},
+) {
+  const audit = fakeAudit();
+  const prisma = fakePrisma({
+    tenant: { findUnique: vi.fn(async () => ({ id: TENANT_ID, planQuota: {} })) },
+    ...models,
+  });
+  const service = new ConnectorsService(
+    prisma,
+    opts.config ?? testConfig(),
+    kek,
+    audit.service,
+    opts.fetchImpl,
+  );
+  return { service, prisma, audit };
+}
+
+describe('ConnectorsService.create', () => {
+  it('builds a Microsoft authorization URL with S256 PKCE and a flow cookie', async () => {
+    const created = baseAccount();
+    const { service } = makeService({
+      connectorAccount: {
+        count: vi.fn(async () => 0),
+        create: vi.fn(async () => created),
+      },
+    });
+    const result = await service.create(
+      auth,
+      { provider: 'microsoft', mode: 'delegated', label: 'Mailbox' },
+      fakeRequest(),
+    );
+    expect(result.authorizationUrl).toBeDefined();
+    const url = new URL(result.authorizationUrl ?? '');
+    expect(url.searchParams.get('code_challenge')).toBeTruthy();
+    expect(url.searchParams.get('code_challenge_method')).toBe('S256');
+    expect(url.searchParams.get('client_id')).toBe('ms-client-id');
+    // state is the sealed flow, also bound to the browser via cookie
+    expect(result.flowCookie?.value).toBe(url.searchParams.get('state'));
+  });
+
+  it('builds a Google authorization URL requesting offline access', async () => {
+    const created = baseAccount({ provider: 'google' });
+    const { service } = makeService({
+      connectorAccount: {
+        count: vi.fn(async () => 0),
+        create: vi.fn(async () => created),
+      },
+    });
+    const result = await service.create(
+      auth,
+      { provider: 'google', mode: 'delegated', label: 'Mailbox' },
+      fakeRequest(),
+    );
+    const url = new URL(result.authorizationUrl ?? '');
+    expect(url.searchParams.get('access_type')).toBe('offline');
+    expect(url.searchParams.get('prompt')).toBe('consent');
+  });
+
+  it('refuses with 409 when the provider OAuth app is not configured', async () => {
+    const { service } = makeService({}, { config: testConfig({ EV_MS_CLIENT_ID: '' }) });
+    await expect(
+      service.create(auth, { provider: 'microsoft', mode: 'delegated', label: 'X' }, fakeRequest()),
+    ).rejects.toThrow(ConflictException);
+  });
+
+  it('returns no authorization URL for organization mode', async () => {
+    const created = baseAccount({ mode: 'organization' });
+    const { service } = makeService({
+      connectorAccount: {
+        count: vi.fn(async () => 0),
+        create: vi.fn(async () => created),
+      },
+    });
+    const result = await service.create(
+      auth,
+      { provider: 'microsoft', mode: 'organization', label: 'Org' },
+      fakeRequest(),
+    );
+    expect(result.authorizationUrl).toBeUndefined();
+    expect(result.flowCookie).toBeUndefined();
+  });
+});
+
+describe('ConnectorsService.configureOrg (google)', () => {
+  const serviceAccountJson = JSON.stringify({
+    client_email: 'svc@project.iam.gserviceaccount.com',
+    private_key: '-----BEGIN PRIVATE KEY-----\nSECRETKEYMATERIAL\n-----END PRIVATE KEY-----\n',
+  });
+
+  it('never echoes key material in the response or the audit summary', async () => {
+    const account = baseAccount({ provider: 'google', mode: 'organization' });
+    const secretCreate = vi.fn(async () => ({}));
+    const { service, audit } = makeService({
+      connectorAccount: {
+        findFirst: vi.fn(async () => account),
+        update: vi.fn(async () => account),
+      },
+      connectorSecret: { deleteMany: vi.fn(async () => ({ count: 0 })), create: secretCreate },
+    });
+
+    const result = await service.configureOrg(
+      auth,
+      CONNECTOR_ID,
+      {
+        serviceAccountJson,
+        allowedDomains: ['corp.example'],
+        adminEmail: 'admin@corp.example',
+      },
+      fakeRequest(),
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(JSON.stringify(result)).not.toContain('PRIVATE KEY');
+
+    // Stored ciphertext only — never the raw key.
+    expect(secretCreate).toHaveBeenCalledTimes(1);
+    const stored = secretCreate.mock.calls[0]?.[0] as { data: Record<string, unknown> };
+    expect(stored.data.kind).toBe(SecretKind.service_account_key);
+    expect(JSON.stringify(stored.data.ciphertext)).not.toContain('SECRETKEYMATERIAL');
+
+    // Audit summary is redacted.
+    expect(audit.appendTx).toHaveBeenCalledTimes(1);
+    const call = audit.appendTx.mock.calls[0]?.[1] as { summary: Record<string, unknown> };
+    const summaryText = JSON.stringify(call.summary);
+    expect(summaryText).not.toContain('PRIVATE KEY');
+    expect(summaryText).not.toContain('SECRETKEYMATERIAL');
+    expect(call.summary.adminEmail).toBe('admin@corp.example');
+  });
+
+  it('rejects a key blob without client_email/private_key', async () => {
+    const account = baseAccount({ provider: 'google', mode: 'organization' });
+    const { service } = makeService({
+      connectorAccount: { findFirst: vi.fn(async () => account) },
+    });
+    await expect(
+      service.configureOrg(
+        auth,
+        CONNECTOR_ID,
+        { serviceAccountJson: '{"foo":1}', allowedDomains: ['x.com'], adminEmail: 'a@x.com' },
+        fakeRequest(),
+      ),
+    ).rejects.toThrow('serviceAccountJson');
+  });
+});
+
+describe('ConnectorsService.test', () => {
+  it('refreshes a token, probes mail folders, and marks the account connected', async () => {
+    const encrypted = await encryptSecret(
+      kek,
+      TENANT_ID,
+      connectorSecretScope(CONNECTOR_ID),
+      Buffer.from('refresh-token-1', 'utf8'),
+    );
+    const account = baseAccount({
+      status: ConnectorStatus.connected,
+      secrets: [{ id: 'secret-1', kind: SecretKind.oauth_refresh_token, ...encrypted }],
+    });
+    const accountUpdate = vi.fn(async () => account);
+    const fetchImpl = vi.fn(async (url: string): Promise<Response> => {
+      if (url.includes('/oauth2/v2.0/token')) {
+        return jsonResponse({ access_token: 'at-1', expires_in: 3600 });
+      }
+      if (url.includes('recoverableitemsdeletions')) {
+        return jsonResponse({ error: 'not found' }, 404);
+      }
+      if (url.includes('/me/mailFolders')) {
+        return jsonResponse({ value: [{ id: 'f1', displayName: 'Inbox' }] });
+      }
+      return jsonResponse({ error: 'unexpected url' }, 500);
+    });
+    const { service, audit } = makeService(
+      {
+        connectorAccount: {
+          findFirst: vi.fn(async () => account),
+          update: accountUpdate,
+        },
+      },
+      { fetchImpl },
+    );
+
+    const result = await service.test(auth, CONNECTOR_ID, fakeRequest());
+    expect(result.ok).toBe(true);
+    expect(result.detail).toContain('1 mail folders');
+    const update = accountUpdate.mock.calls[0]?.[0] as { data: Record<string, unknown> };
+    expect(update.data.status).toBe(ConnectorStatus.connected);
+    expect(audit.appendTx).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ action: 'connector.tested' }),
+    );
+  });
+
+  it('records an error status with a sanitized detail on auth failure', async () => {
+    const encrypted = await encryptSecret(
+      kek,
+      TENANT_ID,
+      connectorSecretScope(CONNECTOR_ID),
+      Buffer.from('refresh-token-1', 'utf8'),
+    );
+    const account = baseAccount({
+      status: ConnectorStatus.connected,
+      secrets: [{ id: 'secret-1', kind: SecretKind.oauth_refresh_token, ...encrypted }],
+    });
+    const accountUpdate = vi.fn(async () => account);
+    const fetchImpl = vi.fn(async (): Promise<Response> =>
+      jsonResponse({ error: 'invalid_grant' }, 400),
+    );
+    const { service } = makeService(
+      { connectorAccount: { findFirst: vi.fn(async () => account), update: accountUpdate } },
+      { fetchImpl },
+    );
+
+    const result = await service.test(auth, CONNECTOR_ID, fakeRequest());
+    expect(result.ok).toBe(false);
+    expect(result.detail).not.toContain('refresh-token-1');
+    const update = accountUpdate.mock.calls[0]?.[0] as { data: Record<string, unknown> };
+    expect(update.data.status).toBe(ConnectorStatus.error);
+  });
+});
+
+describe('ConnectorsService.custodians', () => {
+  it('delegated mode returns only the connected identity plus the truthfulness notice', async () => {
+    const account = baseAccount({ status: ConnectorStatus.connected });
+    const { service } = makeService({
+      connectorAccount: { findFirst: vi.fn(async () => account) },
+      custodian: {
+        findMany: vi.fn(async () => [
+          {
+            id: 'cust-1',
+            externalId: 'ext-1',
+            email: 'owner@example.com',
+            displayName: 'Owner',
+          },
+        ]),
+      },
+    });
+    const result = await service.custodians(auth, CONNECTOR_ID, {});
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]?.email).toBe('owner@example.com');
+    expect(result.notice).toBe(TRUTHFULNESS_NOTICES.delegatedAccess);
+    expect(result.nextCursor).toBeNull();
+  });
+});
+
+describe('ConnectorsService.revoke', () => {
+  it('deletes stored secrets, marks the account revoked, and returns a provider note', async () => {
+    const account = baseAccount({ status: ConnectorStatus.connected });
+    const deleteMany = vi.fn(async () => ({ count: 2 }));
+    const update = vi.fn(async () => account);
+    const { service, audit } = makeService({
+      connectorAccount: { findFirst: vi.fn(async () => account), update },
+      connectorSecret: { deleteMany },
+    });
+
+    const result = await service.revoke(auth, CONNECTOR_ID, fakeRequest());
+    expect(result.ok).toBe(true);
+    expect(result.providerRevocationNote).toContain('myaccount.microsoft.com');
+    expect(deleteMany).toHaveBeenCalledWith({ where: { connectorAccountId: CONNECTOR_ID } });
+    const updateArgs = update.mock.calls[0]?.[0] as { data: Record<string, unknown> };
+    expect(updateArgs.data.status).toBe(ConnectorStatus.revoked);
+    expect(audit.appendTx).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: 'connector.revoked',
+        summary: expect.objectContaining({ secretsDeleted: 2 }),
+      }),
+    );
+  });
+});

@@ -184,7 +184,7 @@ type LoadedExportItem = Prisma.EvidenceItemGetPayload<{
 function participantList(item: LoadedExportItem, role: string): string {
   return item.participants
     .filter((p) => p.role === role)
-    .map((p) => p.rawAddress !== '' ? p.rawAddress : p.rawName)
+    .map((p) => (p.rawAddress !== '' ? p.rawAddress : p.rawName))
     .filter((v) => v !== '')
     .join('; ');
 }
@@ -425,7 +425,9 @@ async function runNativeExport(
     const fileName = sanitizeFilename(
       item.kind === 'email' && !item.name.endsWith('.eml') ? `${item.name}.eml` : item.name,
     );
-    let candidate = ['custodian', custodianDir, familyDir, fileName].filter((p) => p !== '').join('/');
+    let candidate = ['custodian', custodianDir, familyDir, fileName]
+      .filter((p) => p !== '')
+      .join('/');
     if (usedPaths.has(candidate)) {
       candidate = candidate.replace(/(\.[^./]+)?$/, `_${item.id.slice(0, 8)}$1`);
     }
@@ -544,7 +546,16 @@ async function runNativeExport(
     items: manifestEntries,
   });
   const manifestCsvLines = [
-    ['evidenceItemId', 'archivePath', 'part', 'sha256', 'size', 'custodianEmail', 'verified', 'error']
+    [
+      'evidenceItemId',
+      'archivePath',
+      'part',
+      'sha256',
+      'size',
+      'custodianEmail',
+      'verified',
+      'error',
+    ]
       .map((c) => csvEscape(c))
       .join(','),
     ...manifestEntries.map((e) =>

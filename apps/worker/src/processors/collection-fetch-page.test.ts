@@ -9,7 +9,11 @@ import {
   fakeCtx,
   type FakeCtx,
 } from '../testing/fakes.js';
-import { cursorHash, exhaustedCursorKind, processCollectionFetchPage } from './collection-fetch-page.js';
+import {
+  cursorHash,
+  exhaustedCursorKind,
+  processCollectionFetchPage,
+} from './collection-fetch-page.js';
 
 vi.mock('../connector-factory.js', () => ({
   buildConnectorsForAccount: vi.fn(),
@@ -136,9 +140,7 @@ describe('processCollectionFetchPage', () => {
   it('marks the scope exhausted and schedules a finalize check when no next cursor', async () => {
     const f = fakeCtx();
     arm(f);
-    armConnector(
-      vi.fn().mockResolvedValue({ items: [], deltaCursor: 'delta-token' }),
-    );
+    armConnector(vi.fn().mockResolvedValue({ items: [], deltaCursor: 'delta-token' }));
 
     await processCollectionFetchPage(f.ctx, payload);
 

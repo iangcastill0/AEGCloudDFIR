@@ -11,11 +11,9 @@ const CANONICAL_TIMEZONES: ReadonlySet<string> = new Set([
   'UTC',
 ]);
 
-export const timezoneId = z
-  .string()
-  .refine((tz) => CANONICAL_TIMEZONES.has(tz), {
-    message: 'must be a canonical IANA timezone identifier (e.g. America/Chicago or UTC)',
-  });
+export const timezoneId = z.string().refine((tz) => CANONICAL_TIMEZONES.has(tz), {
+  message: 'must be a canonical IANA timezone identifier (e.g. America/Chicago or UTC)',
+});
 
 export const collectionScope = z.object({
   /** 'all_time' still means: within account/permission/API-visible scope. */

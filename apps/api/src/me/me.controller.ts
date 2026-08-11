@@ -1,11 +1,4 @@
-import {
-  Controller,
-  Get,
-  Inject,
-  Req,
-  UnauthorizedException,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Inject, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
 import type { PrismaClient } from '@evidencevault/database';
 import type { FastifyRequest } from 'fastify';
 import '../common/http.js';

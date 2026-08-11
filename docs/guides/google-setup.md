@@ -4,7 +4,7 @@ Two independent modes, both read-only.
 
 ## A. Delegated OAuth (personal Google + Google Workspace users)
 
-1. Google Cloud Console → create/select a project → *APIs & Services*.
+1. Google Cloud Console → create/select a project → _APIs & Services_.
 2. Enable APIs: **Gmail API**, **Google Drive API** (org mode later also needs
    **Admin SDK API**).
 3. OAuth consent screen: External (for personal accounts) or Internal
@@ -49,7 +49,7 @@ A Workspace **super administrator** performs steps 2–3.
      https://www.googleapis.com/auth/admin.directory.user.readonly
      ```
 3. Decide which domain(s) may be impersonated.
-4. In EvidenceVault: Connectors → Google → *Organization mode* → paste the
+4. In EvidenceVault: Connectors → Google → _Organization mode_ → paste the
    JSON key, the allowed domain list, and an admin email (used only for
    directory enumeration). EvidenceVault refuses to impersonate any address
    outside the allowed domains (`DomainNotAllowedError`), and only custodians
@@ -70,5 +70,5 @@ A Workspace **super administrator** performs steps 2–3.
 ### Revocation
 
 Remove the domain-wide delegation entry (Admin console) and delete/disable the
-service-account key (Cloud console). In EvidenceVault, *Revoke* on the
+service-account key (Cloud console). In EvidenceVault, _Revoke_ on the
 connector deletes the stored encrypted key material and is audited.

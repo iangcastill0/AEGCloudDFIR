@@ -50,7 +50,8 @@ async function* loadDocs(
         return {
           evidenceItemId: item.id,
           tenantId: item.tenantId,
-          kind: item.kind === 'email' ? 'email' : item.kind === 'attachment' ? 'attachment' : 'file',
+          kind:
+            item.kind === 'email' ? 'email' : item.kind === 'attachment' ? 'attachment' : 'file',
           name: item.name,
           extension: item.extension,
           mimeType: item.mimeType,

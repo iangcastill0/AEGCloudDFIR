@@ -23,7 +23,10 @@ export interface OptDocument {
 
 const CRLF = '\r\n';
 
-export function buildOptFile(documents: readonly OptDocument[], defaultVolumeLabel: string): string {
+export function buildOptFile(
+  documents: readonly OptDocument[],
+  defaultVolumeLabel: string,
+): string {
   const lines: string[] = [];
   for (const document of documents) {
     if (document.pages.length === 0) {

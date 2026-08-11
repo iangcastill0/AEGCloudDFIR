@@ -96,9 +96,7 @@ export function buildSearchDoc(input: SearchDocInput): EvidenceSearchDoc {
     .slice(0, MAX_HEADERS_INDEXED)
     .map((h) => ({ name: h.rawName, value: h.value }));
 
-  const allAddresses = input.participants
-    .map((p) => p.normalizedAddress)
-    .filter((a) => a !== '');
+  const allAddresses = input.participants.map((p) => p.normalizedAddress).filter((a) => a !== '');
   const allDomains = input.participants.map((p) => p.domain).filter((d) => d !== '');
 
   const tags: EvidenceTag[] = input.tags.map((t) => ({
@@ -129,7 +127,10 @@ export function buildSearchDoc(input: SearchDocInput): EvidenceSearchDoc {
     collectionId: input.collectionId ?? undefined,
     sourcePath: input.sourcePath || undefined,
     sourceLabels: input.sourceLabels.length > 0 ? input.sourceLabels : undefined,
-    folder: input.email?.folder !== undefined && input.email.folder !== '' ? input.email.folder : undefined,
+    folder:
+      input.email?.folder !== undefined && input.email.folder !== ''
+        ? input.email.folder
+        : undefined,
     dates: {
       sent: input.email?.sentAt?.toISOString(),
       received: input.email?.receivedAt?.toISOString(),
@@ -210,7 +211,9 @@ export async function processSearchIndex(
         tagAssignments: { include: { tag: true } },
         caseItems: { select: { caseId: true } },
         productionItems: {
-          include: { productionRun: { include: { production: { select: { id: true, name: true } } } } },
+          include: {
+            productionRun: { include: { production: { select: { id: true, name: true } } } },
+          },
         },
         childRelationships: true,
         parentRelationships: { select: { kind: true } },

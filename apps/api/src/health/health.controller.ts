@@ -1,9 +1,4 @@
-import {
-  Controller,
-  Get,
-  Inject,
-  ServiceUnavailableException,
-} from '@nestjs/common';
+import { Controller, Get, Inject, ServiceUnavailableException } from '@nestjs/common';
 import type { AppConfig } from '@evidencevault/config';
 import type { PrismaClient } from '@evidencevault/database';
 import { APP_CONFIG, PRISMA } from '../common/tokens.js';

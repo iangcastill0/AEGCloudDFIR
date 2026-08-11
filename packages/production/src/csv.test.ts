@@ -77,16 +77,14 @@ describe('buildCsvFile', () => {
   it('emits CRLF rows with header, quoting, and injection guarding', () => {
     const csv = buildCsvFile([record()], profile);
     expect(csv).toBe(
-      'BegBates,Custodian,Subject,Tags\r\n' +
-        'ABC00000001,"Smith, Jane",\'=IMPORTANT,A; B\r\n',
+      'BegBates,Custodian,Subject,Tags\r\n' + 'ABC00000001,"Smith, Jane",\'=IMPORTANT,A; B\r\n',
     );
   });
 
   it('honors a custom delimiter end to end', () => {
     const csv = buildCsvFile([record()], profile, { delimiter: '|' });
     expect(csv).toBe(
-      'BegBates|Custodian|Subject|Tags\r\n' +
-        "ABC00000001|Smith, Jane|'=IMPORTANT|A; B\r\n",
+      'BegBates|Custodian|Subject|Tags\r\n' + "ABC00000001|Smith, Jane|'=IMPORTANT|A; B\r\n",
     );
   });
 

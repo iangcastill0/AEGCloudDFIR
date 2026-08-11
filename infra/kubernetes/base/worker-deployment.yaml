@@ -11,8 +11,8 @@ spec:
     metadata:
       labels: { app: evidencevault, component: worker }
       annotations:
-        prometheus.io/scrape: "true"
-        prometheus.io/port: "9464"
+        prometheus.io/scrape: 'true'
+        prometheus.io/port: '9464'
     spec:
       automountServiceAccountToken: false
       terminationGracePeriodSeconds: 120 # let in-flight items reach a durable checkpoint
@@ -29,12 +29,12 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
-            capabilities: { drop: ["ALL"] }
+            capabilities: { drop: ['ALL'] }
           volumeMounts:
             - { name: tmp, mountPath: /tmp }
           resources:
             requests: { cpu: 500m, memory: 1Gi }
-            limits: { cpu: "2", memory: 4Gi } # OCR/conversion headroom
+            limits: { cpu: '2', memory: 4Gi } # OCR/conversion headroom
           ports:
             - { containerPort: 5000, name: http }
           readinessProbe:

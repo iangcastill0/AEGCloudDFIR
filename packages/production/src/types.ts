@@ -7,12 +7,7 @@
  */
 
 export type StampPosition =
-  | 'top_left'
-  | 'top_center'
-  | 'top_right'
-  | 'bottom_left'
-  | 'bottom_center'
-  | 'bottom_right';
+  'top_left' | 'top_center' | 'top_right' | 'bottom_left' | 'bottom_center' | 'bottom_right';
 
 export type StampKind = 'bates' | 'tag' | 'confidentiality' | 'custom';
 

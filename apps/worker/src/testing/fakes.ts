@@ -158,20 +158,28 @@ export interface FakeCtx {
 export function fakeCtx(options: FakeCtxOptions = {}): FakeCtx {
   const tx = options.tx ?? fakeTx();
   const store = {
-    stageStream: vi
-      .fn()
-      .mockResolvedValue({ stagingKey: `tenants/${TENANT}/staging/x`, sha256: 'a'.repeat(64), size: 3 }),
-    promoteToOriginal: vi
-      .fn()
-      .mockResolvedValue({ objectKey: `tenants/${TENANT}/originals/sha256/aa/${'a'.repeat(64)}`, bucket: 'evidence-test' }),
-    putDerivative: vi
-      .fn()
-      .mockResolvedValue({ objectKey: `tenants/${TENANT}/derivatives/x`, sha256: 'b'.repeat(64), size: 1 }),
-    putManifest: vi
-      .fn()
-      .mockResolvedValue({ objectKey: `tenants/${TENANT}/manifests/${COLLECTION}/manifest.json`, sha256: 'c'.repeat(64) }),
+    stageStream: vi.fn().mockResolvedValue({
+      stagingKey: `tenants/${TENANT}/staging/x`,
+      sha256: 'a'.repeat(64),
+      size: 3,
+    }),
+    promoteToOriginal: vi.fn().mockResolvedValue({
+      objectKey: `tenants/${TENANT}/originals/sha256/aa/${'a'.repeat(64)}`,
+      bucket: 'evidence-test',
+    }),
+    putDerivative: vi.fn().mockResolvedValue({
+      objectKey: `tenants/${TENANT}/derivatives/x`,
+      sha256: 'b'.repeat(64),
+      size: 1,
+    }),
+    putManifest: vi.fn().mockResolvedValue({
+      objectKey: `tenants/${TENANT}/manifests/${COLLECTION}/manifest.json`,
+      sha256: 'c'.repeat(64),
+    }),
     getStream: vi.fn(),
-    verifyObjectHash: vi.fn().mockResolvedValue({ ok: true, actualSha256: 'a'.repeat(64), size: 3 }),
+    verifyObjectHash: vi
+      .fn()
+      .mockResolvedValue({ ok: true, actualSha256: 'a'.repeat(64), size: 3 }),
   };
   const search = {
     indexBulk: vi.fn().mockResolvedValue({ indexed: 1, errors: [] }),

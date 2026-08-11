@@ -105,9 +105,7 @@ function compileTerm(node: Extract<ValidatedNode, { kind: 'term' }>): QueryDsl {
     }
     case 'ocr': {
       const body: QueryDsl =
-        fuzzy !== undefined
-          ? { query: String(value), fuzziness: fuzzy }
-          : { query: String(value) };
+        fuzzy !== undefined ? { query: String(value), fuzziness: fuzzy } : { query: String(value) };
       return ocrQuery('match', body);
     }
     case 'address': {

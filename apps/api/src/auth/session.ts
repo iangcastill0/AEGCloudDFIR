@@ -15,6 +15,7 @@ export const SESSION_COOKIE_PROD = '__Host-ev_session';
 export const SESSION_COOKIE_DEV = 'ev_session';
 export const AUTH_FLOW_COOKIE = 'ev_authflow';
 export const CSRF_COOKIE = 'ev_csrf';
+export const CONNECTOR_FLOW_COOKIE = 'ev_connectorflow';
 
 export function sessionCookieName(isProduction: boolean): string {
   return isProduction ? SESSION_COOKIE_PROD : SESSION_COOKIE_DEV;
@@ -42,6 +43,25 @@ const authFlowSchema = z.object({
 });
 
 export type AuthFlowPayload = z.infer<typeof authFlowSchema>;
+
+/**
+ * Provider-OAuth connect flow, sealed into the `state` parameter AND a
+ * short-TTL cookie: the callback requires both to match, binding the flow to
+ * the browser that started it. Carries the PKCE verifier for Microsoft.
+ */
+const connectorFlowSchema = z.object({
+  v: z.literal(1),
+  kind: z.literal('connectorflow'),
+  connectorId: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  userId: z.string().uuid(),
+  provider: z.enum(['microsoft', 'google']),
+  verifier: z.string().default(''),
+  iat: z.number().int(),
+  exp: z.number().int(),
+});
+
+export type ConnectorFlowPayload = z.infer<typeof connectorFlowSchema>;
 
 /** Derive the 32-byte AES key from the configured session secret. */
 export function deriveSealingKey(secret: string): Buffer {
@@ -110,6 +130,22 @@ export function openSession(
 
 export function sealAuthFlow(key: Buffer, payload: AuthFlowPayload): string {
   return seal(key, payload);
+}
+
+export function sealConnectorFlow(key: Buffer, payload: ConnectorFlowPayload): string {
+  return seal(key, payload);
+}
+
+/** Returns null on tamper, malformed content, wrong key, or expiry. */
+export function openConnectorFlow(
+  key: Buffer,
+  sealed: string,
+  nowMs: number = Date.now(),
+): ConnectorFlowPayload | null {
+  const parsed = connectorFlowSchema.safeParse(open(key, sealed));
+  if (!parsed.success) return null;
+  if (parsed.data.exp * 1000 <= nowMs) return null;
+  return parsed.data;
 }
 
 /** Returns null on tamper, malformed content, wrong key, or expiry. */

@@ -151,9 +151,7 @@ class Validator {
 
   private walk(node: QueryNode, depth: number): ValidatedNode | null {
     if (depth > this.limits.maxDepth) {
-      return this.fail(
-        `Query nesting depth exceeds the maximum of ${this.limits.maxDepth}`,
-      );
+      return this.fail(`Query nesting depth exceeds the maximum of ${this.limits.maxDepth}`);
     }
 
     switch (node.kind) {
@@ -252,9 +250,7 @@ class Validator {
         if (HASH_FIELD_NAMES.has(field.name)) {
           value = value.toLowerCase();
           if (!HASH_PATTERN.test(value)) {
-            return this.fail(
-              `Invalid hash "${rawValue}": expected 6-64 lowercase hex characters`,
-            );
+            return this.fail(`Invalid hash "${rawValue}": expected 6-64 lowercase hex characters`);
           }
         }
         const result: ValidatedTerm = { kind: 'term', field, value };
@@ -285,9 +281,7 @@ class Validator {
       );
     }
     if (proximity !== undefined && proximity > this.limits.maxProximity) {
-      return this.fail(
-        `Proximity ${proximity} exceeds the maximum of ${this.limits.maxProximity}`,
-      );
+      return this.fail(`Proximity ${proximity} exceeds the maximum of ${this.limits.maxProximity}`);
     }
     const node: ValidatedPhrase = { kind: 'phrase', field, value };
     if (proximity !== undefined) node.proximity = proximity;

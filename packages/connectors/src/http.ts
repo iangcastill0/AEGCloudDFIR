@@ -55,7 +55,10 @@ export function sanitizeUrl(url: string): string {
 }
 
 /** Parse a Retry-After header value: delta-seconds or HTTP-date. Returns ms or undefined. */
-export function parseRetryAfterMs(value: string | null, now: number = Date.now()): number | undefined {
+export function parseRetryAfterMs(
+  value: string | null,
+  now: number = Date.now(),
+): number | undefined {
   if (value === null || value.trim() === '') return undefined;
   const trimmed = value.trim();
   if (/^\d+$/.test(trimmed)) return Number(trimmed) * 1000;

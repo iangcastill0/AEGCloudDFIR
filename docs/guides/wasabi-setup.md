@@ -8,9 +8,9 @@ same code path.
 
 Create two buckets in the same region:
 
-| Bucket | Purpose |
-|---|---|
-| `ev-evidence` | originals, derivatives, manifests, exports, productions |
+| Bucket          | Purpose                                                          |
+| --------------- | ---------------------------------------------------------------- |
+| `ev-evidence`   | originals, derivatives, manifests, exports, productions          |
 | `ev-quarantine` | malware-flagged originals (retained, never rendered unsandboxed) |
 
 Region choice matters for latency to your workers. Set:
@@ -31,7 +31,7 @@ Immutability layers, weakest to strongest:
    for the application credential (see policy below).
 3. **Bucket versioning + Object Lock** — real WORM. Object Lock must be
    enabled **at bucket creation** (`aws s3api create-bucket
-   --object-lock-enabled-for-bucket ...` against the Wasabi endpoint), then
+--object-lock-enabled-for-bucket ...` against the Wasabi endpoint), then
    configure a default retention mode/duration appropriate to your matters
    (compliance mode cannot be shortened, even by root — decide with counsel).
 
@@ -50,11 +50,23 @@ Create a dedicated sub-user + access key for EvidenceVault. Example policy:
     {
       "Sid": "AppReadWrite",
       "Effect": "Allow",
-      "Action": ["s3:PutObject", "s3:GetObject", "s3:DeleteObject", "s3:ListBucket",
-                  "s3:GetBucketVersioning", "s3:GetObjectLockConfiguration",
-                  "s3:GetObjectRetention", "s3:AbortMultipartUpload", "s3:ListBucketMultipartUploads"],
-      "Resource": ["arn:aws:s3:::ev-evidence", "arn:aws:s3:::ev-evidence/*",
-                    "arn:aws:s3:::ev-quarantine", "arn:aws:s3:::ev-quarantine/*"]
+      "Action": [
+        "s3:PutObject",
+        "s3:GetObject",
+        "s3:DeleteObject",
+        "s3:ListBucket",
+        "s3:GetBucketVersioning",
+        "s3:GetObjectLockConfiguration",
+        "s3:GetObjectRetention",
+        "s3:AbortMultipartUpload",
+        "s3:ListBucketMultipartUploads"
+      ],
+      "Resource": [
+        "arn:aws:s3:::ev-evidence",
+        "arn:aws:s3:::ev-evidence/*",
+        "arn:aws:s3:::ev-quarantine",
+        "arn:aws:s3:::ev-quarantine/*"
+      ]
     },
     {
       "Sid": "ProtectOriginals",
@@ -76,12 +88,14 @@ Browsers only touch presigned GET URLs. Restrict CORS on `ev-evidence` to your
 web origin:
 
 ```json
-[{
-  "AllowedOrigins": ["https://evidencevault.example.com"],
-  "AllowedMethods": ["GET", "HEAD"],
-  "AllowedHeaders": ["range"],
-  "MaxAgeSeconds": 300
-}]
+[
+  {
+    "AllowedOrigins": ["https://evidencevault.example.com"],
+    "AllowedMethods": ["GET", "HEAD"],
+    "AllowedHeaders": ["range"],
+    "MaxAgeSeconds": 300
+  }
+]
 ```
 
 ## 5. Lifecycle

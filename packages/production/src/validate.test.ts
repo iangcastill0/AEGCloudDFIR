@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  validateProductionSet,
-  type ValidationItem,
-  type ValidationParams,
-} from './validate.js';
+import { validateProductionSet, type ValidationItem, type ValidationParams } from './validate.js';
 import type { ValidationFlag, ValidationFlagCode } from './types.js';
 
 function item(overrides: Partial<ValidationItem> & { evidenceId: string }): ValidationItem {
@@ -170,10 +166,7 @@ describe('validateProductionSet', () => {
 
   it('unsupported_conversion: warning when images are rendered, silent for natives_only', () => {
     const f = flag(
-      validateProductionSet(
-        [item({ evidenceId: 'a', conversionSupported: false })],
-        defaultParams,
-      ),
+      validateProductionSet([item({ evidenceId: 'a', conversionSupported: false })], defaultParams),
       'unsupported_conversion',
     );
     expect(f?.severity).toBe('warning');
@@ -212,7 +205,14 @@ describe('validateProductionSet', () => {
     expect(f?.overridable).toBe(true);
     const withoutText = validateProductionSet([item({ evidenceId: 'a', hasText: false })], {
       ...defaultParams,
-      output: { ...defaultParams.output, mode: 'load_file', includeText: false, imageFormat: 'tiff_g4', includeNatives: false, loadFileFormats: ['dat'] },
+      output: {
+        ...defaultParams.output,
+        mode: 'load_file',
+        includeText: false,
+        imageFormat: 'tiff_g4',
+        includeNatives: false,
+        loadFileFormats: ['dat'],
+      },
     });
     expect(flag(withoutText, 'missing_text')).toBeUndefined();
   });
@@ -272,18 +272,15 @@ describe('validateProductionSet', () => {
 
   it('preview_redactions_in_release: blocking for final stage, silent for preview stage', () => {
     const f = flag(
-      validateProductionSet(
-        [item({ evidenceId: 'a', hasPreviewRedactions: true })],
-        defaultParams,
-      ),
+      validateProductionSet([item({ evidenceId: 'a', hasPreviewRedactions: true })], defaultParams),
       'preview_redactions_in_release',
     );
     expect(f?.severity).toBe('blocking');
     expect(f?.overridable).toBe(false);
-    const preview = validateProductionSet(
-      [item({ evidenceId: 'a', hasPreviewRedactions: true })],
-      { ...defaultParams, redactionStage: 'preview' },
-    );
+    const preview = validateProductionSet([item({ evidenceId: 'a', hasPreviewRedactions: true })], {
+      ...defaultParams,
+      redactionStage: 'preview',
+    });
     expect(flag(preview, 'preview_redactions_in_release')).toBeUndefined();
   });
 

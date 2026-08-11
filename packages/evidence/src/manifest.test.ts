@@ -50,9 +50,23 @@ function baseInput(): BuildManifestInput {
     completeness: 'complete_with_exceptions',
     completenessNarrative: 'One item could not be fetched after 5 retries.',
     exceptions: [
-      { kind: 'fetch_error', message: 'HTTP 503 after retries', providerItemId: 'AAMk-1', custodianId: 'c-1' },
-      { kind: 'fetch_error', message: 'HTTP 410 item gone', providerItemId: 'AAMk-2', custodianId: 'c-1' },
-      { kind: 'skipped_unsupported', message: 'IRM-protected item skipped', providerItemId: 'AAMk-3' },
+      {
+        kind: 'fetch_error',
+        message: 'HTTP 503 after retries',
+        providerItemId: 'AAMk-1',
+        custodianId: 'c-1',
+      },
+      {
+        kind: 'fetch_error',
+        message: 'HTTP 410 item gone',
+        providerItemId: 'AAMk-2',
+        custodianId: 'c-1',
+      },
+      {
+        kind: 'skipped_unsupported',
+        message: 'IRM-protected item skipped',
+        providerItemId: 'AAMk-3',
+      },
     ],
     items: [
       {
@@ -186,7 +200,11 @@ describe('renderCompletenessReport', () => {
   });
 
   it('handles zero exceptions honestly', () => {
-    const input = { ...baseInput(), exceptions: [], completeness: 'complete_within_selected_api_scope' as const };
+    const input = {
+      ...baseInput(),
+      exceptions: [],
+      completeness: 'complete_within_selected_api_scope' as const,
+    };
     const report = renderCompletenessReport(buildManifest(input));
     expect(report).toContain('Exceptions: 0');
     expect(report).toContain('(none recorded)');

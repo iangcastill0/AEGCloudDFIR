@@ -279,10 +279,7 @@ export class GoogleDriveConnector implements DriveConnector {
     };
   }
 
-  private async exportNative(
-    entry: DriveEntry,
-    opts: FetchContentOptions,
-  ): Promise<DriveContent> {
+  private async exportNative(entry: DriveEntry, opts: FetchContentOptions): Promise<DriveContent> {
     const nativeType = entry.googleNativeType ?? entry.mimeType;
     const targets = GOOGLE_EXPORT_MAP[nativeType];
     if (targets === undefined || targets.length === 0) {
@@ -296,10 +293,10 @@ export class GoogleDriveConnector implements DriveConnector {
         ? targets.find((t) => t.mimeType === opts.exportMimeType)
         : targets[0];
     if (target === undefined) {
-      throw new NonDownloadableError(
-        `requested export type is not configured for ${nativeType}`,
-        { kind: 'unsupported_item', providerItemId: entry.providerItemId },
-      );
+      throw new NonDownloadableError(`requested export type is not configured for ${nativeType}`, {
+        kind: 'unsupported_item',
+        providerItemId: entry.providerItemId,
+      });
     }
     const u = new URL(this.driveUrl(`/files/${encodeURIComponent(entry.providerItemId)}/export`));
     u.searchParams.set('mimeType', target.mimeType);

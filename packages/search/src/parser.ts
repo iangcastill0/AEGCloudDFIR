@@ -51,14 +51,7 @@ export interface MatchAllNode {
 }
 
 export type QueryNode =
-  | BoolNode
-  | NotNode
-  | TermNode
-  | PhraseNode
-  | WildcardNode
-  | RangeNode
-  | ExistsNode
-  | MatchAllNode;
+  BoolNode | NotNode | TermNode | PhraseNode | WildcardNode | RangeNode | ExistsNode | MatchAllNode;
 
 function hasWildcard(value: string): boolean {
   return value.includes('*') || value.includes('?');

@@ -26,7 +26,10 @@ function toReadable(stream: ReadableStream<Uint8Array> | Uint8Array): Readable {
 function extensionOf(name: string): string {
   const dot = name.lastIndexOf('.');
   if (dot <= 0 || dot === name.length - 1) return '';
-  return name.slice(dot + 1).toLowerCase().slice(0, 16);
+  return name
+    .slice(dot + 1)
+    .toLowerCase()
+    .slice(0, 16);
 }
 
 function parseDate(value: string | undefined): Date | null {
@@ -164,7 +167,9 @@ export async function processCollectionFetchItem(
       const meta = fetched.emailMetadata;
       const isEmail = source === 'email';
       const name = isEmail
-        ? (meta?.subject !== undefined && meta.subject !== '' ? meta.subject : '(no subject)')
+        ? meta?.subject !== undefined && meta.subject !== ''
+          ? meta.subject
+          : '(no subject)'
         : (entry?.name ?? providerItemId);
       const primaryDate = isEmail
         ? (parseDate(meta?.receivedAt) ?? parseDate(meta?.sentAt))

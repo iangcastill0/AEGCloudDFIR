@@ -22,9 +22,7 @@ interface Call {
   body: URLSearchParams;
 }
 
-function tokenFetch(
-  responses: (() => Response)[],
-): { fetchImpl: FetchLike; calls: Call[] } {
+function tokenFetch(responses: (() => Response)[]): { fetchImpl: FetchLike; calls: Call[] } {
   const calls: Call[] = [];
   let i = 0;
   const fetchImpl: FetchLike = (url, init) => {
@@ -37,11 +35,13 @@ function tokenFetch(
   return { fetchImpl, calls };
 }
 
-const okToken = (extra: Record<string, unknown> = {}) => () =>
-  new Response(
-    JSON.stringify({ access_token: 'at-1', expires_in: 3600, token_type: 'Bearer', ...extra }),
-    { status: 200, headers: { 'content-type': 'application/json' } },
-  );
+const okToken =
+  (extra: Record<string, unknown> = {}) =>
+  () =>
+    new Response(
+      JSON.stringify({ access_token: 'at-1', expires_in: 3600, token_type: 'Bearer', ...extra }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    );
 
 const PKCS8_PEM = generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey.export({
   type: 'pkcs8',

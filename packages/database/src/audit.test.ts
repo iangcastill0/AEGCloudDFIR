@@ -58,9 +58,7 @@ describe('computeEventHash', () => {
     const h = computeEventHash(GENESIS_HASH, baseEvent);
     expect(computeEventHash(GENESIS_HASH, { ...baseEvent, action: 'tag.remove' })).not.toBe(h);
     expect(computeEventHash(GENESIS_HASH, { ...baseEvent, sequence: 2n })).not.toBe(h);
-    expect(
-      computeEventHash(GENESIS_HASH, { ...baseEvent, summary: { tag: 'cold' } }),
-    ).not.toBe(h);
+    expect(computeEventHash(GENESIS_HASH, { ...baseEvent, summary: { tag: 'cold' } })).not.toBe(h);
   });
 
   it('chains: changing an earlier hash changes later hashes', () => {

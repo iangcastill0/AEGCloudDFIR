@@ -1,5 +1,10 @@
 {
   "value": [
-    { "id": "u-3", "mail": "sam.rivera@example.com", "displayName": "Sam Rivera", "userPrincipalName": "sam.rivera@example.com" }
+    {
+      "id": "u-3",
+      "mail": "sam.rivera@example.com",
+      "displayName": "Sam Rivera",
+      "userPrincipalName": "sam.rivera@example.com"
+    }
   ]
 }

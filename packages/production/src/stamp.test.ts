@@ -119,7 +119,12 @@ describe('stampPdf', () => {
     const result = await stampPdf(pdf, {
       stamps: [
         stamp({ position: 'bottom_center', kind: 'bates', addedMarginPoints: margin }),
-        stamp({ position: 'top_center', kind: 'custom', text: 'TOP BAND', addedMarginPoints: margin }),
+        stamp({
+          position: 'top_center',
+          kind: 'custom',
+          text: 'TOP BAND',
+          addedMarginPoints: margin,
+        }),
       ],
       pageBatesNumbers: ['ABC00000001', 'ABC00000002'],
     });
@@ -143,9 +148,9 @@ describe('stampPdf', () => {
 
   it('throws when a bates stamp has no per-page numbers', async () => {
     const pdf = await makeTwoPagePdf();
-    await expect(
-      stampPdf(pdf, { stamps: [stamp({ kind: 'bates' })] }),
-    ).rejects.toThrow(ProductionError);
+    await expect(stampPdf(pdf, { stamps: [stamp({ kind: 'bates' })] })).rejects.toThrow(
+      ProductionError,
+    );
     await expect(
       stampPdf(pdf, { stamps: [stamp({ kind: 'bates' })], pageBatesNumbers: ['ONLY-ONE'] }),
     ).rejects.toThrow(ProductionError);

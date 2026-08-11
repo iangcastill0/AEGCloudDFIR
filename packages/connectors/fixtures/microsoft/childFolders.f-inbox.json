@@ -1,5 +1,11 @@
 {
   "value": [
-    { "id": "f-projects", "displayName": "Projects", "parentFolderId": "f-inbox", "childFolderCount": 0, "totalItemCount": 2 }
+    {
+      "id": "f-projects",
+      "displayName": "Projects",
+      "parentFolderId": "f-inbox",
+      "childFolderCount": 0,
+      "totalItemCount": 2
+    }
   ]
 }

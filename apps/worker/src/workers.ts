@@ -12,6 +12,7 @@ import { processOcr } from './processors/process-ocr.js';
 import { processParse } from './processors/process-parse.js';
 import { processScan } from './processors/process-scan.js';
 import { processProductionRun } from './processors/production-run.js';
+import { deletionRun, deletionRunPayload } from './processors/deletion-run.js';
 import { processSearchIndex } from './processors/search-index.js';
 import {
   discoverPayload,
@@ -39,6 +40,7 @@ export const QUEUE_CONCURRENCY: Record<QueueName, number> = {
   [QUEUES.searchIndex]: 8,
   [QUEUES.exportRun]: 1,
   [QUEUES.productionRun]: 1,
+  [QUEUES.deletionRun]: 1,
   [QUEUES.deadLetter]: 2,
 };
 
@@ -70,6 +72,7 @@ export function buildHandlers(): Record<QueueName, QueueHandler> {
     [QUEUES.exportRun]: (ctx, data) => processExportRun(ctx, exportRunPayload.parse(data)),
     [QUEUES.productionRun]: (ctx, data) =>
       processProductionRun(ctx, productionRunPayload.parse(data)),
+    [QUEUES.deletionRun]: (ctx, data) => deletionRun(ctx, deletionRunPayload.parse(data)),
     [QUEUES.deadLetter]: (ctx, data) => {
       const parsed = tenantOnlyPayload.parse(data);
       ctx.log.error(

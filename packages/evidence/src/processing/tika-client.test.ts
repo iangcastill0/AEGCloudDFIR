@@ -17,16 +17,17 @@ afterEach(async () => {
   }
 });
 
-async function startServer(
-  handler: Parameters<typeof createServer>[1],
-): Promise<string> {
+async function startServer(handler: Parameters<typeof createServer>[1]): Promise<string> {
   server = createServer(handler);
   await new Promise<void>((resolve) => server?.listen(0, '127.0.0.1', resolve));
   const { port } = server.address() as AddressInfo;
   return `http://127.0.0.1:${port}`;
 }
 
-function client(baseUrl: string, overrides: Partial<{ timeoutMs: number; maxBytes: number }> = {}): TikaClient {
+function client(
+  baseUrl: string,
+  overrides: Partial<{ timeoutMs: number; maxBytes: number }> = {},
+): TikaClient {
   return new TikaClient({
     baseUrl,
     timeoutMs: overrides.timeoutMs ?? 2_000,

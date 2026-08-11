@@ -251,7 +251,10 @@ export function validateProductionSet(
   for (const item of items) {
     const id = item.evidenceId;
 
-    if (item.wouldProduceNative && (item.hasFinalRedactions || descendantHasFinalRedactions(item))) {
+    if (
+      item.wouldProduceNative &&
+      (item.hasFinalRedactions || descendantHasFinalRedactions(item))
+    ) {
       add('redacted_native_leak', id);
     }
     if (item.wouldProduceNative && ancestorHasFinalRedactions(item)) {

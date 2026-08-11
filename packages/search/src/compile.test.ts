@@ -64,10 +64,13 @@ describe('tenant isolation (ADVERSARIAL)', () => {
     expect(bool.must).toHaveLength(1);
   });
 
-  it.each(matrix)('%s: compile output is exactly wrapWithAuthorization(compileNode(...))', (_name, query) => {
-    const ast = validated(query);
-    expect(compile(ast, AUTH)).toEqual(wrapWithAuthorization(compileNode(ast.root), AUTH));
-  });
+  it.each(matrix)(
+    '%s: compile output is exactly wrapWithAuthorization(compileNode(...))',
+    (_name, query) => {
+      const ast = validated(query);
+      expect(compile(ast, AUTH)).toEqual(wrapWithAuthorization(compileNode(ast.root), AUTH));
+    },
+  );
 
   it('rejects tenantId as a user-facing query field', () => {
     expect(() => validated('tenantId:other-tenant')).toThrow(QueryValidationError);
@@ -118,9 +121,9 @@ describe('tenant isolation (ADVERSARIAL)', () => {
   });
 
   it('refuses to wrap with an empty tenantId', () => {
-    expect(() => wrapWithAuthorization({ match_all: {} }, { tenantId: '', includePrivileged: false })).toThrow(
-      QueryValidationError,
-    );
+    expect(() =>
+      wrapWithAuthorization({ match_all: {} }, { tenantId: '', includePrivileged: false }),
+    ).toThrow(QueryValidationError);
   });
 });
 

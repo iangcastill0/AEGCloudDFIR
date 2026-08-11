@@ -188,7 +188,8 @@ const COMPLETENESS_WORDING: Record<Completeness, string> = {
   complete_with_exceptions:
     'Complete within the selected API scope, with documented exceptions listed below.',
   partial: 'PARTIAL collection: some in-scope items were not preserved. See exceptions below.',
-  failed: 'FAILED collection: the collection did not finish. Results must not be relied upon as complete.',
+  failed:
+    'FAILED collection: the collection did not finish. Results must not be relied upon as complete.',
   cancelled:
     'CANCELLED collection: the collection was stopped before finishing. Results must not be relied upon as complete.',
 };
@@ -204,7 +205,9 @@ export function renderCompletenessReport(m: CollectionManifestV1): string {
   lines.push(`Collection: ${m.collection.name} (${m.collection.id})`);
   lines.push(`Tenant: ${m.collection.tenantId}`);
   lines.push(`Provider: ${m.collection.provider} (${m.collection.permissionMode} permissions)`);
-  lines.push(`Connector: ${m.collection.connectorLabel} [${m.collection.connectorExternalIdentity}]`);
+  lines.push(
+    `Connector: ${m.collection.connectorLabel} [${m.collection.connectorExternalIdentity}]`,
+  );
   lines.push(`Custodians: ${m.collection.custodians.map((c) => c.email).join(', ') || '(none)'}`);
   lines.push(`Window: ${m.collection.startedAt} to ${m.collection.finishedAt}`);
   lines.push(`Generated: ${m.generatedAt}`);

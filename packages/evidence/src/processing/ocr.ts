@@ -20,11 +20,7 @@ export interface RunnerResult {
 }
 
 /** Injectable process runner (cmd, args, optional stdin bytes). */
-export type ProcessRunner = (
-  cmd: string,
-  args: string[],
-  stdin?: Buffer,
-) => Promise<RunnerResult>;
+export type ProcessRunner = (cmd: string, args: string[], stdin?: Buffer) => Promise<RunnerResult>;
 
 export interface OcrWord {
   text: string;
@@ -229,9 +225,12 @@ export async function rasterizePdf(
     const probePages = options.maxPages + 1;
     const args = [
       '-png',
-      '-r', String(options.dpi),
-      '-f', '1',
-      '-l', String(probePages),
+      '-r',
+      String(options.dpi),
+      '-f',
+      '1',
+      '-l',
+      String(probePages),
       pdfPath,
       prefix,
     ];

@@ -1,11 +1,4 @@
-import {
-  Controller,
-  Get,
-  Inject,
-  Query,
-  Req,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Inject, Query, Req, UseGuards } from '@nestjs/common';
 import {
   TenantRole,
   verifyAuditChain,

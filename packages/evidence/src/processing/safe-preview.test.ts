@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  buildSafeEmailPreview,
-  buildTextPreview,
-  filterStyleAttribute,
-} from './safe-preview.js';
+import { buildSafeEmailPreview, buildTextPreview, filterStyleAttribute } from './safe-preview.js';
 
 /** Extract every attribute value from the output html. */
 function attributeValues(html: string): string[] {
@@ -76,13 +72,10 @@ describe('buildSafeEmailPreview: images', () => {
   });
 
   it('resolves allowed cid: images through the resolver', () => {
-    const result = buildSafeEmailPreview(
-      '<img src="cid:diagram-1@example.com" alt="diagram">',
-      {
-        allowedCidResolver: (cid) =>
-          cid === 'diagram-1@example.com' ? '/derivatives/ev-1/inline/diagram.png' : null,
-      },
-    );
+    const result = buildSafeEmailPreview('<img src="cid:diagram-1@example.com" alt="diagram">', {
+      allowedCidResolver: (cid) =>
+        cid === 'diagram-1@example.com' ? '/derivatives/ev-1/inline/diagram.png' : null,
+    });
     expect(result.html).toContain('src="/derivatives/ev-1/inline/diagram.png"');
     expect(result.html).toContain('alt="diagram"');
     expect(result.blockedRemoteResources).toBe(0);
@@ -142,9 +135,7 @@ describe('buildSafeEmailPreview: styles', () => {
   });
 
   it('drops non-allowlisted properties and position:fixed overlays', () => {
-    const result = buildSafeEmailPreview(
-      '<p style="position:fixed; top:0; color:blue">x</p>',
-    );
+    const result = buildSafeEmailPreview('<p style="position:fixed; top:0; color:blue">x</p>');
     expect(result.html).not.toContain('position');
     expect(result.html).not.toContain('fixed');
   });

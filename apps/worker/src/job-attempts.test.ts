@@ -14,8 +14,9 @@ describe('withJobAttempt', () => {
     );
 
     expect(result).toBe('done');
-    const createData = (f.tx.jobAttempt.create.mock.calls[0]?.[0] as { data: Record<string, unknown> })
-      .data;
+    const createData = (
+      f.tx.jobAttempt.create.mock.calls[0]?.[0] as { data: Record<string, unknown> }
+    ).data;
     expect(createData).toMatchObject({
       tenantId: TENANT,
       queue: 'collection.fetch-item',

@@ -100,8 +100,9 @@ describe('processCollectionFetchItem', () => {
       { quarantine: false },
     );
     // evidence + metadata + state machine
-    const evidenceData = (f.tx.evidenceItem.create.mock.calls[0]?.[0] as { data: Record<string, unknown> })
-      .data;
+    const evidenceData = (
+      f.tx.evidenceItem.create.mock.calls[0]?.[0] as { data: Record<string, unknown> }
+    ).data;
     expect(evidenceData['kind']).toBe('email');
     expect(evidenceData['name']).toBe('Hello');
     const metadataData = (

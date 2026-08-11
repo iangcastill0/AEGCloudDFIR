@@ -45,7 +45,11 @@ describe('ProductionArchiveWriter', () => {
     // ZIP local file header magic.
     expect(zip.subarray(0, 4)).toEqual(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
     // Each entry name appears in a local header AND in the central directory.
-    for (const name of ['DATA/production.dat', 'TEXT/ABC00000001.txt', 'NATIVES/ABC00000002.xlsx']) {
+    for (const name of [
+      'DATA/production.dat',
+      'TEXT/ABC00000001.txt',
+      'NATIVES/ABC00000002.xlsx',
+    ]) {
       expect(countOccurrences(zip, Buffer.from(name, 'utf8'))).toBeGreaterThanOrEqual(2);
     }
     // Central directory file header + end-of-central-directory records exist.

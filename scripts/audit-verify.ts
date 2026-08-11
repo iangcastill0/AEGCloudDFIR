@@ -37,7 +37,9 @@ async function main(): Promise<void> {
         verifyAuditChain(tx, tenant.id),
       );
       if (result.valid) {
-        console.log(`✔ tenant ${tenant.id} (${tenant.name}): ${result.checkedCount} events, chain intact`);
+        console.log(
+          `✔ tenant ${tenant.id} (${tenant.name}): ${result.checkedCount} events, chain intact`,
+        );
       } else {
         allValid = false;
         console.error(

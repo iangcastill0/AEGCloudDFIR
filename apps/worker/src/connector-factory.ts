@@ -158,9 +158,9 @@ export async function buildConnectorsForAccount(
   if (account.provider === 'microsoft') {
     if (account.mode === 'delegated') {
       const row = requireSecret(secrets, 'oauth_refresh_token', 'OAuth refresh token');
-      const refreshToken = (await decryptSecretRow(ctx, tenantId, connectorAccountId, row)).toString(
-        'utf8',
-      );
+      const refreshToken = (
+        await decryptSecretRow(ctx, tenantId, connectorAccountId, row)
+      ).toString('utf8');
       tokenProvider = new MicrosoftDelegatedTokenSource({
         msLoginBaseUrl: ctx.config.EV_MS_LOGIN_BASE_URL,
         clientId: ctx.config.EV_MS_CLIENT_ID,

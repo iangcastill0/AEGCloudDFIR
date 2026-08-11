@@ -34,7 +34,9 @@ describe('processScan', () => {
   it('skips items that already have a scan row', async () => {
     const f = fakeCtx();
     arm(f, { malwareScans: [{ id: 's1' }] });
-    await processScan(f.ctx, payload, { clamFactory: () => clam({ infected: false, signature: '' }) });
+    await processScan(f.ctx, payload, {
+      clamFactory: () => clam({ infected: false, signature: '' }),
+    });
     expect(f.tx.malwareScan.create).not.toHaveBeenCalled();
   });
 
@@ -57,7 +59,9 @@ describe('processScan', () => {
       version: vi.fn().mockRejectedValue(new Error('ECONNREFUSED')),
       scanStream: vi.fn(),
     };
-    await expect(processScan(f.ctx, payload, { clamFactory: () => broken })).resolves.toBeUndefined();
+    await expect(
+      processScan(f.ctx, payload, { clamFactory: () => broken }),
+    ).resolves.toBeUndefined();
     expect(f.tx.malwareScan.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ result: 'scan_failed' }) }),
     );
@@ -66,7 +70,9 @@ describe('processScan', () => {
   it('clean result marks the item clean and re-indexes', async () => {
     const f = fakeCtx();
     arm(f);
-    await processScan(f.ctx, payload, { clamFactory: () => clam({ infected: false, signature: '' }) });
+    await processScan(f.ctx, payload, {
+      clamFactory: () => clam({ infected: false, signature: '' }),
+    });
     expect(f.tx.evidenceItem.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: { malwareStatus: 'clean' } }),
     );

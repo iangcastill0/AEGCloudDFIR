@@ -59,7 +59,9 @@ describe('Sha256Stream', () => {
   it('passes bytes through unchanged for large multi-chunk payloads', async () => {
     const chunkA = Buffer.alloc(64 * 1024, 7);
     const chunkB = Buffer.alloc(32 * 1024, 9);
-    const expected = createHash('sha256').update(Buffer.concat([chunkA, chunkB])).digest('hex');
+    const expected = createHash('sha256')
+      .update(Buffer.concat([chunkA, chunkB]))
+      .digest('hex');
     const hasher = new Sha256Stream();
     const out: Buffer[] = [];
     await pipeline(Readable.from([chunkA, chunkB]), hasher, collectSink(out));

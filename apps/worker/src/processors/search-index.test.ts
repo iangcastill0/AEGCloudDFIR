@@ -34,8 +34,20 @@ const base: SearchDocInput = {
     receivedAt: new Date('2026-02-01T10:00:00Z'),
   },
   participants: [
-    { role: 'from', rawName: 'A', rawAddress: 'a@x.com', normalizedAddress: 'a@x.com', domain: 'x.com' },
-    { role: 'to', rawName: '', rawAddress: 'b@y.com', normalizedAddress: 'b@y.com', domain: 'y.com' },
+    {
+      role: 'from',
+      rawName: 'A',
+      rawAddress: 'a@x.com',
+      normalizedAddress: 'a@x.com',
+      domain: 'x.com',
+    },
+    {
+      role: 'to',
+      rawName: '',
+      rawAddress: 'b@y.com',
+      normalizedAddress: 'b@y.com',
+      domain: 'y.com',
+    },
     {
       role: 'bcc',
       rawName: '',
@@ -88,7 +100,12 @@ describe('buildSearchDoc', () => {
       ],
       caseIds: ['case-1', 'case-2'],
       bates: [
-        { productionId: 'p1', productionName: 'Prod 1', begBates: 'ABC000001', endBates: 'ABC000003' },
+        {
+          productionId: 'p1',
+          productionName: 'Prod 1',
+          begBates: 'ABC000001',
+          endBates: 'ABC000003',
+        },
       ],
     });
     expect(doc.tagNames).toEqual(['Privileged', 'Hot']);

@@ -22,7 +22,12 @@ import {
   type ListMessagesOptions,
   type MailFolderDiscovery,
 } from '../types.js';
-import { graphFetchOptions, normalizeBaseUrl, userSegment, type GraphConnectorOptions } from './common.js';
+import {
+  graphFetchOptions,
+  normalizeBaseUrl,
+  userSegment,
+  type GraphConnectorOptions,
+} from './common.js';
 
 const IMMUTABLE_ID_PREFER = 'IdType="ImmutableId"';
 
@@ -112,9 +117,7 @@ const fullMessageSchema = z.object({
   parentFolderId: z.string().optional(),
   hasAttachments: z.boolean().optional(),
   internetMessageId: z.string().optional(),
-  internetMessageHeaders: z
-    .array(z.object({ name: z.string(), value: z.string() }))
-    .optional(),
+  internetMessageHeaders: z.array(z.object({ name: z.string(), value: z.string() })).optional(),
   body: z.object({ contentType: z.string().optional() }).optional(),
   attachments: z.array(attachmentSchema).optional(),
 });
@@ -128,9 +131,7 @@ function mapAddressList(
   list: z.infer<typeof recipientSchema>[] | undefined,
 ): EmailAddressRef[] | undefined {
   if (list === undefined) return undefined;
-  const mapped = list
-    .map(mapAddress)
-    .filter((a): a is EmailAddressRef => a !== undefined);
+  const mapped = list.map(mapAddress).filter((a): a is EmailAddressRef => a !== undefined);
   return mapped;
 }
 

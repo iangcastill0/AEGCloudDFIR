@@ -9,9 +9,5 @@ export {
   verifyAuditChain,
 } from './audit.js';
 export type { AuditEventInput, AuditChainVerification } from './audit.js';
-export {
-  LocalAesKeyEncryptionProvider,
-  encryptSecret,
-  decryptSecret,
-} from './envelope.js';
+export { LocalAesKeyEncryptionProvider, encryptSecret, decryptSecret } from './envelope.js';
 export type { KeyEncryptionProvider, EncryptedSecret } from './envelope.js';

@@ -39,9 +39,7 @@ function main(): void {
         .filter(Boolean)
         .join('; ') || 'UNKNOWN';
     rows.push(
-      [c.name, c.version, license]
-        .map((v) => `"${String(v).replaceAll('"', '""')}"`)
-        .join(','),
+      [c.name, c.version, license].map((v) => `"${String(v).replaceAll('"', '""')}"`).join(','),
     );
   }
   writeFileSync('sbom/licenses.csv', rows.join('\n') + '\n');

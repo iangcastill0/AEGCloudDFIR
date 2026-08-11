@@ -1,17 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import {
-  ForbiddenException,
-  UnauthorizedException,
-  type ExecutionContext,
-} from '@nestjs/common';
+import { ForbiddenException, UnauthorizedException, type ExecutionContext } from '@nestjs/common';
 import type { Reflector } from '@nestjs/core';
 import { TenantRole, type PrismaClient } from '@evidencevault/database';
 import type { AppConfig } from '@evidencevault/config';
-import {
-  createSessionPayload,
-  deriveSealingKey,
-  sealSession,
-} from '../session.js';
+import { createSessionPayload, deriveSealingKey, sealSession } from '../session.js';
 import type { AuthContext } from '../../common/http.js';
 import type { SessionPayload } from '../session.js';
 import { SessionGuard } from './session.guard.js';
@@ -106,8 +98,8 @@ function makePrisma(user: UserRow | null, membership: MembershipRow | null): Pri
   };
   const prisma = {
     user: { findUnique: vi.fn(async (): Promise<UserRow | null> => user) },
-    $transaction: vi.fn(
-      async (fn: (txArg: typeof tx) => Promise<unknown>): Promise<unknown> => fn(tx),
+    $transaction: vi.fn(async (fn: (txArg: typeof tx) => Promise<unknown>): Promise<unknown> =>
+      fn(tx),
     ),
   };
   return prisma as unknown as PrismaClient;
@@ -141,7 +133,9 @@ describe('TenantGuard', () => {
   });
 
   it('throws 403 when the membership is disabled', async () => {
-    const guard = new TenantGuard(makePrisma(activeUser, { ...activeMembership, status: 'disabled' }));
+    const guard = new TenantGuard(
+      makePrisma(activeUser, { ...activeMembership, status: 'disabled' }),
+    );
     const request = makeRequest({ evSession: createSessionPayload(USER_ID, TENANT_ID, 3600) });
     await expect(guard.canActivate(contextFor(request))).rejects.toThrow(ForbiddenException);
   });

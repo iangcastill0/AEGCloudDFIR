@@ -3,7 +3,9 @@ import { describe, expect, it } from 'vitest';
 import { ArchiveBombError, ArchiveDepthExceededError } from './errors.js';
 import { ExpansionGuard, gunzipCapped } from './limits.js';
 
-function guard(overrides: Partial<ConstructorParameters<typeof ExpansionGuard>[0]> = {}): ExpansionGuard {
+function guard(
+  overrides: Partial<ConstructorParameters<typeof ExpansionGuard>[0]> = {},
+): ExpansionGuard {
   return new ExpansionGuard({
     maxDepth: 3,
     maxRatio: 100,
@@ -87,6 +89,8 @@ describe('gunzipCapped', () => {
 
   it('propagates genuine corruption errors unchanged', () => {
     const g = guard();
-    expect(() => gunzipCapped(Buffer.from('not gzip data'), g)).toThrow(/incorrect header|unknown compression/i);
+    expect(() => gunzipCapped(Buffer.from('not gzip data'), g)).toThrow(
+      /incorrect header|unknown compression/i,
+    );
   });
 });

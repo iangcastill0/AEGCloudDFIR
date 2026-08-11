@@ -20,7 +20,10 @@ const IMAGE_EXTENSIONS: Record<Exclude<ProductionImageFormat, 'none'>, string> =
 };
 
 /** VOL001 for images 0..999, VOL002 for 1000..1999, ... */
-export function volumeLabel(imageIndex: number, imagesPerVolume: number = IMAGES_PER_VOLUME): string {
+export function volumeLabel(
+  imageIndex: number,
+  imagesPerVolume: number = IMAGES_PER_VOLUME,
+): string {
   if (!Number.isInteger(imageIndex) || imageIndex < 0) {
     throw new ProductionError(`imageIndex must be a non-negative integer, got ${imageIndex}`);
   }

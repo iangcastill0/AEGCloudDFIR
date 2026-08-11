@@ -9,14 +9,7 @@
 import { QueryValidationError } from './errors.js';
 
 export type FieldType =
-  | 'text'
-  | 'keyword'
-  | 'date'
-  | 'size'
-  | 'address'
-  | 'header'
-  | 'ocr'
-  | 'boolean';
+  'text' | 'keyword' | 'date' | 'size' | 'address' | 'header' | 'ocr' | 'boolean';
 
 export interface FieldDef {
   esPath: string;

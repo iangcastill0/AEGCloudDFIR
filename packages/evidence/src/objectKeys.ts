@@ -36,7 +36,9 @@ export type KeyClass =
 
 function assertUuid(value: string, label: string): string {
   if (typeof value !== 'string' || !UUID_RE.test(value)) {
-    throw new KeyValidationError(`${label} must be a lowercase UUID, got: ${JSON.stringify(value)}`);
+    throw new KeyValidationError(
+      `${label} must be a lowercase UUID, got: ${JSON.stringify(value)}`,
+    );
   }
   return value;
 }

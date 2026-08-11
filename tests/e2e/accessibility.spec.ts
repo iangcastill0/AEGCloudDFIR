@@ -6,7 +6,16 @@ import { expect, test } from '@playwright/test';
  * available — structural assertions below are dependency-free).
  */
 test.describe('accessibility fundamentals', () => {
-  const pages = ['/', '/connectors', '/collections', '/review', '/cases', '/exports', '/productions', '/audit'];
+  const pages = [
+    '/',
+    '/connectors',
+    '/collections',
+    '/review',
+    '/cases',
+    '/exports',
+    '/productions',
+    '/audit',
+  ];
 
   for (const path of pages) {
     test(`${path} has landmarks, skip link, and a single h1`, async ({ page }) => {

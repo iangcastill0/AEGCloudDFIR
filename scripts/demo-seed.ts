@@ -68,7 +68,12 @@ async function main(): Promise<void> {
           create: { tenantId: tenantA.id, userId: user.id },
           update: {},
         });
-        for (const role of ['org_admin', 'case_manager', 'production_manager', 'reviewer'] as const) {
+        for (const role of [
+          'org_admin',
+          'case_manager',
+          'production_manager',
+          'reviewer',
+        ] as const) {
           await tx.roleAssignment.upsert({
             where: { membershipId_role: { membershipId: membership.id, role } },
             create: { tenantId: tenantA.id, membershipId: membership.id, role },

@@ -81,10 +81,7 @@ function stampText(stamp: StampConfig, batesForPage: string | undefined): string
 }
 
 interface DrawTarget {
-  drawText: (
-    text: string,
-    opts: { x: number; y: number; size: number; font: PDFFont },
-  ) => void;
+  drawText: (text: string, opts: { x: number; y: number; size: number; font: PDFFont }) => void;
 }
 
 function drawStamps(

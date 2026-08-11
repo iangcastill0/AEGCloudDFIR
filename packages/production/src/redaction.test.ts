@@ -2,11 +2,7 @@ import { PDFDocument, StandardFonts } from 'pdf-lib';
 import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
 import { ProductionError } from './errors.js';
-import {
-  assembleImageOnlyPdf,
-  burnRedactions,
-  validateNoTextLayer,
-} from './redaction.js';
+import { assembleImageOnlyPdf, burnRedactions, validateNoTextLayer } from './redaction.js';
 
 /** White 400x300 page with a black "text-ish" band in the middle. */
 async function makePageImage(): Promise<Buffer> {
@@ -30,11 +26,10 @@ describe('burnRedactions', () => {
   it('paints the redaction region opaque in the configured color', async () => {
     const page = await makePageImage();
     // Redact the right half of the black band with a red box.
-    const burned = await burnRedactions(
-      page,
-      [{ x: 0.5, y: 0.4, w: 0.4, h: 0.2 }],
-      { color: '#ff0000', label: '' },
-    );
+    const burned = await burnRedactions(page, [{ x: 0.5, y: 0.4, w: 0.4, h: 0.2 }], {
+      color: '#ff0000',
+      label: '',
+    });
     // Inside the redaction: red, even where the black band used to be.
     expect(await pixelAt(burned, 250, 140)).toEqual([255, 0, 0]);
     expect(await pixelAt(burned, 300, 100 + 40)).toEqual([255, 0, 0]);
@@ -54,12 +49,12 @@ describe('burnRedactions', () => {
 
   it('rejects rects outside 0..1 and bad colors', async () => {
     const page = await makePageImage();
-    await expect(
-      burnRedactions(page, [{ x: -0.1, y: 0, w: 0.5, h: 0.5 }]),
-    ).rejects.toThrow(ProductionError);
-    await expect(
-      burnRedactions(page, [{ x: 0, y: 0, w: 1.5, h: 0.5 }]),
-    ).rejects.toThrow(ProductionError);
+    await expect(burnRedactions(page, [{ x: -0.1, y: 0, w: 0.5, h: 0.5 }])).rejects.toThrow(
+      ProductionError,
+    );
+    await expect(burnRedactions(page, [{ x: 0, y: 0, w: 1.5, h: 0.5 }])).rejects.toThrow(
+      ProductionError,
+    );
     await expect(
       burnRedactions(page, [{ x: 0, y: 0, w: 0.5, h: 0.5 }], { color: 'red' }),
     ).rejects.toThrow(ProductionError);

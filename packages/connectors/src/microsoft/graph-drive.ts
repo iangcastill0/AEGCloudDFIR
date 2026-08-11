@@ -19,7 +19,12 @@ import {
   type DriveListPage,
   type ListFilesOptions,
 } from '../types.js';
-import { graphFetchOptions, normalizeBaseUrl, userSegment, type GraphConnectorOptions } from './common.js';
+import {
+  graphFetchOptions,
+  normalizeBaseUrl,
+  userSegment,
+  type GraphConnectorOptions,
+} from './common.js';
 
 const identitySchema = z.object({
   user: z

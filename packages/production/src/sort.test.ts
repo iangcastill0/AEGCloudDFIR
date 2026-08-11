@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { sortProductionItems, type SortableProductionItem } from './sort.js';
 import type { ProductionSortKey } from './types.js';
 
-function item(overrides: Partial<SortableProductionItem> & { evidenceId: string }): SortableProductionItem {
+function item(
+  overrides: Partial<SortableProductionItem> & { evidenceId: string },
+): SortableProductionItem {
   return {
     fileName: 'file.txt',
     folderPath: '/root',
@@ -105,7 +107,11 @@ describe('sortProductionItems', () => {
   });
 
   it('sorts by evidence id', () => {
-    const items = [item({ evidenceId: 'e3' }), item({ evidenceId: 'e1' }), item({ evidenceId: 'e2' })];
+    const items = [
+      item({ evidenceId: 'e3' }),
+      item({ evidenceId: 'e1' }),
+      item({ evidenceId: 'e2' }),
+    ];
     expect(sortProductionItems(items, 'evidence_id', true).map((i) => i.evidenceId)).toEqual([
       'e1',
       'e2',

@@ -79,10 +79,7 @@ export interface RawSearchBody {
     total: { value: number } | number;
     hits: RawSearchHit[];
   };
-  aggregations?: Record<
-    string,
-    { buckets: { key: string | number; doc_count: number }[] }
-  >;
+  aggregations?: Record<string, { buckets: { key: string | number; doc_count: number }[] }>;
 }
 
 export interface MinimalOpenSearchClient {
@@ -98,10 +95,7 @@ export interface MinimalOpenSearchClient {
       body: { actions: Record<string, unknown>[] };
     }): Promise<OsApiResponse<unknown>>;
   };
-  bulk(params: {
-    body: unknown[];
-    refresh?: boolean;
-  }): Promise<OsApiResponse<BulkResponseBody>>;
+  bulk(params: { body: unknown[]; refresh?: boolean }): Promise<OsApiResponse<BulkResponseBody>>;
   search(params: {
     index: string;
     body: Record<string, unknown>;

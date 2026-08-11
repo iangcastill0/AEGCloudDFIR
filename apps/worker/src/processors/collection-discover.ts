@@ -2,7 +2,11 @@ import { appendAuditEvent, withTenantContext, type Prisma } from '@evidencevault
 import { GMAIL_ACCOUNT_FOLDER } from '@evidencevault/connectors';
 import type { CollectionScope } from '@evidencevault/contracts';
 import { sanitizeError, type WorkerContext } from '../context.js';
-import { buildConnectorsForAccount, makeRateLimitObserver, type ConnectorBundle } from '../connector-factory.js';
+import {
+  buildConnectorsForAccount,
+  makeRateLimitObserver,
+  type ConnectorBundle,
+} from '../connector-factory.js';
 import { recordException } from '../progress.js';
 import { QUEUES, dedupKeys } from '../queues.js';
 import { emailFolderIncluded, parseCollectionScope } from '../scope.js';
@@ -20,7 +24,10 @@ interface DiscoveredScope {
 async function discoverEmailScopeKeys(
   bundle: ConnectorBundle,
   scope: CollectionScope,
-  onPermissionException: (kind: 'permission_denied' | 'unavailable_item', message: string) => Promise<void>,
+  onPermissionException: (
+    kind: 'permission_denied' | 'unavailable_item',
+    message: string,
+  ) => Promise<void>,
 ): Promise<string[]> {
   const emailScope = scope.email ?? {
     folderIds: null,

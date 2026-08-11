@@ -37,7 +37,9 @@ async function startClamd(options: FakeClamdOptions = {}): Promise<number> {
         const command = buffer.subarray(0, nul).toString('utf8');
         buffer = buffer.subarray(nul + 1);
         if (command === 'zVERSION') {
-          socket.end(`${options.versionResponse ?? 'ClamAV 1.4.1/27484/Tue Aug 10 08:00:00 2026'}\0`);
+          socket.end(
+            `${options.versionResponse ?? 'ClamAV 1.4.1/27484/Tue Aug 10 08:00:00 2026'}\0`,
+          );
           return;
         }
         if (command === 'zINSTREAM') {
@@ -75,7 +77,11 @@ function scanner(port: number, timeoutMs = 2_000): ClamAvScanner {
 describe('ClamAvScanner.scan', () => {
   it('returns clean for stream: OK and streams the exact bytes', async () => {
     let received: Buffer | undefined;
-    const port = await startClamd({ onPayload: (p) => { received = p; } });
+    const port = await startClamd({
+      onPayload: (p) => {
+        received = p;
+      },
+    });
     const bytes = Buffer.from('some evidence file bytes');
 
     const result = await scanner(port).scan(bytes);
@@ -85,7 +91,11 @@ describe('ClamAvScanner.scan', () => {
 
   it('accepts a Readable stream input', async () => {
     let received: Buffer | undefined;
-    const port = await startClamd({ onPayload: (p) => { received = p; } });
+    const port = await startClamd({
+      onPayload: (p) => {
+        received = p;
+      },
+    });
     const chunks = [Buffer.from('part-one|'), Buffer.from('part-two')];
 
     const result = await scanner(port).scan(Readable.from(chunks));

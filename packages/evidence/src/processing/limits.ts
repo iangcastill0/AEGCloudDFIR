@@ -96,10 +96,10 @@ export class ExpansionGuard {
     }
     this.totalOut += n;
     if (this.totalOut > this.maxTotalBytes) {
-      throw new ArchiveBombError(
-        `decompressed output exceeded ${this.maxTotalBytes} bytes`,
-        { maxTotalBytes: this.maxTotalBytes, totalOut: this.totalOut },
-      );
+      throw new ArchiveBombError(`decompressed output exceeded ${this.maxTotalBytes} bytes`, {
+        maxTotalBytes: this.maxTotalBytes,
+        totalOut: this.totalOut,
+      });
     }
     const ratio = this.totalOut / this.inputSize;
     if (ratio > this.maxRatio) {
@@ -127,10 +127,9 @@ export function gunzipCapped(bytes: Buffer, guard: ExpansionGuard): Buffer {
     const code = (err as NodeJS.ErrnoException).code;
     const message = err instanceof Error ? err.message : String(err);
     if (code === 'ERR_BUFFER_TOO_LARGE' || /maxOutputLength/i.test(message)) {
-      throw new ArchiveBombError(
-        `gzip output exceeded remaining budget of ${budget} bytes`,
-        { budget },
-      );
+      throw new ArchiveBombError(`gzip output exceeded remaining budget of ${budget} bytes`, {
+        budget,
+      });
     }
     throw err;
   }

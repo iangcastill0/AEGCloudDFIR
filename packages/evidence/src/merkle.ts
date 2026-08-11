@@ -3,7 +3,9 @@ import { createHash } from 'node:crypto';
 const SHA256_HEX_RE = /^[0-9a-f]{64}$/;
 
 function sha256Pair(a: Buffer, b: Buffer): Buffer {
-  return createHash('sha256').update(Buffer.concat([a, b])).digest();
+  return createHash('sha256')
+    .update(Buffer.concat([a, b]))
+    .digest();
 }
 
 /**

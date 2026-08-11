@@ -83,7 +83,11 @@ describe('processExportRun (native)', () => {
     await processExportRun(f.ctx, payload, { createArchive: () => writer });
 
     const upserts = f.tx.exportItem.upsert.mock.calls.map(
-      (c) => c[0] as { where: { exportId_evidenceItemId: { evidenceItemId: string } }; create: Record<string, unknown> },
+      (c) =>
+        c[0] as {
+          where: { exportId_evidenceItemId: { evidenceItemId: string } };
+          create: Record<string, unknown>;
+        },
     );
     const good = upserts.find((u) => u.where.exportId_evidenceItemId.evidenceItemId === GOOD_ID);
     const bad = upserts.find((u) => u.where.exportId_evidenceItemId.evidenceItemId === BAD_ID);
@@ -99,7 +103,9 @@ describe('processExportRun (native)', () => {
     expect(finalUpdate.data['itemCount']).toBe(1);
     expect(String(finalUpdate.data['statusDetail'])).toContain('1 item(s) failed verification');
 
-    const audit = f.tx.auditEvent.create.mock.calls.at(-1)?.[0] as { data: Record<string, unknown> };
+    const audit = f.tx.auditEvent.create.mock.calls.at(-1)?.[0] as {
+      data: Record<string, unknown>;
+    };
     expect(audit.data['action']).toBe('export.completed');
   });
 
@@ -139,7 +145,12 @@ describe('processExportRun (native)', () => {
 
   it('returns without work for already-finished exports', async () => {
     const f = fakeCtx();
-    f.tx.export.findUnique.mockResolvedValue({ id: EXPORT_ID, kind: 'native', status: 'ready', parameters: {} });
+    f.tx.export.findUnique.mockResolvedValue({
+      id: EXPORT_ID,
+      kind: 'native',
+      status: 'ready',
+      parameters: {},
+    });
     await processExportRun(f.ctx, payload);
     expect(f.tx.export.update).not.toHaveBeenCalled();
   });

@@ -293,11 +293,7 @@ export class EvidenceObjectStore {
    * Staging keys and keys outside the tenant are refused. The URL is returned
    * to the caller and is never logged.
    */
-  async presignGet(
-    tenantId: string,
-    key: string,
-    opts?: { ttlSeconds?: number },
-  ): Promise<string> {
+  async presignGet(tenantId: string, key: string, opts?: { ttlSeconds?: number }): Promise<string> {
     assertKeyInTenant(tenantId, key);
     const cls = keyClass(key);
     if (cls === 'staging') {

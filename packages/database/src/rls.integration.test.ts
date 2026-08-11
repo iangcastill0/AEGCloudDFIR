@@ -111,21 +111,24 @@ suite('PostgreSQL RLS tenant isolation (integration)', () => {
         }),
       );
     }
-    const result = await withTenantContext(prisma, tenantA, (tx) =>
-      verifyAuditChain(tx, tenantA),
-    );
+    const result = await withTenantContext(prisma, tenantA, (tx) => verifyAuditChain(tx, tenantA));
     expect(result.valid).toBe(true);
     expect(result.checkedCount).toBeGreaterThanOrEqual(3);
 
     // Append-only trigger: UPDATE and DELETE both raise.
     await expect(
-      withTenantContext(prisma, tenantA, (tx) =>
-        tx.$executeRaw`UPDATE audit_events SET action = 'forged' WHERE "tenantId" = ${tenantA}::uuid`,
+      withTenantContext(
+        prisma,
+        tenantA,
+        (tx) =>
+          tx.$executeRaw`UPDATE audit_events SET action = 'forged' WHERE "tenantId" = ${tenantA}::uuid`,
       ),
     ).rejects.toThrow(/append-only/i);
     await expect(
-      withTenantContext(prisma, tenantA, (tx) =>
-        tx.$executeRaw`DELETE FROM audit_events WHERE "tenantId" = ${tenantA}::uuid`,
+      withTenantContext(
+        prisma,
+        tenantA,
+        (tx) => tx.$executeRaw`DELETE FROM audit_events WHERE "tenantId" = ${tenantA}::uuid`,
       ),
     ).rejects.toThrow(/append-only/i);
   });

@@ -88,7 +88,9 @@ describe('buildDatFile', () => {
 
   it('substitutes embedded newlines (CRLF, CR, LF) with the configured character', () => {
     const buf = buildDatFile([record({ subject: 'line1\r\nline2\rline3\nline4' })]);
-    expect(buf.toString('utf8')).toContain(`${THORN}line1${REG}line2${REG}line3${REG}line4${THORN}`);
+    expect(buf.toString('utf8')).toContain(
+      `${THORN}line1${REG}line2${REG}line3${REG}line4${THORN}`,
+    );
   });
 
   it('joins multi-value tags with the multi-value separator', () => {

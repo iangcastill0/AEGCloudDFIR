@@ -17,7 +17,12 @@ import {
   type ListMessagesOptions,
   type MailFolderDiscovery,
 } from '../types.js';
-import { GOOGLE_SELF_UID, googleFetchOptions, normalizeBaseUrl, type GoogleConnectorOptions } from './common.js';
+import {
+  GOOGLE_SELF_UID,
+  googleFetchOptions,
+  normalizeBaseUrl,
+  type GoogleConnectorOptions,
+} from './common.js';
 
 const labelSchema = z.object({
   id: z.string(),
@@ -145,9 +150,7 @@ export class GmailConnector implements EmailConnector {
 
   async fetchMessage(_custodian: string, providerItemId: string): Promise<FetchedEmail> {
     const res = await ensureOk(
-      await this.get(
-        this.gmailUrl(`/messages/${encodeURIComponent(providerItemId)}?format=raw`),
-      ),
+      await this.get(this.gmailUrl(`/messages/${encodeURIComponent(providerItemId)}?format=raw`)),
       'fetchMessage',
     );
     const parsed = rawMessageSchema.parse(await res.json());

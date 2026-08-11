@@ -37,13 +37,19 @@ export const batesConfig = z.object({
   prefix: z.string().regex(/^[A-Za-z0-9_-]{0,20}$/),
   startNumber: z.number().int().min(1),
   digits: z.number().int().min(4).max(12).default(8),
-  suffix: z.string().regex(/^[A-Za-z0-9_-]{0,10}$/).default(''),
+  suffix: z
+    .string()
+    .regex(/^[A-Za-z0-9_-]{0,10}$/)
+    .default(''),
   numbering: z.enum(['per_page', 'per_document']).default('per_page'),
 });
 
 export const redactionConfig = z.object({
   stage: z.enum(['preview', 'final']),
-  color: z.string().regex(/^#[0-9a-fA-F]{6}$/).default('#000000'),
+  color: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/)
+    .default('#000000'),
   label: z.string().max(60).default('REDACTED'),
   enforceImageOnly: z.boolean().default(true),
 });

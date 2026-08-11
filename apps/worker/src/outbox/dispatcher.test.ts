@@ -63,9 +63,7 @@ describe('OutboxDispatcher.dispatchOnce', () => {
       .mockRejectedValueOnce(new Error('redis down'));
     await new OutboxDispatcher(prisma, { enqueue }, silentLog).dispatchOnce();
 
-    const sqlCalls = tx.$executeRaw.mock.calls.map((c) =>
-      (c[0] as TemplateStringsArray).join('¶'),
-    );
+    const sqlCalls = tx.$executeRaw.mock.calls.map((c) => (c[0] as TemplateStringsArray).join('¶'));
     const failureUpdate = sqlCalls.find((s) => s.includes('"lastError"'));
     expect(failureUpdate).toBeTruthy();
     const dispatchedUpdate = sqlCalls.find((s) => s.includes('"dispatchedAt"'));
@@ -87,9 +85,7 @@ describe('OutboxDispatcher.dispatchOnce', () => {
       (c[0] as TemplateStringsArray).join('').includes('"lastError"'),
     );
     // params: attempts, message, status, id
-    expect(failCall?.slice(1)).toEqual(
-      expect.arrayContaining([10, 'still broken', 'failed', 'x']),
-    );
+    expect(failCall?.slice(1)).toEqual(expect.arrayContaining([10, 'still broken', 'failed', 'x']));
   });
 
   it('returns 0 on an empty outbox', async () => {

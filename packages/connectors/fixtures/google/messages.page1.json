@@ -1,5 +1,5 @@
 {
-  "messages": [ { "id": "g-001", "threadId": "t-1" } ],
+  "messages": [{ "id": "g-001", "threadId": "t-1" }],
   "nextPageToken": "page2",
   "resultSizeEstimate": 2
 }

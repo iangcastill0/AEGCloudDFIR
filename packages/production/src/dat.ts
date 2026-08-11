@@ -127,9 +127,7 @@ export function buildDatFile(
   lines.push(profile.map((f) => wrap(f.loadFileField)).join(opts.fieldDelimiter));
   for (const record of records) {
     lines.push(
-      profile
-        .map((f) => wrap(recordValue(record, f.source, opts)))
-        .join(opts.fieldDelimiter),
+      profile.map((f) => wrap(recordValue(record, f.source, opts))).join(opts.fieldDelimiter),
     );
   }
   const body = lines.join(CRLF) + CRLF;

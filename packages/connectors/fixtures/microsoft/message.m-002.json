@@ -3,7 +3,9 @@
   "subject": "Deposition prep",
   "from": { "emailAddress": { "name": "Jordan Lee", "address": "jordan.lee@example.com" } },
   "sender": { "emailAddress": { "name": "Jordan Lee", "address": "jordan.lee@example.com" } },
-  "toRecipients": [ { "emailAddress": { "name": "Avery Chen", "address": "avery.chen@example.com" } } ],
+  "toRecipients": [
+    { "emailAddress": { "name": "Avery Chen", "address": "avery.chen@example.com" } }
+  ],
   "ccRecipients": [],
   "bccRecipients": [],
   "replyTo": [],
@@ -16,7 +18,7 @@
   "parentFolderId": "f-inbox",
   "hasAttachments": false,
   "internetMessageId": "<msg-002@example.com>",
-  "internetMessageHeaders": [ { "name": "Message-ID", "value": "<msg-002@example.com>" } ],
+  "internetMessageHeaders": [{ "name": "Message-ID", "value": "<msg-002@example.com>" }],
   "body": { "contentType": "text", "content": "sanitized" },
   "attachments": []
 }

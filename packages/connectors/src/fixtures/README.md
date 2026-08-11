@@ -21,7 +21,7 @@ clearly-labeled demo mode only.
   `google/message.<id>.json` (metadata) plus `google/message.<id>.eml`
   (base64url-encoded into `raw`), keeping fixtures readable.
 - Graph `/drives/{d}/items/{i}/content` responds `302 Location:
-  {{BASE}}/download/ms/{i}?tempauth=...`; the download route serves
+{{BASE}}/download/ms/{i}?tempauth=...`; the download route serves
   `microsoft/content.<i>.bin` and must be called WITHOUT an Authorization
   header (the request log records whether one was sent).
 - Custodian `no-recoverable@example.com` gets a 403 for the

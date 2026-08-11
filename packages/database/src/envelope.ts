@@ -15,7 +15,13 @@ export interface KeyEncryptionProvider {
     dek: Buffer,
     aad: Buffer,
   ): Promise<{ keyId: string; wrappedDek: Buffer; iv: Buffer; tag: Buffer }>;
-  unwrapDek(keyId: string, wrappedDek: Buffer, iv: Buffer, tag: Buffer, aad: Buffer): Promise<Buffer>;
+  unwrapDek(
+    keyId: string,
+    wrappedDek: Buffer,
+    iv: Buffer,
+    tag: Buffer,
+    aad: Buffer,
+  ): Promise<Buffer>;
 }
 
 export interface EncryptedSecret {
@@ -115,7 +121,13 @@ export async function decryptSecret(
   secret: EncryptedSecret,
 ): Promise<Buffer> {
   const aad = buildAad(tenantId, secretScope);
-  const dek = await kek.unwrapDek(secret.kekKeyId, secret.wrappedDek, secret.dekIv, secret.dekTag, aad);
+  const dek = await kek.unwrapDek(
+    secret.kekKeyId,
+    secret.wrappedDek,
+    secret.dekIv,
+    secret.dekTag,
+    aad,
+  );
   try {
     const decipher = createDecipheriv('aes-256-gcm', dek, secret.cipherIv);
     decipher.setAAD(aad);

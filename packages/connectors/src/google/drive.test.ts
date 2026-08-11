@@ -91,9 +91,7 @@ describe('GoogleDriveConnector.listFiles', () => {
     const folderLookups = server.requests.filter(
       (r) => r.path === '/google/drive/v3/files/gd-folder1',
     );
-    const rootLookups = server.requests.filter(
-      (r) => r.path === '/google/drive/v3/files/gd-root',
-    );
+    const rootLookups = server.requests.filter((r) => r.path === '/google/drive/v3/files/gd-root');
     expect(folderLookups).toHaveLength(1);
     expect(rootLookups).toHaveLength(1);
   });
@@ -133,8 +131,7 @@ describe('GoogleDriveConnector.fetchContent', () => {
 
   it('supports the configured docx export target', async () => {
     const content = await connector().fetchContent('me', googleDocEntry(), {
-      exportMimeType:
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      exportMimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     });
     expect(content.apiExportDerivative).toBe(true);
     expect(content.exportFormat).toBe('docx');

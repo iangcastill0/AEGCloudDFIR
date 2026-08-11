@@ -12,12 +12,7 @@ export type {
 
 export { QuerySyntaxError, QueryValidationError } from './errors.js';
 
-export {
-  buildAliasName,
-  buildIndexName,
-  EVIDENCE_MAPPING,
-  MAPPING_VERSION,
-} from './mapping.js';
+export { buildAliasName, buildIndexName, EVIDENCE_MAPPING, MAPPING_VERSION } from './mapping.js';
 
 export {
   ALL_TEXT_FIELDS,
@@ -46,12 +41,7 @@ export type {
   WildcardNode,
 } from './parser.js';
 
-export {
-  DEFAULT_COST_LIMITS,
-  parseDateValue,
-  parseSizeValue,
-  validateAst,
-} from './validate.js';
+export { DEFAULT_COST_LIMITS, parseDateValue, parseSizeValue, validateAst } from './validate.js';
 export type { CostLimits, ValidatedAst, ValidatedNode } from './validate.js';
 
 export {
@@ -63,12 +53,7 @@ export {
   MAX_PAGE_SIZE,
   wrapWithAuthorization,
 } from './compile.js';
-export type {
-  AuthContext,
-  QueryDsl,
-  SearchRequestBody,
-  SearchRequestOptions,
-} from './compile.js';
+export type { AuthContext, QueryDsl, SearchRequestBody, SearchRequestOptions } from './compile.js';
 
 export { OpenSearchAdapter } from './adapter.js';
 export type {

@@ -15,7 +15,9 @@ async function makePng(): Promise<Buffer> {
 }
 
 /** TIFF tag 259 (Compression), type SHORT, count 1, value 4 = CCITT Group 4 — little-endian. */
-const G4_COMPRESSION_TAG = Buffer.from([0x03, 0x01, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00, 0x04, 0x00]);
+const G4_COMPRESSION_TAG = Buffer.from([
+  0x03, 0x01, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00, 0x04, 0x00,
+]);
 
 describe('toTiffG4', () => {
   it('outputs a little-endian TIFF (II*\\0 magic)', async () => {

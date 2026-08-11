@@ -226,7 +226,10 @@ export async function processOcr(
     return;
   }
 
-  const fullText = pages.map((p) => p.text).join('\n\n').trim();
+  const fullText = pages
+    .map((p) => p.text)
+    .join('\n\n')
+    .trim();
   const put = await ctx.store.putDerivative(
     tenantId,
     evidenceItemId,

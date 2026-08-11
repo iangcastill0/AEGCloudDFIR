@@ -1,7 +1,19 @@
 {
   "value": [
-    { "id": "f-inbox", "displayName": "Inbox", "parentFolderId": "f-root", "childFolderCount": 1, "totalItemCount": 3 },
-    { "id": "f-deleted", "displayName": "Deleted Items", "parentFolderId": "f-root", "childFolderCount": 0, "totalItemCount": 1 }
+    {
+      "id": "f-inbox",
+      "displayName": "Inbox",
+      "parentFolderId": "f-root",
+      "childFolderCount": 1,
+      "totalItemCount": 3
+    },
+    {
+      "id": "f-deleted",
+      "displayName": "Deleted Items",
+      "parentFolderId": "f-root",
+      "childFolderCount": 0,
+      "totalItemCount": 1
+    }
   ],
   "@odata.nextLink": "{{BASE}}/graph/me/mailFolders?page=2"
 }

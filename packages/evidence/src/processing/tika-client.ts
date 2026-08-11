@@ -69,7 +69,10 @@ export class TikaClient {
     contentType?: string,
   ): Promise<string> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(new Error('tika request timed out')), this.timeoutMs);
+    const timer = setTimeout(
+      () => controller.abort(new Error('tika request timed out')),
+      this.timeoutMs,
+    );
     try {
       const headers: Record<string, string> = { Accept: accept };
       headers['Content-Type'] = contentType ?? 'application/octet-stream';
@@ -91,9 +94,12 @@ export class TikaClient {
           });
         }
         if (response.status === 422) {
-          throw new UnsupportedFormatError('tika cannot parse this document (unsupported or corrupt)', {
-            status: response.status,
-          });
+          throw new UnsupportedFormatError(
+            'tika cannot parse this document (unsupported or corrupt)',
+            {
+              status: response.status,
+            },
+          );
         }
         throw new Error(`tika request failed with status ${response.status}`);
       }
@@ -116,10 +122,9 @@ export class TikaClient {
     if (body === null) {
       const text = await response.text();
       if (Buffer.byteLength(text, 'utf8') > this.maxBytes) {
-        throw new TextExtractionTooLargeError(
-          `tika response exceeded ${this.maxBytes} bytes`,
-          { maxBytes: this.maxBytes },
-        );
+        throw new TextExtractionTooLargeError(`tika response exceeded ${this.maxBytes} bytes`, {
+          maxBytes: this.maxBytes,
+        });
       }
       return text;
     }
@@ -135,10 +140,10 @@ export class TikaClient {
           total += value.byteLength;
           if (total > this.maxBytes) {
             controller.abort(new Error('response cap exceeded'));
-            throw new TextExtractionTooLargeError(
-              `tika response exceeded ${this.maxBytes} bytes`,
-              { maxBytes: this.maxBytes, receivedAtLeast: total },
-            );
+            throw new TextExtractionTooLargeError(`tika response exceeded ${this.maxBytes} bytes`, {
+              maxBytes: this.maxBytes,
+              receivedAtLeast: total,
+            });
           }
           chunks.push(value);
         }

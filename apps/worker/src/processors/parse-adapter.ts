@@ -151,7 +151,7 @@ export function parseRfc822Minimal(rfc822: Uint8Array): ParsedEmail {
     bodyPlain: body,
     attachments: [],
     isEncrypted: isSmime,
-    smimeType: isSmime ? contentType.split(';')[0]?.trim() ?? '' : '',
+    smimeType: isSmime ? (contentType.split(';')[0]?.trim() ?? '') : '',
     parserName: 'minimal-parser',
     parserVersion: '1',
   };
@@ -185,7 +185,9 @@ interface FullParserModule {
   buildSafeEmailPreview?: (html: string, resolveCid: (contentId: string) => string) => string;
 }
 
-function hasFullParser(mod: Record<string, unknown>): mod is Record<string, unknown> & FullParserModule {
+function hasFullParser(
+  mod: Record<string, unknown>,
+): mod is Record<string, unknown> & FullParserModule {
   return typeof mod['parseEmail'] === 'function';
 }
 

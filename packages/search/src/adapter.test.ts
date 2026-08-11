@@ -145,9 +145,7 @@ describe('indexBulk', () => {
     const result = await adapter(client).indexBulk([doc('a'), doc('b')]);
     expect(client.bulk).toHaveBeenCalledTimes(1);
     expect(result.indexed).toBe(1);
-    expect(result.errors).toEqual([
-      { id: 'b', error: 'mapper_parsing_exception: bad field' },
-    ]);
+    expect(result.errors).toEqual([{ id: 'b', error: 'mapper_parsing_exception: bad field' }]);
   });
 
   it('retries only the 429-throttled docs and succeeds', async () => {
@@ -178,7 +176,9 @@ describe('indexBulk', () => {
     client.bulk.mockResolvedValue({
       body: {
         errors: true,
-        items: [{ index: { _id: 'a', status: 429, error: { type: 'es_rejected', reason: 'busy' } } }],
+        items: [
+          { index: { _id: 'a', status: 429, error: { type: 'es_rejected', reason: 'busy' } } },
+        ],
       } satisfies BulkResponseBody,
     });
 
@@ -233,9 +233,7 @@ describe('search', () => {
       track_total_hits: true,
     });
 
-    expect(client.search).toHaveBeenCalledWith(
-      expect.objectContaining({ index: 'test-evidence' }),
-    );
+    expect(client.search).toHaveBeenCalledWith(expect.objectContaining({ index: 'test-evidence' }));
     expect(response.total).toBe(42);
     expect(response.items).toHaveLength(2);
     expect(response.items[0]).toMatchObject({

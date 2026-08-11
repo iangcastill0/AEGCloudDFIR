@@ -3,14 +3,23 @@ import { decodeEntities, htmlToText } from './html-to-text.js';
 
 describe('htmlToText', () => {
   it('converts block boundaries to newlines', () => {
-    const text = htmlToText('<p>one</p><div>two</div>three<br>four<ul><li>five</li><li>six</li></ul>');
+    const text = htmlToText(
+      '<p>one</p><div>two</div>three<br>four<ul><li>five</li><li>six</li></ul>',
+    );
     expect(text.split('\n').filter((l) => l !== '')).toEqual([
-      'one', 'two', 'three', 'four', 'five', 'six',
+      'one',
+      'two',
+      'three',
+      'four',
+      'five',
+      'six',
     ]);
   });
 
   it('separates table rows and cells', () => {
-    const text = htmlToText('<table><tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr></table>');
+    const text = htmlToText(
+      '<table><tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr></table>',
+    );
     expect(text).toContain('a b');
     expect(text).toContain('c d');
     expect(text.indexOf('a b')).toBeLessThan(text.indexOf('c d'));

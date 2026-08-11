@@ -65,8 +65,7 @@ async function listOnePage(
       page = await bundle.email.listMessages(bundle.custodianRef, payload.scopeKey, {
         since: instants.since ?? undefined,
         until: instants.untilExclusive ?? undefined,
-        includeDeleted:
-          (scope.email?.includeSpam ?? false) || (scope.email?.includeTrash ?? false),
+        includeDeleted: (scope.email?.includeSpam ?? false) || (scope.email?.includeTrash ?? false),
         cursor,
       });
     }
@@ -209,9 +208,7 @@ export async function processCollectionFetchPage(
           custodianId,
           source,
           providerItemId: item.providerItemId,
-          ...(source === 'drive'
-            ? { entry: entriesById.get(item.providerItemId)?.entry }
-            : {}),
+          ...(source === 'drive' ? { entry: entriesById.get(item.providerItemId)?.entry } : {}),
         } as Prisma.InputJsonValue,
       }));
       await tx.outboxEvent.createMany({ data: outboxRows, skipDuplicates: true });

@@ -12,27 +12,27 @@ services:
       POSTGRES_DB: evidencevault
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${EV_LOCAL_PG_SUPER_PASSWORD:-changeme-local-only}
-    command: ["postgres", "-c", "shared_preload_libraries=pg_stat_statements"]
+    command: ['postgres', '-c', 'shared_preload_libraries=pg_stat_statements']
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./init/postgres:/docker-entrypoint-initdb.d:ro
     ports:
-      - "127.0.0.1:5432:5432"
+      - '127.0.0.1:5432:5432'
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d evidencevault"]
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d evidencevault']
       interval: 5s
       timeout: 3s
       retries: 20
 
   redis:
     image: redis:7-alpine
-    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    command: ['redis-server', '--appendonly', 'yes', '--maxmemory-policy', 'noeviction']
     volumes:
       - redis-data:/data
     ports:
-      - "127.0.0.1:6379:6379"
+      - '127.0.0.1:6379:6379'
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ['CMD', 'redis-cli', 'ping']
       interval: 5s
       timeout: 3s
       retries: 20
@@ -41,32 +41,32 @@ services:
     image: opensearchproject/opensearch:2.19.1
     environment:
       discovery.type: single-node
-      plugins.security.disabled: "true" # local dev only; enable + TLS in prod
-      OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
+      plugins.security.disabled: 'true' # local dev only; enable + TLS in prod
+      OPENSEARCH_JAVA_OPTS: '-Xms512m -Xmx512m'
       OPENSEARCH_INITIAL_ADMIN_PASSWORD: ${EV_LOCAL_OS_ADMIN_PASSWORD:-LocalDev!ChangeMe1}
     volumes:
       - opensearch-data:/usr/share/opensearch/data
     ports:
-      - "127.0.0.1:9200:9200"
+      - '127.0.0.1:9200:9200'
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:9200/_cluster/health >/dev/null"]
+      test: ['CMD-SHELL', 'curl -fsS http://localhost:9200/_cluster/health >/dev/null']
       interval: 10s
       timeout: 5s
       retries: 30
 
   minio:
     image: minio/minio:RELEASE.2025-04-22T22-12-26Z
-    command: ["server", "/data", "--console-address", ":9001"]
+    command: ['server', '/data', '--console-address', ':9001']
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: ${EV_LOCAL_MINIO_PASSWORD:-minioadmin-local-only}
     volumes:
       - minio-data:/data
     ports:
-      - "127.0.0.1:9000:9000"
-      - "127.0.0.1:9001:9001"
+      - '127.0.0.1:9000:9000'
+      - '127.0.0.1:9001:9001'
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: ['CMD', 'mc', 'ready', 'local']
       interval: 5s
       timeout: 3s
       retries: 30
@@ -91,9 +91,9 @@ services:
     volumes:
       - clamav-data:/var/lib/clamav
     ports:
-      - "127.0.0.1:3310:3310"
+      - '127.0.0.1:3310:3310'
     healthcheck:
-      test: ["CMD-SHELL", "clamdscan --ping 1 || exit 1"]
+      test: ['CMD-SHELL', 'clamdscan --ping 1 || exit 1']
       interval: 30s
       timeout: 10s
       retries: 30
@@ -102,9 +102,9 @@ services:
   tika:
     image: apache/tika:2.9.2.1-full
     ports:
-      - "127.0.0.1:9998:9998"
+      - '127.0.0.1:9998:9998'
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:9998/tika >/dev/null"]
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:9998/tika >/dev/null']
       interval: 10s
       timeout: 5s
       retries: 20
@@ -118,7 +118,7 @@ services:
     volumes:
       - authentik-pg-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U authentik"]
+      test: ['CMD-SHELL', 'pg_isready -U authentik']
       interval: 5s
       timeout: 3s
       retries: 20
@@ -126,7 +126,7 @@ services:
   authentik-redis:
     image: redis:7-alpine
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ['CMD', 'redis-cli', 'ping']
       interval: 5s
       timeout: 3s
       retries: 20
@@ -146,7 +146,7 @@ services:
     volumes:
       - ../authentik/blueprints:/blueprints/custom:ro
     ports:
-      - "127.0.0.1:9443:9000"
+      - '127.0.0.1:9443:9000'
     depends_on:
       authentik-postgres:
         condition: service_healthy
@@ -185,18 +185,18 @@ services:
       EV_CLAMAV_HOST: clamav
       EV_TIKA_URL: http://tika:9998
     ports:
-      - "127.0.0.1:4000:4000"
+      - '127.0.0.1:4000:4000'
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:4000/healthz >/dev/null"]
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:4000/healthz >/dev/null']
       interval: 10s
       timeout: 5s
       retries: 10
-    profiles: ["app"]
+    profiles: ['app']
 
   worker:
     build:
@@ -216,11 +216,11 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:5000/healthz >/dev/null"]
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:5000/healthz >/dev/null']
       interval: 10s
       timeout: 5s
       retries: 10
-    profiles: ["app"]
+    profiles: ['app']
 
   web:
     build:
@@ -228,10 +228,10 @@ services:
       dockerfile: infra/docker/web.Dockerfile
     env_file: ../../.env
     ports:
-      - "127.0.0.1:3000:3000"
+      - '127.0.0.1:3000:3000'
     depends_on:
       - api
-    profiles: ["app"]
+    profiles: ['app']
 
 volumes:
   postgres-data:

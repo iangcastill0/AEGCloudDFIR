@@ -67,7 +67,9 @@ export async function burnRedactions(
   for (const rect of rects) {
     for (const [name, v] of Object.entries(rect)) {
       if (!Number.isFinite(v) || v < 0 || v > 1) {
-        throw new ProductionError(`redaction rect ${name}=${v} is outside the normalized 0..1 range`);
+        throw new ProductionError(
+          `redaction rect ${name}=${v} is outside the normalized 0..1 range`,
+        );
       }
     }
     const px = Math.floor(rect.x * width);
@@ -155,9 +157,7 @@ export async function validateNoTextLayer(pdfBytes: Uint8Array): Promise<TextLay
     for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber += 1) {
       const page = await doc.getPage(pageNumber);
       const content = await page.getTextContent();
-      const pageHasText = content.items.some(
-        (item) => 'str' in item && item.str.trim().length > 0,
-      );
+      const pageHasText = content.items.some((item) => 'str' in item && item.str.trim().length > 0);
       if (pageHasText) pagesWithText.push(pageNumber);
       page.cleanup();
     }

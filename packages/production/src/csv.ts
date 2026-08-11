@@ -24,7 +24,9 @@ const FORMULA_TRIGGERS = new Set(['=', '+', '-', '@', '\t', '\r']);
 export function csvEscape(value: string, options: CsvOptions = {}): string {
   const delimiter = options.delimiter ?? ',';
   if (delimiter.length !== 1 || delimiter === '"') {
-    throw new ProductionError(`CSV delimiter must be a single non-quote character, got "${delimiter}"`);
+    throw new ProductionError(
+      `CSV delimiter must be a single non-quote character, got "${delimiter}"`,
+    );
   }
   let v = value;
   const first = v.charAt(0);
@@ -67,9 +69,7 @@ export function buildCsvFile(
   const lines: string[] = [];
   lines.push(profile.map((f) => csvEscape(f.loadFileField, options)).join(delimiter));
   for (const record of records) {
-    lines.push(
-      profile.map((f) => csvEscape(toCell(record[f.source]), options)).join(delimiter),
-    );
+    lines.push(profile.map((f) => csvEscape(toCell(record[f.source]), options)).join(delimiter));
   }
   return lines.join(CRLF) + CRLF;
 }

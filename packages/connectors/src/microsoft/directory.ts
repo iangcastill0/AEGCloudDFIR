@@ -47,7 +47,11 @@ export class GraphCustodianDirectory implements CustodianDirectory {
     }
     const headers: Record<string, string> = searching ? { ConsistencyLevel: 'eventual' } : {};
     const res = await ensureOk(
-      await providerFetch(url, { method: 'GET', headers }, graphFetchOptions({ ...this.options, mode: 'organization' })),
+      await providerFetch(
+        url,
+        { method: 'GET', headers },
+        graphFetchOptions({ ...this.options, mode: 'organization' }),
+      ),
       'listUsers',
     );
     const page = userPageSchema.parse(await res.json());

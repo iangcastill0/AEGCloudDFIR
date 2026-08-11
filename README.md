@@ -4,14 +4,14 @@ Self-hostable, multi-tenant eDiscovery platform: **collect, preserve, index,
 review, tag, export, and produce** email and cloud-drive evidence from
 Microsoft 365 / Outlook / OneDrive and Google Workspace / Gmail / Drive.
 
-| Concern | Choice |
-|---|---|
-| Login | Authentik via standards-compliant OIDC (code + PKCE); MFA enforced at the IdP |
-| Evidence bytes | Wasabi or any S3-compatible store (MinIO locally) — content-addressed, immutable originals |
-| Source of truth | PostgreSQL 16 with row-level security per tenant + hash-chained append-only audit log |
-| Search | OpenSearch 2.x behind a replaceable adapter; typed query AST with server-side tenant-filter injection |
-| Jobs | Redis 7 + BullMQ fed by a transactional outbox; idempotent, resumable, checkpointed |
-| Processing | Apache Tika, Tesseract OCR, LibreOffice, ClamAV — locked-down worker containers only |
+| Concern         | Choice                                                                                                |
+| --------------- | ----------------------------------------------------------------------------------------------------- |
+| Login           | Authentik via standards-compliant OIDC (code + PKCE); MFA enforced at the IdP                         |
+| Evidence bytes  | Wasabi or any S3-compatible store (MinIO locally) — content-addressed, immutable originals            |
+| Source of truth | PostgreSQL 16 with row-level security per tenant + hash-chained append-only audit log                 |
+| Search          | OpenSearch 2.x behind a replaceable adapter; typed query AST with server-side tenant-filter injection |
+| Jobs            | Redis 7 + BullMQ fed by a transactional outbox; idempotent, resumable, checkpointed                   |
+| Processing      | Apache Tika, Tesseract OCR, LibreOffice, ClamAV — locked-down worker containers only                  |
 
 ## Quick start (local development)
 

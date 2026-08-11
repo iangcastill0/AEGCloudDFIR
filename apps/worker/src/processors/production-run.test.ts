@@ -175,7 +175,11 @@ describe('processProductionRun', () => {
     expect(security.length).toBeGreaterThanOrEqual(1);
 
     const rows = createdProductionItems(f);
-    expect(rows[0]).toMatchObject({ outputKind: 'placeholder', state: 'placeholder', nativePath: '' });
+    expect(rows[0]).toMatchObject({
+      outputKind: 'placeholder',
+      state: 'placeholder',
+      nativePath: '',
+    });
     // The run still completes; item-level problems never fail the run.
     const finalUpdate = f.tx.productionRun.update.mock.calls.at(-1)?.[0] as {
       data: Record<string, unknown>;

@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { canonicalJson } from './canonical.js';
-import {
-  buildProductionManifest,
-  type ProductionManifestInput,
-} from './manifest.js';
+import { buildProductionManifest, type ProductionManifestInput } from './manifest.js';
 import type { ProducedItemRecord } from './types.js';
 
 function record(begBates: string): ProducedItemRecord {

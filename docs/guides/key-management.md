@@ -2,12 +2,12 @@
 
 ## What is encrypted with what
 
-| Material | Mechanism |
-|---|---|
+| Material                                                  | Mechanism                                                                                                                                                 |
+| --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Connector refresh tokens, Google DWD service-account keys | Envelope encryption: per-secret AES-256-GCM DEK, wrapped by the active KEK via `KeyEncryptionProvider`; AAD binds ciphertext to `(tenantId, secretScope)` |
-| Login session cookies | AES-256-GCM sealed with a key derived from `EV_SESSION_SECRET` |
-| Collection manifest signatures | HMAC-SHA256 with a key HKDF-derived from the KEK master key (`info: manifest-signing-v1`) |
-| Evidence at rest | Object-store SSE (enable on Wasabi) + TLS in transit |
+| Login session cookies                                     | AES-256-GCM sealed with a key derived from `EV_SESSION_SECRET`                                                                                            |
+| Collection manifest signatures                            | HMAC-SHA256 with a key HKDF-derived from the KEK master key (`info: manifest-signing-v1`)                                                                 |
+| Evidence at rest                                          | Object-store SSE (enable on Wasabi) + TLS in transit                                                                                                      |
 
 ## Local KEK provider (default)
 

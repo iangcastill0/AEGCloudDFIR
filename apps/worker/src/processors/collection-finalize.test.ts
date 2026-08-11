@@ -60,7 +60,10 @@ function arm(
   ]);
 }
 
-function storedEnvelope(f: FakeCtx): { manifest: CollectionManifestV1; signature: { signature: string } } {
+function storedEnvelope(f: FakeCtx): {
+  manifest: CollectionManifestV1;
+  signature: { signature: string };
+} {
   const call = f.store.putManifest.mock.calls[0];
   expect(call).toBeDefined();
   return JSON.parse(call?.[2] as string) as {
@@ -109,9 +112,9 @@ describe('processCollectionFinalize', () => {
     const serialized = (f.store.putManifest.mock.calls[0]?.[2] as string)
       .replace(/^\{"manifest":/, '')
       .replace(/,"signature":.*\}$/, '');
-    expect(
-      verifyManifestSignature(serialized, signature.signature, f.ctx.manifestSigningKey),
-    ).toBe(true);
+    expect(verifyManifestSignature(serialized, signature.signature, f.ctx.manifestSigningKey)).toBe(
+      true,
+    );
     // Completeness report stored beside the manifest.
     expect(f.store.putDerivative).toHaveBeenCalledWith(
       TENANT,

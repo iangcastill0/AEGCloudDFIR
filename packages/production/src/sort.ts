@@ -60,8 +60,7 @@ export function sortProductionItems<T extends SortableProductionItem>(
   familyGrouping: boolean,
 ): T[] {
   const byKey = keyComparator(sortKey);
-  const compare = (a: T, b: T): number =>
-    byKey(a, b) || compareStrings(a.evidenceId, b.evidenceId);
+  const compare = (a: T, b: T): number => byKey(a, b) || compareStrings(a.evidenceId, b.evidenceId);
 
   if (!familyGrouping) {
     return [...items].sort(compare);

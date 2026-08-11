@@ -164,11 +164,7 @@ export async function processCollectionFinalize(
 
   const preservedTotal = counts.preserved + counts.processed + counts.indexed;
   const totalDiscovered =
-    counts.discovered +
-    counts.fetching +
-    preservedTotal +
-    counts.failed +
-    counts.skipped;
+    counts.discovered + counts.fetching + preservedTotal + counts.failed + counts.skipped;
   const completeness = decideCompleteness({
     wasCancelling,
     preserved: preservedTotal,

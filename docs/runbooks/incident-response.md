@@ -4,6 +4,7 @@ Severity guide: S1 evidence integrity/confidentiality suspected; S2 service
 down; S3 degraded (search stale, OCR backlog).
 
 ## S1 — suspected breach or tampering
+
 1. Freeze: scale api to 0 (or enable maintenance mode), keep workers stopped;
    snapshot PostgreSQL and bucket versioning state.
 2. Verify audit chains per tenant; export the audit log for the window.
@@ -14,6 +15,7 @@ down; S3 degraded (search stale, OCR backlog).
 6. Postmortem with timeline reconstructed from audit events (hash-chained).
 
 ## Platform-operator access (break-glass) — design
+
 Routine operator access to tenant evidence does not exist (no API path;
 platform context has no evidence-table RLS policy). If a court order or
 recovery scenario requires it, the documented-but-disabled break-glass path

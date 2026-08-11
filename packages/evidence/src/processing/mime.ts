@@ -67,11 +67,7 @@ export interface ParsedAttachment {
   isNestedMessage: boolean;
 }
 
-export type SmimeType =
-  | ''
-  | 'application/pkcs7-mime'
-  | 'multipart/encrypted'
-  | 'multipart/signed';
+export type SmimeType = '' | 'application/pkcs7-mime' | 'multipart/encrypted' | 'multipart/signed';
 
 export interface ParsedEmail {
   rawHeaders: RawHeader[];
@@ -250,8 +246,7 @@ function detectSmime(parsed: ParsedMail): { isEncrypted: boolean; smimeType: Smi
 function buildAttachments(parsed: ParsedMail, bodyHtml: string | null): ParsedAttachment[] {
   return parsed.attachments.map((att, index) => {
     const cid = att.cid ?? '';
-    const referencedInHtml =
-      cid !== '' && bodyHtml !== null && bodyHtml.includes(`cid:${cid}`);
+    const referencedInHtml = cid !== '' && bodyHtml !== null && bodyHtml.includes(`cid:${cid}`);
     const fallback = `attachment-${index + 1}.bin`;
     let filename = fallback;
     if (typeof att.filename === 'string' && att.filename.trim() !== '') {
@@ -264,8 +259,7 @@ function buildAttachments(parsed: ParsedMail, bodyHtml: string | null): ParsedAt
       contentType,
       size: att.size,
       content: att.content,
-      isInline:
-        att.contentDisposition === 'inline' || att.related === true || referencedInHtml,
+      isInline: att.contentDisposition === 'inline' || att.related === true || referencedInHtml,
       isNestedMessage: contentType === 'message/rfc822',
     };
     if (cid !== '') attachment.contentId = cid;

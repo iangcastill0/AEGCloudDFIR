@@ -112,7 +112,9 @@ export async function processParse(
 
   const bodyPlain = parsed.bodyPlain.slice(0, MAX_BODY_CHARS);
   const bodyHtmlToText =
-    parsed.bodyHtml !== undefined ? parser.htmlToText(parsed.bodyHtml).slice(0, MAX_BODY_CHARS) : '';
+    parsed.bodyHtml !== undefined
+      ? parser.htmlToText(parsed.bodyHtml).slice(0, MAX_BODY_CHARS)
+      : '';
 
   // --- Attachments: stage + promote bytes before the transaction. ---
   const stagedAttachments: StagedAttachment[] = [];
@@ -219,7 +221,8 @@ export async function processParse(
       bodyHtmlToText,
       isEncrypted: parsed.isEncrypted,
       smimeType: parsed.smimeType,
-      hasAttachments: (item.emailMetadata?.hasAttachments ?? false) || parsed.attachments.length > 0,
+      hasAttachments:
+        (item.emailMetadata?.hasAttachments ?? false) || parsed.attachments.length > 0,
       // bccPresent may ONLY be strengthened by an actual Bcc header.
       bccPresent: (item.emailMetadata?.bccPresent ?? false) || parsed.bcc.length > 0,
       ...(item.emailMetadata?.sentAt === null && parsedDate !== null ? { sentAt: parsedDate } : {}),
@@ -321,7 +324,7 @@ export async function processParse(
           kind: 'attachment',
           name: attachment.filename.slice(0, 500),
           extension: attachment.filename.includes('.')
-            ? attachment.filename.split('.').pop()?.toLowerCase().slice(0, 16) ?? ''
+            ? (attachment.filename.split('.').pop()?.toLowerCase().slice(0, 16) ?? '')
             : '',
           mimeType: attachment.contentType,
           size: BigInt(attachment.size),
@@ -403,7 +406,12 @@ export async function processParse(
 
 async function markException(
   ctx: WorkerContext,
-  item: { id: string; collectionId: string | null; custodianId: string | null; providerItemId: string },
+  item: {
+    id: string;
+    collectionId: string | null;
+    custodianId: string | null;
+    providerItemId: string;
+  },
   payload: EvidenceStagePayload,
   kind: 'unsupported_item' | 'corrupt_item',
   message: string,
@@ -431,7 +439,11 @@ async function markException(
           tenantId: payload.tenantId,
           topic: QUEUES.searchIndex,
           dedupKey: dedupKeys.searchIndex(item.id, payload.version),
-          payload: { tenantId: payload.tenantId, evidenceItemId: item.id, version: payload.version },
+          payload: {
+            tenantId: payload.tenantId,
+            evidenceItemId: item.id,
+            version: payload.version,
+          },
         },
       ],
       skipDuplicates: true,

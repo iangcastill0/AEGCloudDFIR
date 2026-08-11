@@ -9,6 +9,7 @@ resources. Object storage is Wasabi (or any S3 API).
     kubectl apply -k infra/kubernetes/base
 
 Before applying:
+
 1. Create the namespace and secrets (see `secret.example.yaml`; use
    ExternalSecrets/SealedSecrets in production — never commit real values).
 2. Run migrations as a Job (`migrate-job.yaml`) pointing at the migration role.

@@ -107,9 +107,7 @@ describe('GraphDriveConnector.fetchContent', () => {
     const expected = readFileSync(join(FIXTURES, 'microsoft/content.item-file1.bin'));
     expect((await contentBytes(content)).equals(expected)).toBe(true);
 
-    const contentReq = server.requests.find((r) =>
-      r.path.endsWith('/items/item-file1/content'),
-    );
+    const contentReq = server.requests.find((r) => r.path.endsWith('/items/item-file1/content'));
     expect(contentReq?.hadAuthorization).toBe(true);
     const downloadReq = server.requests.find((r) => r.path === '/download/ms/item-file1');
     expect(downloadReq).toBeDefined();

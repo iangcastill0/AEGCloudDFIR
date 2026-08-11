@@ -17,6 +17,7 @@ export const QUEUES = {
   searchIndex: 'search.index',
   exportRun: 'export.run',
   productionRun: 'production.run',
+  deletionRun: 'deletion.run',
   deadLetter: 'dead-letter',
 } as const;
 
@@ -56,14 +57,24 @@ export const BACKOFF_STRATEGIES = {
  */
 export const dedupKeys = {
   collectionDiscover: (collectionId: string) => `discover:${collectionId}`,
-  collectionFetchPage: (collectionId: string, custodianId: string, source: string, scopeKey: string, cursorHash: string) =>
-    `page:${collectionId}:${custodianId}:${source}:${scopeKey}:${cursorHash}`,
-  collectionFetchItem: (collectionId: string, custodianId: string, source: string, providerItemId: string) =>
-    `item:${collectionId}:${custodianId}:${source}:${providerItemId}`,
+  collectionFetchPage: (
+    collectionId: string,
+    custodianId: string,
+    source: string,
+    scopeKey: string,
+    cursorHash: string,
+  ) => `page:${collectionId}:${custodianId}:${source}:${scopeKey}:${cursorHash}`,
+  collectionFetchItem: (
+    collectionId: string,
+    custodianId: string,
+    source: string,
+    providerItemId: string,
+  ) => `item:${collectionId}:${custodianId}:${source}:${providerItemId}`,
   collectionFinalize: (collectionId: string) => `finalize:${collectionId}`,
   processStage: (stage: string, evidenceItemId: string, version: number) =>
     `${stage}:${evidenceItemId}:v${version}`,
   searchIndex: (evidenceItemId: string, version: number) => `index:${evidenceItemId}:v${version}`,
   exportRun: (exportId: string) => `export:${exportId}`,
   productionRun: (productionRunId: string) => `production-run:${productionRunId}`,
+  deletionRun: (deletionRequestId: string) => `deletion:${deletionRequestId}`,
 };

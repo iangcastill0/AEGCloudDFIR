@@ -50,7 +50,9 @@ describe('key builders', () => {
   });
 
   it('builds an export key with parts', () => {
-    expect(exportKey(TENANT, ID, 'archive.zip')).toBe(`tenants/${TENANT}/exports/${ID}/archive.zip`);
+    expect(exportKey(TENANT, ID, 'archive.zip')).toBe(
+      `tenants/${TENANT}/exports/${ID}/archive.zip`,
+    );
   });
 
   it('rejects malformed UUIDs', () => {

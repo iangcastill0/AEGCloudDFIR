@@ -287,10 +287,7 @@ export class DeltaExpiredError extends ConnectorError {}
 export class NonDownloadableError extends ConnectorError {
   readonly kind: ExceptionKind;
   readonly providerItemId?: string;
-  constructor(
-    message: string,
-    opts: { kind?: ExceptionKind; providerItemId?: string } = {},
-  ) {
+  constructor(message: string, opts: { kind?: ExceptionKind; providerItemId?: string } = {}) {
     super(message);
     this.kind = opts.kind ?? 'non_downloadable';
     this.providerItemId = opts.providerItemId;

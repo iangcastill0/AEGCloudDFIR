@@ -23,11 +23,11 @@ spec:
             - { containerPort: 3000, name: http }
           env:
             - name: NEXT_PUBLIC_API_URL
-              value: "https://api.evidencevault.example.com"
+              value: 'https://api.evidencevault.example.com'
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
-            capabilities: { drop: ["ALL"] }
+            capabilities: { drop: ['ALL'] }
           volumeMounts:
             - { name: tmp, mountPath: /tmp }
           resources:

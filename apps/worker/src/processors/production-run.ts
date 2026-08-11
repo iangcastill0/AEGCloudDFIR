@@ -442,7 +442,9 @@ export async function processProductionRun(
       }
 
       const includeText =
-        params.output.mode === 'load_file' ? params.output.includeText : params.output.mode !== 'natives_only';
+        params.output.mode === 'load_file'
+          ? params.output.includeText
+          : params.output.mode !== 'natives_only';
       if (includeText && !hasFinalRedactions) {
         const textContent =
           bestText(item) ??
@@ -485,8 +487,7 @@ export async function processProductionRun(
           from: participantsJoined(item, 'from'),
           to: participantsJoined(item, 'to'),
           cc: participantsJoined(item, 'cc'),
-          bcc:
-            item.emailMetadata?.bccPresent === true ? participantsJoined(item, 'bcc') : null,
+          bcc: item.emailMetadata?.bccPresent === true ? participantsJoined(item, 'bcc') : null,
           subject: item.emailMetadata?.subject ?? null,
           sentDate: item.emailMetadata?.sentAt?.toISOString() ?? null,
           receivedDate: item.emailMetadata?.receivedAt?.toISOString() ?? null,
@@ -526,7 +527,10 @@ export async function processProductionRun(
     if (params.output.mode === 'load_file') {
       const records = produced.map((p) => p.record);
       if (params.output.loadFileFormats.includes('dat')) {
-        uploads.push({ path: dataPath('loadfile.dat'), body: deps.buildDat(records, DEFAULT_DAT_PROFILE) });
+        uploads.push({
+          path: dataPath('loadfile.dat'),
+          body: deps.buildDat(records, DEFAULT_DAT_PROFILE),
+        });
       }
       if (params.output.loadFileFormats.includes('csv')) {
         uploads.push({
@@ -575,7 +579,12 @@ export async function processProductionRun(
     // Upload everything under the production key space.
     let outputPrefix = '';
     for (const upload of uploads) {
-      const key = productionKey(tenantId, run.productionId, productionRunId, ...upload.path.split('/'));
+      const key = productionKey(
+        tenantId,
+        run.productionId,
+        productionRunId,
+        ...upload.path.split('/'),
+      );
       if (outputPrefix === '') {
         outputPrefix = key.slice(0, key.lastIndexOf(upload.path) - 1);
       }
@@ -704,7 +713,5 @@ async function renderRedacted(
   // Without a real rasterizer implementation this path must not fabricate
   // output; deps.rasterizerAvailable() gates entry, and test doubles override
   // this hook via assembleImagePdf/validateNoTextLayer.
-  return deps.assembleImagePdf([
-    { image: Buffer.alloc(0), format: 'png' },
-  ]);
+  return deps.assembleImagePdf([{ image: Buffer.alloc(0), format: 'png' }]);
 }

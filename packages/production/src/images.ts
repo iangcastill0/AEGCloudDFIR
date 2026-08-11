@@ -14,7 +14,10 @@ const MM_PER_INCH = 25.4;
  * Convert a rasterized page image (PNG/JPEG buffer) to a single-page,
  * 1-bit CCITT Group 4 compressed TIFF — the standard litigation image format.
  */
-export async function toTiffG4(image: Buffer | Uint8Array, options: TiffG4Options = {}): Promise<Buffer> {
+export async function toTiffG4(
+  image: Buffer | Uint8Array,
+  options: TiffG4Options = {},
+): Promise<Buffer> {
   const dpi = options.dpi ?? 300;
   const threshold = options.threshold ?? 128;
   if (!Number.isFinite(dpi) || dpi <= 0) {
@@ -43,7 +46,10 @@ export interface JpegOptions {
 }
 
 /** Convert a rasterized page image to a flattened JPEG. */
-export async function toJpeg(image: Buffer | Uint8Array, options: JpegOptions = {}): Promise<Buffer> {
+export async function toJpeg(
+  image: Buffer | Uint8Array,
+  options: JpegOptions = {},
+): Promise<Buffer> {
   const quality = options.quality ?? 85;
   if (!Number.isInteger(quality) || quality < 1 || quality > 100) {
     throw new ProductionError(`quality must be an integer 1..100, got ${quality}`);

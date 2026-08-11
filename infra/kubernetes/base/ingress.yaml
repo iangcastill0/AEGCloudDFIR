@@ -4,8 +4,8 @@ metadata:
   name: evidencevault
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt # adjust to your issuer
-    nginx.ingress.kubernetes.io/proxy-body-size: "16m"
-    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: '16m'
+    nginx.ingress.kubernetes.io/force-ssl-redirect: 'true'
 spec:
   ingressClassName: nginx
   tls:

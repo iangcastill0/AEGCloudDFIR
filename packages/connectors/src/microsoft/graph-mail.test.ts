@@ -21,7 +21,10 @@ beforeEach(() => {
   server.reset();
 });
 
-function connector(mode: 'delegated' | 'organization' = 'delegated', onRateLimit?: RateLimitObserver) {
+function connector(
+  mode: 'delegated' | 'organization' = 'delegated',
+  onRateLimit?: RateLimitObserver,
+) {
   return new GraphEmailConnector({
     tokenProvider: new StaticTokenProvider('fake-token'),
     graphBaseUrl: `${server.url}/graph`,

@@ -21,7 +21,10 @@ test.describe('collection wizard → run → completeness (scenario 1)', () => {
     await page.getByRole('button', { name: /next/i }).click();
 
     // Step 2: account — the seeded fake connector
-    await page.getByText(/demo microsoft account/i).first().click();
+    await page
+      .getByText(/demo microsoft account/i)
+      .first()
+      .click();
     await page.getByRole('button', { name: /next/i }).click();
 
     // Step 3: source
@@ -55,15 +58,18 @@ test.describe('collection wizard → run → completeness (scenario 1)', () => {
   test('collection reaches a qualified completeness state with manifest', async ({ page }) => {
     test.setTimeout(240_000);
     await page.goto('/collections');
-    await page.getByRole('link', { name: /view|details/i }).first().click();
+    await page
+      .getByRole('link', { name: /view|details/i })
+      .first()
+      .click();
 
     // Poll the status page until a terminal state shows.
     const banner = page.locator('[data-completeness], [class*=completeness]').first();
     await expect
-      .poll(
-        async () => ((await banner.textContent().catch(() => '')) ?? '').toLowerCase(),
-        { timeout: 180_000, intervals: [3000] },
-      )
+      .poll(async () => ((await banner.textContent().catch(() => '')) ?? '').toLowerCase(), {
+        timeout: 180_000,
+        intervals: [3000],
+      })
       .toMatch(/complete_within_selected_api_scope|complete_with_exceptions|partial/);
 
     // Never an unqualified "complete" label.
