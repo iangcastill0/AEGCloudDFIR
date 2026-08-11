@@ -5,6 +5,7 @@ import { pino } from 'pino';
 import { BullMqEnqueuer } from './bullmq-enqueuer.js';
 import { buildWorkerContext } from './context.js';
 import { startHealthServer } from './health.js';
+import { WorkerMetrics } from './metrics.js';
 import { OutboxDispatcher } from './outbox/dispatcher.js';
 import { createWorkers } from './workers.js';
 
@@ -27,6 +28,19 @@ async function main(): Promise<void> {
   const workers = createWorkers(ctx, redis);
   log.info({ workerCount: workers.length }, 'queue workers started');
 
+  const metrics = new WorkerMetrics();
+  const metricsServer = metrics.serve(config.EV_METRICS_PORT);
+  const outboxSampler = setInterval(() => {
+    void prisma
+      .$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT set_config('app.worker', 'true', true)`;
+        return tx.outboxEvent.count({ where: { status: 'pending' } });
+      })
+      .then((n) => metrics.outboxPending.set(n))
+      .catch(() => undefined);
+  }, 15_000);
+  outboxSampler.unref();
+
   const abort = new AbortController();
   const health = startHealthServer(config.EV_API_PORT + 1000, {
     ready: async () => {
@@ -46,6 +60,8 @@ async function main(): Promise<void> {
   const shutdown = async (signal: string) => {
     log.info({ signal }, 'worker shutting down');
     abort.abort();
+    clearInterval(outboxSampler);
+    metricsServer.close();
     health.close();
     // Close queue workers BEFORE the connections they depend on.
     await Promise.all(workers.map((w) => w.close())).catch(() => undefined);
