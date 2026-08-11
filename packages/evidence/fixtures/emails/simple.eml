@@ -1,0 +1,18 @@
+Return-Path: <alice.sender@example.com>
+X-CusTom-TrAcE: keep-my-casing
+Message-ID: <simple-001@example.com>
+Date: Wed, 05 Aug 2026 10:30:00 +0530
+From: Alice Sender <Alice.Sender@example.com>
+To: Bob Recipient <bob.recipient@example.com>, carol@example.com
+Cc: Dave CC <dave.cc@example.com>
+Reply-To: replies@example.com
+Subject: Quarterly forecast follow-up
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Hi Bob,
+
+Please review the attached forecast before Friday.
+
+Thanks,
+Alice

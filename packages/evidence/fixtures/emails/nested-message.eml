@@ -1,0 +1,26 @@
+Message-ID: <outer-004@example.com>
+Date: Sat, 08 Aug 2026 08:00:00 +0000
+From: alice.sender@example.com
+To: bob.recipient@example.com
+Subject: Fwd: original request
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="FWD-BOUNDARY"
+
+--FWD-BOUNDARY
+Content-Type: text/plain; charset=utf-8
+
+Forwarding the original request below.
+--FWD-BOUNDARY
+Content-Type: message/rfc822
+Content-Disposition: attachment
+
+Message-ID: <inner-004@example.com>
+Date: Fri, 07 Aug 2026 07:00:00 +0000
+From: erin.original@example.com
+To: alice.sender@example.com
+Subject: original request
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Please send the signed contract.
+--FWD-BOUNDARY--

@@ -1,0 +1,30 @@
+Message-ID: <mixed-003@example.com>
+Date: Fri, 07 Aug 2026 14:15:00 +0000
+From: alice.sender@example.com
+To: bob.recipient@example.com
+Subject: Diagram and contract
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="MIXED-BOUNDARY"
+
+--MIXED-BOUNDARY
+Content-Type: multipart/related; boundary="REL-BOUNDARY"
+
+--REL-BOUNDARY
+Content-Type: text/html; charset=utf-8
+
+<html><body><p>See diagram:</p><img src="cid:diagram-1@example.com" alt="diagram"></body></html>
+--REL-BOUNDARY
+Content-Type: image/png
+Content-Transfer-Encoding: base64
+Content-ID: <diagram-1@example.com>
+Content-Disposition: inline; filename="diagram.png"
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==
+--REL-BOUNDARY--
+--MIXED-BOUNDARY
+Content-Type: application/pdf; name="contract.pdf"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="contract.pdf"
+
+JVBERi0xLjQKMSAwIG9iago8PD4+CmVuZG9iagp0cmFpbGVyCjw8Pj4KJSVFT0YK
+--MIXED-BOUNDARY--

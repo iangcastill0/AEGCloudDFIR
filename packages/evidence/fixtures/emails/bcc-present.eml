@@ -1,0 +1,10 @@
+Message-ID: <bcc-005@example.com>
+Date: Sun, 09 Aug 2026 12:00:00 +0000
+From: alice.sender@example.com
+To: bob.recipient@example.com
+Bcc: hidden.copy@example.com, second.hidden@example.com
+Subject: Confidential distribution
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+For your eyes only.

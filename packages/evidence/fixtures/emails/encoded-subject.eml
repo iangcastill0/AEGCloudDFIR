@@ -1,0 +1,9 @@
+Message-ID: <enc-006@example.com>
+Date: Mon, 10 Aug 2026 10:00:00 +0000
+From: =?UTF-8?Q?Fran=C3=A7ois_Tester?= <francois.tester@example.com>
+To: bob.recipient@example.com
+Subject: =?UTF-8?B?UsOpc3Vtw6kg4oCUIG5hw692ZSBjYWbDqQ==?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Body in plain ASCII.

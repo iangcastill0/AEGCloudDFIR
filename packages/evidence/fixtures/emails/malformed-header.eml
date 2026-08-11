@@ -1,0 +1,10 @@
+Message-ID: <bad-007@example.com>
+Date: Mon, 10 Aug 2026 11:00:00 +0000
+THISLINEHASNOCOLONATALL
+From: alice.sender@example.com
+To: bob.recipient@example.com
+Subject: Still parses
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Body survived the garbage header.

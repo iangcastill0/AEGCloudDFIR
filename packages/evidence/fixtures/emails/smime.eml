@@ -1,0 +1,11 @@
+Message-ID: <smime-009@example.com>
+Date: Mon, 10 Aug 2026 13:00:00 +0000
+From: alice.sender@example.com
+To: bob.recipient@example.com
+Subject: secured message
+MIME-Version: 1.0
+Content-Type: application/pkcs7-mime; smime-type=enveloped-data; name="smime.p7m"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="smime.p7m"
+
+bm90LXJlYWwtcGtjczctZGF0YS1mb3ItZml4dHVyZS1vbmx5
