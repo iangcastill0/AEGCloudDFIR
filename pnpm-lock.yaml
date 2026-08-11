@@ -14,9 +14,15 @@ importers:
       '@evidencevault/config':
         specifier: workspace:*
         version: link:packages/config
+      '@evidencevault/connectors':
+        specifier: workspace:*
+        version: link:packages/connectors
       '@evidencevault/database':
         specifier: workspace:*
         version: link:packages/database
+      '@evidencevault/evidence':
+        specifier: workspace:*
+        version: link:packages/evidence
       '@evidencevault/search':
         specifier: workspace:*
         version: link:packages/search
