@@ -4,7 +4,7 @@ import { buildAliasName, buildIndexName, EVIDENCE_MAPPING, MAPPING_VERSION } fro
 
 describe('index naming', () => {
   it('builds versioned index names and stable alias names', () => {
-    expect(MAPPING_VERSION).toBe(1);
+    expect(MAPPING_VERSION).toBe(2);
     expect(buildIndexName('ev', 1)).toBe('ev-evidence-v1');
     expect(buildIndexName('ev', 2)).toBe('ev-evidence-v2');
     expect(buildAliasName('ev')).toBe('ev-evidence');

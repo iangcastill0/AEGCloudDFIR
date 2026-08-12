@@ -76,13 +76,13 @@ describe('ensureIndex', () => {
     const client = mockClient();
     const result = await adapter(client).ensureIndex();
 
-    expect(result).toEqual({ created: true, indexName: 'test-evidence-v1' });
+    expect(result).toEqual({ created: true, indexName: 'test-evidence-v2' });
     expect(client.indices.create).toHaveBeenCalledTimes(1);
     const call = client.indices.create.mock.calls[0]?.[0] as {
       index: string;
       body: Record<string, unknown>;
     };
-    expect(call.index).toBe('test-evidence-v1');
+    expect(call.index).toBe('test-evidence-v2');
     expect(call.body['aliases']).toEqual({ 'test-evidence': {} });
     expect(call.body['mappings']).toBeDefined();
     expect(call.body['settings']).toBeDefined();
@@ -105,7 +105,7 @@ describe('ensureIndex', () => {
     expect(result.created).toBe(false);
     expect(client.indices.create).not.toHaveBeenCalled();
     expect(client.indices.updateAliases).toHaveBeenCalledWith({
-      body: { actions: [{ add: { index: 'test-evidence-v1', alias: 'test-evidence' } }] },
+      body: { actions: [{ add: { index: 'test-evidence-v2', alias: 'test-evidence' } }] },
     });
   });
 });
@@ -295,20 +295,20 @@ describe('reindexToNewVersion', () => {
       batches([doc('a'), doc('b')], [doc('c')]),
     );
 
-    expect(result).toEqual({ indexName: 'test-evidence-v2', count: 3 });
+    expect(result).toEqual({ indexName: 'test-evidence-v3', count: 3 });
     expect(client.indices.create).toHaveBeenCalledWith(
-      expect.objectContaining({ index: 'test-evidence-v2' }),
+      expect.objectContaining({ index: 'test-evidence-v3' }),
     );
 
     const firstBulk = client.bulk.mock.calls[0]?.[0]?.body as unknown[];
-    expect(firstBulk[0]).toEqual({ index: { _index: 'test-evidence-v2', _id: 'a' } });
+    expect(firstBulk[0]).toEqual({ index: { _index: 'test-evidence-v3', _id: 'a' } });
 
     expect(client.indices.updateAliases).toHaveBeenCalledTimes(1);
     expect(client.indices.updateAliases).toHaveBeenCalledWith({
       body: {
         actions: [
           { remove: { index: 'test-evidence-v1', alias: 'test-evidence' } },
-          { add: { index: 'test-evidence-v2', alias: 'test-evidence' } },
+          { add: { index: 'test-evidence-v3', alias: 'test-evidence' } },
         ],
       },
     });

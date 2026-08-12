@@ -3,7 +3,25 @@
  * This is the only document shape the search package indexes or returns.
  */
 
-export type EvidenceKind = 'email' | 'attachment' | 'file';
+export type EvidenceKind = 'email' | 'attachment' | 'file' | 'audit_record' | 'audit_batch';
+
+/** Structured fields for an audit-log event (contract §5 audit sources). */
+export interface EvidenceAuditFields {
+  /** o365_management_activity | graph_directory_audits | graph_signins | google_reports | google_vault */
+  system: string;
+  /** Exchange, SharePoint, AzureActiveDirectory, Teams, login, drive, admin, ... */
+  workload?: string;
+  operation?: string;
+  recordType?: string;
+  actorId?: string;
+  actorEmail?: string;
+  actorIp?: string;
+  targetId?: string;
+  targetType?: string;
+  resultStatus?: string;
+  /** Event time reported by the provider (ISO UTC). */
+  occurredAt?: string;
+}
 
 export interface EmailAddress {
   /** Display name, when present in the source. */
@@ -88,6 +106,8 @@ export interface EvidenceSearchDoc {
   folder?: string;
   dates: EvidenceDates;
   email?: EvidenceEmailFields;
+  /** Present for audit_record / audit_batch evidence. */
+  audit?: EvidenceAuditFields;
   /** All raw headers, searchable as key/value pairs. */
   headers?: RawHeader[];
   /** Normalized participant addresses and domains across all address fields. */

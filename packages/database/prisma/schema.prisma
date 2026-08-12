@@ -286,6 +286,7 @@ enum CollectionKind {
 enum CollectionSource {
   email
   drive
+  audit
 }
 
 enum CollectionStatus {
@@ -549,6 +550,7 @@ model EvidenceItem {
   childRelationships  EvidenceRelationship[] @relation("childItem")
   productionItems     ProductionItem[]
   exportItems         ExportItem[]
+  auditRecords        AuditRecord[]
 
   @@index([tenantId])
   @@index([tenantId, sha256])
@@ -563,6 +565,8 @@ enum EvidenceKind {
   file
   folder_metadata
   container
+  audit_record
+  audit_batch
 }
 
 enum ProcessingStatus {
@@ -739,6 +743,60 @@ model DriveMetadata {
 
   @@index([tenantId])
   @@map("drive_metadata")
+}
+
+/// Which upstream audit system a record/batch came from.
+enum AuditSystem {
+  o365_management_activity
+  graph_directory_audits
+  graph_signins
+  google_reports
+  google_vault
+}
+
+/// A single parsed audit-log event. The immutable native is the raw provider
+/// content blob / activity page preserved as an EvidenceItem (kind
+/// audit_batch); each contained event becomes one AuditRecord pointing back to
+/// that batch, so originals stay byte-preserved while events are searchable.
+model AuditRecord {
+  id               String      @id @default(uuid()) @db.Uuid
+  tenantId         String      @db.Uuid
+  /// The preserved raw batch/native this record was parsed from.
+  evidenceItemId   String      @db.Uuid
+  collectionId     String?     @db.Uuid
+  provider         Provider
+  system           AuditSystem
+  /// Provider's stable id for the event (Management API Id / signIn id /
+  /// Reports etag/uniqueQualifier / Vault export id). Enables idempotent dedup.
+  providerRecordId String
+  /// Workload (Exchange, SharePoint, AzureActiveDirectory, Teams...) or the
+  /// Google application name (login, drive, admin, token, ...).
+  workload         String      @default("")
+  operation        String      @default("")
+  /// Provider record type / event name.
+  recordType       String      @default("")
+  actorId          String      @default("")
+  actorEmail       String      @default("")
+  actorIp          String      @default("")
+  /// Object/target the action was performed on, when present.
+  targetId         String      @default("")
+  targetType       String      @default("")
+  resultStatus     String      @default("")
+  /// Event time as reported by the provider (UTC).
+  occurredAt       DateTime?
+  /// Full raw event JSON exactly as returned (searchable, never mutated).
+  raw              Json        @default("{}")
+  createdAt        DateTime    @default(now())
+
+  evidenceItem EvidenceItem @relation(fields: [evidenceItemId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, system, providerRecordId])
+  @@index([tenantId])
+  @@index([tenantId, occurredAt])
+  @@index([tenantId, actorEmail])
+  @@index([tenantId, operation])
+  @@index([evidenceItemId])
+  @@map("audit_records")
 }
 
 // ---------------------------------------------------------------------------

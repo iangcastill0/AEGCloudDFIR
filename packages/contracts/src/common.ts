@@ -28,7 +28,17 @@ export type Completeness = z.infer<typeof completeness>;
 
 export const provider = z.enum(['microsoft', 'google']);
 export const connectionMode = z.enum(['delegated', 'organization']);
-export const collectionSource = z.enum(['email', 'drive']);
+export const collectionSource = z.enum(['email', 'drive', 'audit']);
+
+/** Upstream audit systems EvidenceVault can collect from. */
+export const auditSystem = z.enum([
+  'o365_management_activity',
+  'graph_directory_audits',
+  'graph_signins',
+  'google_reports',
+  'google_vault',
+]);
+export type AuditSystem = z.infer<typeof auditSystem>;
 
 export const tenantRole = z.enum([
   'org_admin',
@@ -64,4 +74,6 @@ export const TRUTHFULNESS_NOTICES = {
     'Encrypted, rights-managed, corrupt, unavailable, deleted-before-acquisition, or unsupported content can produce exceptions. Exceptions are listed in the collection’s exception ledger and manifests.',
   defensibility:
     'Hashes, manifests, and chain-of-custody records support defensibility but do not by themselves guarantee legal admissibility or regulatory compliance. Consult qualified counsel.',
+  auditScope:
+    'Audit logs are constrained by the provider’s retention window (e.g. Purview Audit Standard ~180 days, Google Workspace reports ~180 days) and the enabled audit configuration at the time events occurred. Events outside the retained window, or not captured because auditing was disabled, cannot be collected and are reported as scope limitations.',
 } as const;

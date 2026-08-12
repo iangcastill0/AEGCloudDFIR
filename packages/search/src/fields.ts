@@ -81,6 +81,16 @@ const FIELD_DEFS: Record<string, FieldDef> = {
   modified: { esPath: 'dates.modified', type: 'date' },
   acquired: { esPath: 'dates.acquired', type: 'date' },
   date: { esPath: 'dates.primary', type: 'date' },
+  // --- audit-log fields ---
+  auditsystem: { esPath: 'audit.system', type: 'keyword' },
+  workload: { esPath: 'audit.workload', type: 'keyword' },
+  operation: { esPath: 'audit.operation', type: 'keyword' },
+  recordtype: { esPath: 'audit.recordType', type: 'keyword' },
+  actor: { esPath: 'audit.actorEmail', type: 'keyword' },
+  actorip: { esPath: 'audit.actorIp', type: 'keyword' },
+  auditresult: { esPath: 'audit.resultStatus', type: 'keyword' },
+  audittarget: { esPath: 'audit.targetId', type: 'keyword' },
+  occurred: { esPath: 'audit.occurredAt', type: 'date' },
 };
 
 /** Fields whose values are content hashes and must be normalized/validated. */

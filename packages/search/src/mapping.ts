@@ -6,7 +6,8 @@
  * atomically to a new version.
  */
 
-export const MAPPING_VERSION = 1;
+// v2 adds the audit.* field group (dynamic:strict requires a new index).
+export const MAPPING_VERSION = 2;
 
 export function buildIndexName(prefix: string, version: number): string {
   return `${prefix}-evidence-v${version}`;
@@ -119,6 +120,21 @@ export const EVIDENCE_MAPPING = {
           bcc: addressObject,
           replyTo: addressObject,
           bccPresent: boolField,
+        },
+      },
+      audit: {
+        properties: {
+          system: keywordLower,
+          workload: keywordLower,
+          operation: keywordLower,
+          recordType: keywordLower,
+          actorId: keywordLower,
+          actorEmail: keywordLower,
+          actorIp: keyword,
+          targetId: keyword,
+          targetType: keywordLower,
+          resultStatus: keywordLower,
+          occurredAt: dateField,
         },
       },
       headers: {

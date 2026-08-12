@@ -43,6 +43,58 @@ export const collectionScope = z.object({
       includeTrashed: z.boolean().default(false),
     })
     .optional(),
+  /**
+   * Audit-log scope. Audit logs are tenant/org-wide, not per-custodian; an
+   * optional actor filter narrows to specific principals when the provider
+   * supports it. A date range is strongly recommended (providers cap history
+   * retention — Purview Audit Standard ~180 days, Google Reports ~180 days).
+   */
+  audit: z
+    .object({
+      microsoft: z
+        .object({
+          /** Office 365 Management Activity API content types. */
+          managementContentTypes: z
+            .array(
+              z.enum([
+                'Audit.Exchange',
+                'Audit.SharePoint',
+                'Audit.AzureActiveDirectory',
+                'Audit.General',
+                'DLP.All',
+              ]),
+            )
+            .default([]),
+          includeGraphSignins: z.boolean().default(false),
+          includeGraphDirectoryAudits: z.boolean().default(false),
+        })
+        .optional(),
+      google: z
+        .object({
+          /** Admin SDK Reports API application names. */
+          reportApplications: z
+            .array(
+              z.enum([
+                'login',
+                'drive',
+                'admin',
+                'token',
+                'mobile',
+                'user_accounts',
+                'groups',
+                'saml',
+              ]),
+            )
+            .default([]),
+          includeVault: z.boolean().default(false),
+          /** Specific Vault matter ids to enumerate exports from (empty = all accessible). */
+          vaultMatterIds: z.array(z.string()).default([]),
+        })
+        .optional(),
+      /** Restrict to specific actor principals (UPN/email) when supported. */
+      actorFilter: z.array(z.string()).default([]),
+    })
+    .optional(),
 });
 export type CollectionScope = z.infer<typeof collectionScope>;
 
