@@ -247,3 +247,33 @@ ediscovery.readonly); a live audit E2E over the fake provider requires config
 overrides for the manage.office.com / admin.googleapis.com / vault.googleapis.com
 base URLs (config keys are a follow-up — the connectors already accept
 injected base URLs and are fixture-tested).
+
+## Addendum — full rebrand to AEG-CloudDFIR
+
+The product was renamed from the original working title to **AEG-CloudDFIR**
+(Cloud Digital Forensics & Incident Response), and the old name was scrubbed
+from every brand token in the codebase and running stack. The English word
+"evidence" is retained where it is the domain noun (e.g. `EvidenceItem`,
+`/api/v1/evidence`, the evidence store) — that is not the brand.
+
+**Scrubbed:** display name; npm scope (`@aeg-clouddfir/*`); env-var prefix
+(`CDFIR_*`); database name + roles (`cdfir`, `cdfir_migrator`); OIDC client
+id / issuer path / Authentik slug (`cdfir`); OpenSearch index prefix
+(`cdfir`); S3 buckets (`cdfir-evidence`, `cdfir-quarantine`); CSS class prefix
+(`cdfir-`); cookies (`cdfir_session`/`cdfir_csrf`/`cdfir_authflow`); Prometheus
+metrics (`cdfir_*`); request props; example groups; and a sanitized test
+fixture's text. A repo-wide grep for the old tokens returns zero matches
+(outside `node_modules`/lockfile history).
+
+**Verification after rebrand:**
+
+| Gate                                                                                                                         | Result           |
+| ---------------------------------------------------------------------------------------------------------------------------- | ---------------- |
+| `pnpm build` / `lint` / `typecheck`                                                                                          | PASS (all tasks) |
+| Unit tests                                                                                                                   | **834 passing**  |
+| Live stack re-provisioned (new DB `cdfir` + roles, migrations, MinIO buckets, Authentik OIDC ids, index `cdfir-evidence-v2`) | OK               |
+| Playwright E2E (scenarios 1, 2, 3, 6, 7 + accessibility)                                                                     | **25 passing**   |
+| Repo-wide residual old-name tokens                                                                                           | **0**            |
+
+The former `evidencevault` database, roles, and OpenSearch indices were
+dropped.
