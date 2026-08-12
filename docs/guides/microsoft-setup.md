@@ -1,11 +1,11 @@
 # Microsoft Entra setup guide
 
-Two independent modes. Both are **read-only**: EvidenceVault never requests
+Two independent modes. Both are **read-only**: AEG-CloudDFIR never requests
 write or send permissions.
 
 ## A. Delegated mode (personal + work/school accounts)
 
-Registers EvidenceVault's own multi-tenant app; each user consents for their
+Registers AEG-CloudDFIR's own multi-tenant app; each user consents for their
 own mailbox/OneDrive. **Delegated access collects only what that signed-in
 identity can see — it does not make other tenant users selectable**, and the
 UI states this on the custodian step.
@@ -24,13 +24,13 @@ UI states this on the custodian step.
    - `Files.Read` (OneDrive; `Files.Read.All` only if shared content is needed)
      No admin consent is required for these delegated read scopes in most
      tenants; individual tenants may require admin approval by policy.
-4. Configure EvidenceVault:
+4. Configure AEG-CloudDFIR:
    ```
    EV_MS_CLIENT_ID=<application (client) id>
    EV_MS_CLIENT_SECRET=<secret>
    ```
 
-Token behavior: Microsoft rotates refresh tokens; EvidenceVault persists the
+Token behavior: Microsoft rotates refresh tokens; AEG-CloudDFIR persists the
 rotated token (re-encrypted) on every refresh. Revoking the app from
 `https://myaccount.microsoft.com` → _App permissions_ invalidates collection
 until reconnected.
@@ -38,7 +38,7 @@ until reconnected.
 ## B. Organization mode (application permissions + admin consent)
 
 For org-wide collection, a **tenant admin** of the _target_ organization
-consents to application permissions. EvidenceVault then enumerates users and
+consents to application permissions. AEG-CloudDFIR then enumerates users and
 collects selected custodians without per-user sign-in.
 
 1. Use the same app registration (or a dedicated single-tenant one supplied by
@@ -47,7 +47,7 @@ collects selected custodians without per-user sign-in.
    - `User.Read.All` (custodian enumeration)
    - `Mail.Read` (all-mailbox read)
    - `Files.Read.All` (OneDrive read)
-3. In EvidenceVault: Connectors → Microsoft → _Organization mode_ → enter the
+3. In AEG-CloudDFIR: Connectors → Microsoft → _Organization mode_ → enter the
    Entra tenant ID → open the generated admin-consent URL
    (`https://login.microsoftonline.com/{tenant}/adminconsent?...`) as a Global
    Administrator and approve.
@@ -69,7 +69,7 @@ ev-collection-scope@contoso.com -AccessRight RestrictAccess`.
   `Files.Read.All`; where site-level scoping is required, grant
   `Sites.Selected` instead and accept that only granted sites are readable.
 
-EvidenceVault honors the resulting 403s as **permission_denied exceptions** in
+AEG-CloudDFIR honors the resulting 403s as **permission_denied exceptions** in
 the collection's exception ledger — it never tries to bypass tenant-side
 scoping, and the completeness state reflects them.
 
@@ -80,7 +80,7 @@ permissions and tenant admin consent, never per-custodian delegated access. A
 delegated-only connector cannot collect audit logs; the connector must be in
 **Organization mode** (section B above).
 
-EvidenceVault collects Microsoft audit events from two upstream systems:
+AEG-CloudDFIR collects Microsoft audit events from two upstream systems:
 
 - **`o365_management_activity`** — the Office 365 Management Activity API, for
   unified audit content types: `Audit.Exchange`, `Audit.SharePoint`,

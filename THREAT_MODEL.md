@@ -1,6 +1,6 @@
-# THREAT MODEL — EvidenceVault
+# THREAT MODEL — AEG-CloudDFIR
 
-Scope: the EvidenceVault application (web, api, worker), its data stores
+Scope: the AEG-CloudDFIR application (web, api, worker), its data stores
 (PostgreSQL, OpenSearch, Redis, S3/Wasabi), its identity dependencies
 (Authentik, Microsoft identity platform, Google OAuth), and the evidence
 lifecycle from acquisition to production. Methodology: STRIDE per component +
@@ -27,7 +27,7 @@ abuse cases specific to eDiscovery.
 3. Worker ↔ provider APIs (egress to internet)
 4. Worker ↔ hostile file content (parsers, OCR, office conversion)
 5. Platform operator ↔ tenant data
-6. EvidenceVault ↔ Authentik
+6. AEG-CloudDFIR ↔ Authentik
 
 ## Threats and mitigations
 

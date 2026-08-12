@@ -1,6 +1,6 @@
 # VERIFICATION
 
-This document records the exact commands run to verify EvidenceVault, their
+This document records the exact commands run to verify AEG-CloudDFIR, their
 results, the environment they ran in, residual risks, and the features that
 could not be fully completed. It reflects the state at commit `c5a283a`.
 

@@ -18,7 +18,7 @@ const SHA_B = 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9'
 function baseInput(): BuildManifestInput {
   return {
     application: {
-      name: 'EvidenceVault',
+      name: 'AEG-CloudDFIR',
       version: '0.1.0',
       parserVersions: { msg: '1.2.0', mbox: '0.9.1' },
     },

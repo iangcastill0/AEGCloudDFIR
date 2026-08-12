@@ -30,7 +30,7 @@ export const provider = z.enum(['microsoft', 'google']);
 export const connectionMode = z.enum(['delegated', 'organization']);
 export const collectionSource = z.enum(['email', 'drive', 'audit']);
 
-/** Upstream audit systems EvidenceVault can collect from. */
+/** Upstream audit systems AEG-CloudDFIR can collect from. */
 export const auditSystem = z.enum([
   'o365_management_activity',
   'graph_directory_audits',

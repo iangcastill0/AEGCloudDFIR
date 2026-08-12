@@ -1,5 +1,5 @@
 /**
- * Tokenizer for the EvidenceVault query language.
+ * Tokenizer for the AEG-CloudDFIR query language.
  *
  * The raw user string is only ever consumed here — downstream stages operate
  * on tokens/AST, never on the raw string, so nothing user-provided is ever

@@ -1,5 +1,5 @@
 /**
- * Typed fetch wrapper for the EvidenceVault API (separate origin).
+ * Typed fetch wrapper for the AEG-CloudDFIR API (separate origin).
  * - credentials: 'include' on every call
  * - double-submit CSRF header on mutating methods (bootstraps /auth/csrf)
  * - error-envelope parsing into ApiError
@@ -17,7 +17,7 @@ export const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:400
 
 /**
  * Base URL of the Authentik instance (the identity provider). Its own admin
- * console lives here; EvidenceVault links out to it rather than embedding it
+ * console lives here; AEG-CloudDFIR links out to it rather than embedding it
  * (Authentik denies iframing by default).
  */
 export const AUTHENTIK_URL = (

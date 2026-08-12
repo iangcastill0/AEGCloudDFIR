@@ -1,4 +1,4 @@
-# EvidenceVault full local development stack.
+# AEG-CloudDFIR full local development stack.
 #   docker compose -f infra/compose/docker-compose.yml up -d
 # Credentials below are LOCAL-ONLY defaults; production deployments must
 # override every one of them (see .env.example and docs/guides/).

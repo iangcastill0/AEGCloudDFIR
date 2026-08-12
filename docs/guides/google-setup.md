@@ -14,7 +14,7 @@ Two independent modes, both read-only.
 4. Credentials → OAuth client ID → Web application:
    - Authorized redirect URI: `EV_API_PUBLIC_URL + EV_GOOGLE_REDIRECT_PATH`
      (default `https://api.<your-domain>/api/v1/connectors/callback/google`).
-5. Configure EvidenceVault:
+5. Configure AEG-CloudDFIR:
    ```
    EV_GOOGLE_CLIENT_ID=<client id>
    EV_GOOGLE_CLIENT_SECRET=<client secret>
@@ -37,7 +37,7 @@ A Workspace **super administrator** performs steps 2–3.
 
 1. In the Cloud project: IAM & Admin → Service accounts → create
    `evidencevault-collector`. Create a JSON key. **Handle it like a domain
-   master key.** You will paste it into EvidenceVault once; it is envelope-
+   master key.** You will paste it into AEG-CloudDFIR once; it is envelope-
    encrypted immediately and never displayed again.
 2. Google Admin console → Security → Access and data control → API controls →
    **Domain-wide delegation** → Add new:
@@ -49,9 +49,9 @@ A Workspace **super administrator** performs steps 2–3.
      https://www.googleapis.com/auth/admin.directory.user.readonly
      ```
 3. Decide which domain(s) may be impersonated.
-4. In EvidenceVault: Connectors → Google → _Organization mode_ → paste the
+4. In AEG-CloudDFIR: Connectors → Google → _Organization mode_ → paste the
    JSON key, the allowed domain list, and an admin email (used only for
-   directory enumeration). EvidenceVault refuses to impersonate any address
+   directory enumeration). AEG-CloudDFIR refuses to impersonate any address
    outside the allowed domains (`DomainNotAllowedError`), and only custodians
    you explicitly select are ever impersonated.
 
@@ -63,7 +63,7 @@ A Workspace **super administrator** performs steps 2–3.
   manifests, exports, and the UI.
 - `files.export` caps exports around 10 MB per format; larger Google-native
   files are recorded as exceptions.
-- Gmail history checkpoints can expire; EvidenceVault then runs a
+- Gmail history checkpoints can expire; AEG-CloudDFIR then runs a
   reconciliation scan and records an `expired_checkpoint` exception — visible
   in the collection report.
 
@@ -74,7 +74,7 @@ delegation, never per-custodian delegated OAuth. A delegated-only connector
 cannot collect audit logs; the connector must be in **Organization mode**
 (section B above).
 
-EvidenceVault collects Google audit events from two upstream systems:
+AEG-CloudDFIR collects Google audit events from two upstream systems:
 
 - **`google_reports`** — the Admin SDK Reports API, covering the activity
   applications: login, drive, admin, token, mobile, user_accounts, groups, and
@@ -116,5 +116,5 @@ the matter/export inventory only; the exported content itself is not retrieved.
 ### Revocation
 
 Remove the domain-wide delegation entry (Admin console) and delete/disable the
-service-account key (Cloud console). In EvidenceVault, _Revoke_ on the
+service-account key (Cloud console). In AEG-CloudDFIR, _Revoke_ on the
 connector deletes the stored encrypted key material and is audited.

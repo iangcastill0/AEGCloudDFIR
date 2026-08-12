@@ -584,7 +584,7 @@ async function runNativeExport(
       .map((e) => [e.evidenceItemId, e.archivePath, e.error].map((v) => csvEscape(v)).join(',')),
   ];
   const readme = [
-    'EvidenceVault native export',
+    'AEG-CloudDFIR native export',
     '===========================',
     '',
     'Verification:',

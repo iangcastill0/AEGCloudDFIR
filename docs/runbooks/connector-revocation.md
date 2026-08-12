@@ -1,6 +1,6 @@
 # Runbook: connector revocation (offboarding a source)
 
-1. EvidenceVault: Connectors → Revoke. Effects: status `revoked`, encrypted
+1. AEG-CloudDFIR: Connectors → Revoke. Effects: status `revoked`, encrypted
    refresh-token/service-account rows deleted, audited (`connector.revoked`).
    Evidence already preserved is unaffected.
 2. Provider side (belt and braces):

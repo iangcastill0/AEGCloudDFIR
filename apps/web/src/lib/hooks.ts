@@ -1,5 +1,5 @@
 'use client';
-/** React Query hooks for the EvidenceVault API. */
+/** React Query hooks for the AEG-CloudDFIR API. */
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import {
   collectionStatusResponse,

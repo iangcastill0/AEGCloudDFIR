@@ -1,4 +1,4 @@
-# EvidenceVault
+# AEG-CloudDFIR
 
 Self-hostable, multi-tenant eDiscovery platform: **collect, preserve, index,
 review, tag, export, and produce** email and cloud-drive evidence from

@@ -1,13 +1,13 @@
-# Authentik blueprint: EvidenceVault OIDC application.
+# Authentik blueprint: AEG-CloudDFIR OIDC application.
 # Mounted at /blueprints/custom in the compose stack; Authentik applies it on
 # startup. The client secret is read from the AUTHENTIK bootstrap env var
 # EV_OIDC_CLIENT_SECRET_BOOTSTRAP if set, else generate one in the UI and copy
-# it into EvidenceVault's EV_OIDC_CLIENT_SECRET.
+# it into AEG-CloudDFIR's EV_OIDC_CLIENT_SECRET.
 version: 1
 metadata:
   name: evidencevault
   labels:
-    blueprints.goauthentik.io/description: 'EvidenceVault OIDC provider + application'
+    blueprints.goauthentik.io/description: 'AEG-CloudDFIR OIDC provider + application'
 entries:
   - model: authentik_providers_oauth2.oauth2provider
     identifiers:
@@ -28,7 +28,7 @@ entries:
       access_code_validity: minutes=1
       access_token_validity: minutes=10
       refresh_token_validity: days=1
-      sub_mode: hashed_user_id # stable pairwise-ish sub; EvidenceVault keys on (issuer, sub)
+      sub_mode: hashed_user_id # stable pairwise-ish sub; AEG-CloudDFIR keys on (issuer, sub)
       include_claims_in_id_token: true
       property_mappings:
         - !Find [
@@ -47,7 +47,7 @@ entries:
     identifiers:
       slug: evidencevault
     attrs:
-      name: EvidenceVault
+      name: AEG-CloudDFIR
       slug: evidencevault
       provider: !KeyOf evidencevault
       policy_engine_mode: any

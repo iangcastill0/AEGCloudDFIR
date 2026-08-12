@@ -1,6 +1,6 @@
 # ASSUMPTIONS
 
-This document records the assumptions under which EvidenceVault is designed and
+This document records the assumptions under which AEG-CloudDFIR is designed and
 built. Anything listed here that turns out to be false should be revisited
 before relying on the affected behavior.
 
@@ -22,14 +22,14 @@ before relying on the affected behavior.
 
 ## Identity and authentication
 
-4. **Authentik is the only login IdP.** EvidenceVault is an OIDC relying party
+4. **Authentik is the only login IdP.** AEG-CloudDFIR is an OIDC relying party
    using authorization-code + PKCE. Local passwords are never stored. MFA
-   policy is enforced inside Authentik, not in EvidenceVault.
+   policy is enforced inside Authentik, not in AEG-CloudDFIR.
 5. **OIDC `sub` is stable per user per Authentik instance.** User rows key on
    `(issuer, sub)`. Email is informational and may change.
 6. **Group-to-role mapping is optional.** When enabled, the configured group
    claim is authoritative on each login; when disabled, roles are managed in
-   EvidenceVault by `org_admin`s.
+   AEG-CloudDFIR by `org_admin`s.
 
 ## Provider access
 
@@ -41,11 +41,11 @@ before relying on the affected behavior.
    `Files.Read.All`, `User.Read.All` or narrower via RBAC for Applications /
    application access policies), and complete admin consent. Scoping mailboxes
    is done with Microsoft-supported controls (application access policies /
-   RBAC for Applications); EvidenceVault documents this and honors resulting
+   RBAC for Applications); AEG-CloudDFIR documents this and honors resulting
    403s as exceptions rather than trying to bypass them.
 9. **Google organization mode** assumes a Workspace super admin can create a
    service account, enable domain-wide delegation for the exact scopes listed
-   in the setup guide, and restrict it via Google admin controls. EvidenceVault
+   in the setup guide, and restrict it via Google admin controls. AEG-CloudDFIR
    validates the configured domain allowlist before impersonating anyone.
 10. **Provider APIs are eventually consistent and rate limited.** Collections
     therefore report completeness _relative to what the API returned_, never

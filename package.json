@@ -2,7 +2,7 @@
   "name": "evidencevault",
   "version": "0.1.0",
   "private": true,
-  "description": "EvidenceVault — self-hostable multi-provider email and drive forensic archive and eDiscovery production platform",
+  "description": "AEG-CloudDFIR — self-hostable multi-provider email and drive forensic archive and eDiscovery production platform",
   "license": "Apache-2.0",
   "engines": {
     "node": ">=22.0.0",

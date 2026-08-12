@@ -1,4 +1,4 @@
-# EvidenceVault architecture
+# AEG-CloudDFIR architecture
 
 See `docs/adr/` for the decision records behind each choice.
 
@@ -9,7 +9,7 @@ flowchart LR
     subgraph Client
       B[Browser - Next.js web]
     end
-    subgraph EvidenceVault
+    subgraph AEG-CloudDFIR
       API[api - NestJS/Fastify\nOIDC BFF + REST]
       W[worker - BullMQ processors\ncollection/processing/export/production]
       PG[(PostgreSQL 16\ntruth + RLS + audit chain + outbox)]

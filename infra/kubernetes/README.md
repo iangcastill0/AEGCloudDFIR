@@ -1,6 +1,6 @@
 # Kubernetes deployment
 
-Kustomize base for the three EvidenceVault services. Stateful dependencies
+Kustomize base for the three AEG-CloudDFIR services. Stateful dependencies
 (PostgreSQL 16, Redis 7, OpenSearch 2.x, Authentik, ClamAV, Tika) are expected
 to be provisioned separately — managed services or your own operators — and
 wired in through the `evidencevault-config` / `evidencevault-secrets`

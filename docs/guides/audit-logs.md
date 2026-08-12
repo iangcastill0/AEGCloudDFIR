@@ -1,6 +1,6 @@
 # Audit log collection
 
-EvidenceVault can collect provider **audit logs** alongside email and drive
+AEG-CloudDFIR can collect provider **audit logs** alongside email and drive
 evidence. Audit collection is **organization-scoped only**: it uses application
 permissions (Microsoft) or domain-wide delegation (Google), never per-custodian
 delegated access. A delegated-only connector cannot collect audit logs — the
@@ -10,7 +10,7 @@ guides; this page summarizes the sources and their honest limitations.
 
 ## Sources
 
-EvidenceVault records the upstream system for every audit event. The enum
+AEG-CloudDFIR records the upstream system for every audit event. The enum
 values are:
 
 | Source                     | Provider  | Captures                                                                                                              | Permission / scope                                                       |
@@ -25,7 +25,7 @@ values are:
 
 Audit logs describe org-wide activity and are exposed by providers only through
 app-level permissions (Microsoft admin consent) or domain-wide delegation
-(Google super-admin grant). EvidenceVault will not attempt audit collection on a
+(Google super-admin grant). AEG-CloudDFIR will not attempt audit collection on a
 delegated-only connector.
 
 - **Microsoft** — enable the Unified Audit Log / Purview in the tenant, grant

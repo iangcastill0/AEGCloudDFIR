@@ -1,4 +1,4 @@
--- Database role bootstrap for EvidenceVault.
+-- Database role bootstrap for AEG-CloudDFIR.
 -- Executed once per environment by an operator (or the compose init script).
 -- Passwords here are placeholders substituted by the deployment tooling via
 -- psql -v; NEVER ship literal production passwords in files.

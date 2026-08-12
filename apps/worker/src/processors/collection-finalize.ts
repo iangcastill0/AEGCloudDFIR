@@ -218,7 +218,7 @@ export async function processCollectionFinalize(
 
   const manifestInput: BuildManifestInput = {
     application: {
-      name: 'EvidenceVault',
+      name: 'AEG-CloudDFIR',
       version: ctx.config.EV_APP_VERSION,
       parserVersions: {},
     },

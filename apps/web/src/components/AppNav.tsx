@@ -44,7 +44,7 @@ export function AppNav() {
   return (
     <header className="app-header">
       <Link href="/" className="app-header__brand">
-        EvidenceVault
+        AEG-CloudDFIR
       </Link>
       <nav className="app-nav" aria-label="Primary">
         <ul>

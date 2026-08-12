@@ -6,7 +6,7 @@ import { Providers } from '@/components/Providers';
 import { AppNav } from '@/components/AppNav';
 
 export const metadata: Metadata = {
-  title: { default: 'EvidenceVault', template: '%s — EvidenceVault' },
+  title: { default: 'AEG-CloudDFIR', template: '%s — AEG-CloudDFIR' },
   description: 'Multi-provider forensic archive and eDiscovery review workspace',
 };
 

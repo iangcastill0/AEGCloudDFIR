@@ -1,6 +1,6 @@
 # Wasabi setup guide
 
-EvidenceVault stores all evidence binaries in S3-compatible object storage.
+AEG-CloudDFIR stores all evidence binaries in S3-compatible object storage.
 This guide configures Wasabi for production; MinIO is used locally with the
 same code path.
 
@@ -25,7 +25,7 @@ EV_S3_FORCE_PATH_STYLE=false
 
 Immutability layers, weakest to strongest:
 
-1. Application discipline: EvidenceVault never overwrites/deletes under
+1. Application discipline: AEG-CloudDFIR never overwrites/deletes under
    `originals/` outside the governed deletion workflow.
 2. IAM policy: deny `s3:DeleteObject`/`s3:PutObject` on existing original keys
    for the application credential (see policy below).
@@ -35,13 +35,13 @@ Immutability layers, weakest to strongest:
    configure a default retention mode/duration appropriate to your matters
    (compliance mode cannot be shortened, even by root — decide with counsel).
 
-EvidenceVault **detects and reports** the actual bucket state (versioning +
+AEG-CloudDFIR **detects and reports** the actual bucket state (versioning +
 Object Lock) on the admin screen and in collection manifests. It never claims
 WORM immutability unless both are actually enabled.
 
 ## 3. Credentials and least-privilege policy
 
-Create a dedicated sub-user + access key for EvidenceVault. Example policy:
+Create a dedicated sub-user + access key for AEG-CloudDFIR. Example policy:
 
 ```json
 {
@@ -104,13 +104,13 @@ web origin:
   days (staging objects are deleted on promote; this catches crashes).
 - Do **not** add expiry lifecycle rules to `originals/`, `manifests/`, or
   `productions/`; retention is governed by tenant policy + legal holds inside
-  EvidenceVault.
+  AEG-CloudDFIR.
 - Abort incomplete multipart uploads after 7 days.
 
 ## 6. Verification checklist
 
 1. `aws s3api get-bucket-versioning --bucket ev-evidence --endpoint-url $EV_S3_ENDPOINT` → `Enabled`
 2. `aws s3api get-object-lock-configuration --bucket ev-evidence --endpoint-url $EV_S3_ENDPOINT` → your mode
-3. In EvidenceVault: Admin → Storage shows “versioning enabled / Object Lock enabled (mode)”.
+3. In AEG-CloudDFIR: Admin → Storage shows “versioning enabled / Object Lock enabled (mode)”.
 4. Upload+promote a demo item, then attempt `aws s3api delete-object` on its
    original key with the app credential → `AccessDenied`.

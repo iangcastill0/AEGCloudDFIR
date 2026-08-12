@@ -15,7 +15,7 @@ async function main(): Promise<void> {
 
   const server = await startFakeProviderServer(fixtures, 4010);
   console.log(`[demo] fake provider server listening at ${server.url}`);
-  console.log('[demo] point EvidenceVault at it via .env:');
+  console.log('[demo] point AEG-CloudDFIR at it via .env:');
   console.log(`  EV_DEMO_MODE=true`);
   console.log(`  EV_MS_GRAPH_BASE_URL=${server.url}/graph`);
   console.log(`  EV_MS_LOGIN_BASE_URL=${server.url}`);

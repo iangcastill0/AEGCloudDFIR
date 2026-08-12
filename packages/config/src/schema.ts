@@ -10,7 +10,7 @@ const booleanString = (def: 'true' | 'false') =>
 const port = z.coerce.number().int().min(1).max(65535);
 
 /**
- * Complete environment schema for every EvidenceVault service.
+ * Complete environment schema for every AEG-CloudDFIR service.
  * Services validate at startup and crash fast with a readable report;
  * secrets are never echoed back in validation errors (values are elided).
  */
@@ -76,7 +76,7 @@ export const configSchema = z.object({
   EV_KEK_LOCAL_MASTER_KEY: z.string().min(1),
   EV_KEK_ACTIVE_KEY_ID: z.string().default('kek-1'),
 
-  // --- Provider OAuth apps (EvidenceVault's own registrations) ---
+  // --- Provider OAuth apps (AEG-CloudDFIR's own registrations) ---
   EV_MS_CLIENT_ID: z.string().default(''),
   EV_MS_CLIENT_SECRET: z.string().default(''),
   EV_MS_REDIRECT_PATH: z.string().default('/api/v1/connectors/callback/microsoft'),

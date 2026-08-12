@@ -1,6 +1,6 @@
-# IMPLEMENTATION PLAN — EvidenceVault
+# IMPLEMENTATION PLAN — AEG-CloudDFIR
 
-EvidenceVault is a self-hostable, multi-tenant eDiscovery platform that
+AEG-CloudDFIR is a self-hostable, multi-tenant eDiscovery platform that
 collects, preserves, indexes, reviews, tags, exports, and produces email and
 cloud-drive evidence from Microsoft 365 / Outlook / OneDrive and
 Google Workspace / Gmail / Drive, with Authentik OIDC login and Wasabi/S3

@@ -1,7 +1,7 @@
 import { KeyValidationError } from './errors.js';
 
 /**
- * Pure object-key builders for the EvidenceVault S3 layout.
+ * Pure object-key builders for the AEG-CloudDFIR S3 layout.
  *
  * Key layout contract:
  *   staging     tenants/{tenantId}/staging/{uuid}

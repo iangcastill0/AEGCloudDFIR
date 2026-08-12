@@ -1,5 +1,5 @@
 /**
- * Error types for the EvidenceVault search query pipeline.
+ * Error types for the AEG-CloudDFIR search query pipeline.
  */
 
 /** Thrown by the lexer/parser when the query string is malformed. */

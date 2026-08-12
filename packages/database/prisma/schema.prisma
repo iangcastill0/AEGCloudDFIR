@@ -1,4 +1,4 @@
-// EvidenceVault canonical data model.
+// AEG-CloudDFIR canonical data model.
 // Every tenant-owned table carries tenantId and is covered by PostgreSQL
 // row-level security (see migrations — RLS compares tenant_id to
 // current_setting('app.tenant_id')). AuditEvent is append-only with a
