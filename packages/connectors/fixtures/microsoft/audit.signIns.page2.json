@@ -1,0 +1,14 @@
+{
+  "value": [
+    {
+      "id": "si-2",
+      "appDisplayName": "Microsoft Teams",
+      "createdDateTime": "2026-07-01T08:05:00Z",
+      "userPrincipalName": "jordan.lee@example.com",
+      "userId": "u-2",
+      "ipAddress": "203.0.113.55",
+      "resourceDisplayName": "Microsoft Teams",
+      "status": { "errorCode": 50126, "failureReason": "Invalid username or password." }
+    }
+  ]
+}

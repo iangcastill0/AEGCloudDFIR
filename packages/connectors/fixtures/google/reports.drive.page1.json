@@ -1,0 +1,26 @@
+{
+  "kind": "admin#reports#activities",
+  "items": [
+    {
+      "kind": "admin#reports#activity",
+      "id": {
+        "time": "2026-07-01T13:00:00.000Z",
+        "uniqueQualifier": "-1111222233334444555",
+        "applicationName": "drive",
+        "customerId": "C01example"
+      },
+      "actor": { "email": "avery.chen@example.com", "profileId": "1122334455" },
+      "ipAddress": "203.0.113.9",
+      "events": [
+        {
+          "type": "access",
+          "name": "view",
+          "parameters": [
+            { "name": "doc_title", "value": "Q3 Vendor Contract" },
+            { "name": "doc_type", "value": "document" }
+          ]
+        }
+      ]
+    }
+  ]
+}

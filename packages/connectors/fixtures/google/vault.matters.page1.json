@@ -1,0 +1,6 @@
+{
+  "matters": [
+    { "matterId": "matter-001", "name": "Acme Litigation Hold", "state": "OPEN" },
+    { "matterId": "matter-002", "name": "Internal Investigation 2026", "state": "OPEN" }
+  ]
+}

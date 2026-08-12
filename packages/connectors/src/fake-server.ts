@@ -157,6 +157,13 @@ export async function startFakeProviderServer(
       return;
     }
 
+    // ---- Office 365 Management Activity: subscription start (POST, idempotent) ----
+    const mgmtStart = /^\/manage\/([^/]+)\/activity\/feed\/subscriptions\/start$/.exec(path);
+    if (method === 'POST' && mgmtStart !== null) {
+      sendJson(res, 200, { contentType: q.get('contentType'), status: 'enabled' });
+      return;
+    }
+
     if (method !== 'GET') {
       sendError(res, 405, 'methodNotAllowed', 'only GET is supported here');
       return;
@@ -166,6 +173,30 @@ export async function startFakeProviderServer(
     let m = /^\/download\/ms\/([^/]+)$/.exec(path);
     if (m !== null) {
       await sendBinary(res, `microsoft/content.${m[1]}.bin`, 'application/octet-stream');
+      return;
+    }
+
+    // ---- Office 365 Management Activity (content feed) ----
+    m = /^\/manage\/([^/]+)\/activity\/feed\/subscriptions\/content$/.exec(path);
+    if (m !== null) {
+      const suffix = graphSuffix(q); // page1 / page2 / token-<T>
+      const buf = await readFixture(`microsoft/audit.mgmt.content.${suffix}.json`);
+      const arr = buf === undefined ? '[]' : buf.toString('utf8').replaceAll('{{BASE}}', baseUrl);
+      const headers: Record<string, string> = { 'content-type': 'application/json' };
+      // The first page advertises a NextPageUri; the connector follows it verbatim.
+      if (suffix === 'page1') {
+        const next = new URL(`${baseUrl}/manage/${m[1]}/activity/feed/subscriptions/content`);
+        next.searchParams.set('contentType', q.get('contentType') ?? '');
+        next.searchParams.set('page', '2');
+        headers['NextPageUri'] = next.toString();
+      }
+      res.writeHead(200, headers);
+      res.end(arr);
+      return;
+    }
+    m = /^\/manage\/content\/([^/]+)$/.exec(path);
+    if (m !== null) {
+      await sendJsonFile(res, `microsoft/audit.mgmt.${m[1]}.json`);
       return;
     }
 
@@ -253,6 +284,14 @@ export async function startFakeProviderServer(
           location: `${baseUrl}/download/ms/${m[2]}?tempauth=fake-preauth-token-do-not-log`,
         });
         res.end();
+        return;
+      }
+      if (g === '/auditLogs/directoryAudits') {
+        await sendJsonFile(res, `microsoft/audit.directoryAudits.${graphSuffix(q)}.json`, true);
+        return;
+      }
+      if (g === '/auditLogs/signIns') {
+        await sendJsonFile(res, `microsoft/audit.signIns.${graphSuffix(q)}.json`, true);
         return;
       }
       if (g === '/users') {
@@ -359,6 +398,24 @@ export async function startFakeProviderServer(
         return;
       }
       sendError(res, 404, 'notFound', 'unknown drive route');
+      return;
+    }
+
+    // ---- Workspace Admin SDK Reports (audit activities) ----
+    m = /^\/google\/admin\/reports\/v1\/activity\/users\/([^/]+)\/applications\/([^/]+)$/.exec(path);
+    if (m !== null) {
+      await sendJsonFile(res, `google/reports.${m[2]}.${googleSuffix(q)}.json`, true);
+      return;
+    }
+
+    // ---- Google Vault (matters + exports, read-only) ----
+    if (path === '/google/vault/v1/matters') {
+      await sendJsonFile(res, `google/vault.matters.${googleSuffix(q)}.json`, true);
+      return;
+    }
+    m = /^\/google\/vault\/v1\/matters\/([^/]+)\/exports$/.exec(path);
+    if (m !== null) {
+      await sendJsonFile(res, `google/vault.exports.${m[1]}.${googleSuffix(q)}.json`, true);
       return;
     }
 

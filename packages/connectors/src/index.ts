@@ -24,3 +24,20 @@ export {
   type GoogleExportTarget,
 } from './google/drive.js';
 export { GoogleCustodianDirectory } from './google/directory.js';
+export {
+  O365ManagementActivityConnector,
+  O365_MANAGEMENT_CONTENT_TYPES,
+  type O365ManagementActivityOptions,
+} from './microsoft/mgmt-activity.js';
+export {
+  GraphAuditConnector,
+  GRAPH_AUDIT_SCOPES,
+  type GraphAuditScope,
+  type GraphAuditOptions,
+} from './microsoft/graph-audit.js';
+export {
+  GoogleReportsConnector,
+  GOOGLE_REPORTS_APPLICATIONS,
+  type GoogleReportsOptions,
+} from './google/reports.js';
+export { GoogleVaultConnector, type GoogleVaultOptions } from './google/vault.js';

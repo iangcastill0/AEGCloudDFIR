@@ -46,6 +46,11 @@ clearly-labeled demo mode only.
     driveDelta.<driveId>.token-<T>.json
     content.<itemId>.bin                # GET /download/ms/{itemId} (after 302)
     users.page<N>.json, users.search.json  # GET /graph/users
+    audit.mgmt.content.page<N>.json     # GET /manage/{tenant}/.../subscriptions/content
+                                        #   (JSON array; page1 sets a NextPageUri header)
+    audit.mgmt.<contentId>.json         # GET /manage/content/{contentId} (audit blob, JSON array)
+    audit.directoryAudits.page<N>.json  # GET /graph/auditLogs/directoryAudits
+    audit.signIns.page<N>.json          # GET /graph/auditLogs/signIns
   google/
     token.json                          # POST /token
     labels.json                         # GET /google/gmail/v1/users/me/labels
@@ -60,7 +65,15 @@ clearly-labeled demo mode only.
     startPageToken.json                 # GET /google/drive/v3/changes/startPageToken
     changes.<pageToken>.json            # GET /google/drive/v3/changes
     users.page<N>.json, users.search.json  # GET /google/admin/directory/v1/users
+    reports.<application>.page<N>.json  # GET /google/admin/reports/v1/activity/users/{u}/applications/{app}
+    vault.matters.page<N>.json          # GET /google/vault/v1/matters
+    vault.exports.<matterId>.page<N>.json # GET /google/vault/v1/matters/{id}/exports
 ```
+
+The O365 Management Activity content POST route
+(`/manage/{tenant}/activity/feed/subscriptions/start`) is canned to `200`.
+Idempotent "already enabled" (400/AF20024) and throttling behaviors are
+exercised through an injected `fetchImpl` in the connector tests.
 
 Connector base URLs for a server at `URL`:
 

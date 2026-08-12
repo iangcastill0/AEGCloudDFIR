@@ -1,0 +1,17 @@
+{
+  "kind": "admin#reports#activities",
+  "items": [
+    {
+      "kind": "admin#reports#activity",
+      "id": {
+        "time": "2026-07-01T12:30:00.000Z",
+        "uniqueQualifier": "-9876543210987654321",
+        "applicationName": "login",
+        "customerId": "C01example"
+      },
+      "actor": { "email": "jordan.lee@example.com", "profileId": "5566778899" },
+      "ipAddress": "203.0.113.8",
+      "events": [{ "type": "login", "name": "logout", "parameters": [] }]
+    }
+  ]
+}

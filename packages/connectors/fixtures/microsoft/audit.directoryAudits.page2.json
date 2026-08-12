@@ -1,0 +1,13 @@
+{
+  "value": [
+    {
+      "id": "da-2",
+      "activityDisplayName": "Update user",
+      "category": "UserManagement",
+      "activityDateTime": "2026-07-01T10:05:00Z",
+      "result": "success",
+      "initiatedBy": { "user": { "id": "u-1", "userPrincipalName": "admin@example.com" } },
+      "targetResources": [ { "id": "u-3", "type": "User" } ]
+    }
+  ]
+}

@@ -48,6 +48,39 @@ export const GOOGLE_DWD_SCOPES: readonly string[] = [
 export const GOOGLE_AUTHORIZATION_ENDPOINT = 'https://accounts.google.com/o/oauth2/v2/auth';
 
 // ---------------------------------------------------------------------------
+// Audit-log scope constants (least-privilege, read-only)
+// ---------------------------------------------------------------------------
+
+/** App token scope for the Office 365 Management Activity API. */
+export const MICROSOFT_MANAGEMENT_ACTIVITY_APP_SCOPE = 'https://manage.office.com/.default';
+
+/** App token scope for Microsoft Graph audit logs. */
+export const MICROSOFT_GRAPH_AUDIT_APP_SCOPE = 'https://graph.microsoft.com/.default';
+
+/**
+ * Application permissions (admin-consented) that back the audit app tokens:
+ * - ActivityFeed.Read → Office 365 Management Activity API content feed.
+ * - AuditLog.Read.All → Graph /auditLogs/directoryAudits and /signIns.
+ */
+export const MICROSOFT_AUDIT_ORG_APP_PERMISSIONS: readonly string[] = [
+  'ActivityFeed.Read',
+  'AuditLog.Read.All',
+];
+
+/** DWD scope for the Admin SDK Reports (audit activities), read-only. */
+export const GOOGLE_REPORTS_AUDIT_SCOPE =
+  'https://www.googleapis.com/auth/admin.reports.audit.readonly';
+
+/** DWD scope for Google Vault, read-only (enumerate matters/holds/exports). */
+export const GOOGLE_VAULT_READONLY_SCOPE = 'https://www.googleapis.com/auth/ediscovery.readonly';
+
+/** DWD scope set for the two Google audit sources. */
+export const GOOGLE_AUDIT_DWD_SCOPES: readonly string[] = [
+  GOOGLE_REPORTS_AUDIT_SCOPE,
+  GOOGLE_VAULT_READONLY_SCOPE,
+];
+
+// ---------------------------------------------------------------------------
 // Token response validation
 // ---------------------------------------------------------------------------
 

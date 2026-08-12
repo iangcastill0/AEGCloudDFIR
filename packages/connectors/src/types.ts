@@ -249,6 +249,80 @@ export type RateLimitObserver = (info: {
 }) => void;
 
 // ---------------------------------------------------------------------------
+// Audit-log SPI (read-only). One connector interface fronts four provider
+// sources. The string-literal AuditSystem mirrors the platform DB enum
+// (do not import that package).
+// ---------------------------------------------------------------------------
+
+export type AuditSystem =
+  | 'o365_management_activity'
+  | 'graph_directory_audits'
+  | 'graph_signins'
+  | 'google_reports'
+  | 'google_vault';
+
+/** A single normalized audit event. Provider-specific extras live in `raw`. */
+export interface AuditRecordRaw {
+  system: AuditSystem;
+  providerRecordId: string;
+  workload?: string;
+  operation?: string;
+  recordType?: string;
+  actorId?: string;
+  actorEmail?: string;
+  actorIp?: string;
+  targetId?: string;
+  targetType?: string;
+  resultStatus?: string;
+  /** ISO-8601 event time as reported by the provider. */
+  occurredAt?: string;
+  /** The untouched provider element this record was parsed from. */
+  raw: unknown;
+}
+
+/**
+ * A preserved raw provider payload (an O365 content blob, a Graph audit page,
+ * a Reports activity page, or a Vault export descriptor) plus its parsed
+ * records. The worker preserves `rawBytes` verbatim as the immutable native
+ * and persists `records`.
+ */
+export interface AuditBatch {
+  system: AuditSystem;
+  /** Stable id for the payload within its scope (contentId / skiptoken / exportId). */
+  batchId: string;
+  /** The scope the batch belongs to (content type, audit resource, application, or matter id). */
+  scopeKey: string;
+  /** The exact bytes returned by the provider for this payload. */
+  rawBytes: Uint8Array;
+  contentType: string;
+  records: AuditRecordRaw[];
+  /** Count the provider reported for this payload, when known. */
+  providerReportedCount?: number;
+}
+
+export interface AuditListPage {
+  batches: AuditBatch[];
+  /** Opaque cursor for the next page of the same scope; absent when exhausted. */
+  nextCursor?: string;
+}
+
+export interface FetchAuditPageOptions {
+  /** ISO-8601 lower bound (inclusive) on event time. */
+  since?: string;
+  /** ISO-8601 upper bound (inclusive) on event time. */
+  until?: string;
+  cursor?: string;
+  /** Restrict to these actor principals when the source supports it. */
+  actorFilter?: string[];
+}
+
+/** Read-only audit-log source SPI shared by all four connectors. */
+export interface AuditConnector {
+  listAuditScopes(): Promise<{ scopeKey: string; label: string }[]>;
+  fetchAuditPage(scopeKey: string, opts: FetchAuditPageOptions): Promise<AuditListPage>;
+}
+
+// ---------------------------------------------------------------------------
 // Typed errors. Messages are sanitized: they never contain header values,
 // tokens, or query strings.
 // ---------------------------------------------------------------------------
@@ -295,6 +369,9 @@ export class NonDownloadableError extends ConnectorError {
 }
 
 export class DomainNotAllowedError extends ConnectorError {}
+
+/** A required audit-connector setup value is missing or invalid. */
+export class AuditConfigError extends ConnectorError {}
 
 export class ProviderApiError extends ConnectorError {
   readonly status: number;

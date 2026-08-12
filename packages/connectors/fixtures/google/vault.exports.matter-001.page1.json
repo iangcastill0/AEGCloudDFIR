@@ -1,0 +1,28 @@
+{
+  "exports": [
+    {
+      "id": "export-001",
+      "name": "Acme Mailbox Export",
+      "matterId": "matter-001",
+      "requester": { "email": "vault.admin@example.com" },
+      "status": "COMPLETED",
+      "createTime": "2026-07-02T15:00:00.000Z",
+      "cloudStorageSink": {
+        "files": [
+          {
+            "bucketName": "vault-exports-example",
+            "objectName": "matter-001/export-001/part-0.zip",
+            "size": "10485760"
+          }
+        ]
+      }
+    },
+    {
+      "id": "export-002",
+      "name": "Acme Drive Export (in progress)",
+      "matterId": "matter-001",
+      "status": "IN_PROGRESS",
+      "createTime": "2026-07-03T09:00:00.000Z"
+    }
+  ]
+}

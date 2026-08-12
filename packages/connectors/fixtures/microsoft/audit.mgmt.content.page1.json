@@ -1,0 +1,9 @@
+[
+  {
+    "contentType": "Audit.Exchange",
+    "contentId": "blob1",
+    "contentUri": "{{BASE}}/manage/content/blob1",
+    "contentCreated": "2026-07-01T00:05:00.000Z",
+    "contentExpiration": "2026-07-08T00:05:00.000Z"
+  }
+]

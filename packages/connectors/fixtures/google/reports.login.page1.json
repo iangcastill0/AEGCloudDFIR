@@ -1,0 +1,27 @@
+{
+  "kind": "admin#reports#activities",
+  "items": [
+    {
+      "kind": "admin#reports#activity",
+      "id": {
+        "time": "2026-07-01T12:00:00.000Z",
+        "uniqueQualifier": "-1234567890123456789",
+        "applicationName": "login",
+        "customerId": "C01example"
+      },
+      "actor": { "email": "avery.chen@example.com", "profileId": "1122334455" },
+      "ipAddress": "203.0.113.7",
+      "events": [
+        {
+          "type": "login",
+          "name": "login_success",
+          "parameters": [
+            { "name": "login_type", "value": "google_password" },
+            { "name": "is_suspicious", "boolValue": false }
+          ]
+        }
+      ]
+    }
+  ],
+  "nextPageToken": "page2"
+}
