@@ -2,17 +2,17 @@
   "cookies": [
     {
       "name": "authentik_csrf",
-      "value": "2jmjYGnN4Klz56IC3rQ07tb7mY6S5zul",
+      "value": "MoMYnOBjeetvLMz8feBCDCiEEWlTanOY",
       "domain": "localhost",
       "path": "/",
-      "expires": 1817932272.552775,
+      "expires": 1817949498.343612,
       "httpOnly": false,
       "secure": false,
       "sameSite": "Lax"
     },
     {
       "name": "authentik_session",
-      "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzaWQiOiI2M3h1aW5raHV4czZmbHpyZzY0MXFwOG1lYXd6NXQ5aiIsImlzcyI6ImF1dGhlbnRpayIsInN1YiI6ImM0ZjZjNjU4ZGRhNjM5ZjNlNTY1MmY3NDFjNjQ5MzAyOGRmYzI5NThiZWMzYTYyZDVjOWRkOThhYWMwZmZkZDEiLCJhdXRoZW50aWNhdGVkIjp0cnVlLCJhY3IiOiJnb2F1dGhlbnRpay5pby9jb3JlL2RlZmF1bHQifQ.IemFJubEf1jI2KRzjRMsg9Yy0B00qVkuameKhA7LgfI",
+      "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzaWQiOiJiYm5rNjUxb2o3d2prajcxMHBkYm9rOXd2bDZvbGV2dCIsImlzcyI6ImF1dGhlbnRpayIsInN1YiI6ImM0ZjZjNjU4ZGRhNjM5ZjNlNTY1MmY3NDFjNjQ5MzAyOGRmYzI5NThiZWMzYTYyZDVjOWRkOThhYWMwZmZkZDEiLCJhdXRoZW50aWNhdGVkIjp0cnVlLCJhY3IiOiJnb2F1dGhlbnRpay5pby9jb3JlL2RlZmF1bHQifQ.fTa7e-fyVOvetlz38SU-lhqokgnnJo3_w8IaIfa7Np8",
       "domain": "localhost",
       "path": "/",
       "expires": -1,
@@ -22,10 +22,10 @@
     },
     {
       "name": "ev_session",
-      "value": "jxyu8BG8cTguitjEh-EM8PFOpKPZFutWzTmPtjf426w516BG6nmxn7lI4RmDfn4Ap7wje-BDQR76yhOwxB4WD9Sijicfx2Bec4_yjxbCrZZKSmVnYHRGO8R7_EGz3L0meTQuC2qlx-uG4IgbW8TJyBWRCpfR",
+      "value": "9nRjgUUz5a_MzloGmz_e0JQ62ZruAX0uW_xp32WDRqEqVsxKtUyGHhbKahqCcaR9CBSgs5i23xdyPe8xMSMPD1y79X8xWIOx1bMVk0xPcfs4nmZIi07468dcQMLb8VTy560vrRUSPP1bJZiRwpYk7Rca7tVv",
       "domain": "localhost",
       "path": "/",
-      "expires": 1786511472.869144,
+      "expires": 1786528698.710748,
       "httpOnly": true,
       "secure": false,
       "sameSite": "Lax"

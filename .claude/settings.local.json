@@ -126,7 +126,10 @@
       "Bash(curl -s \"http://localhost:9200/evidencevault-evidence/_mapping\")",
       "Bash(python3 -c ' *)",
       "Bash(curl -s \"http://localhost:9200/evidencevault-evidence/_search\" -H 'content-type: application/json' -d '{\"size\":5,\"query\":{\"exists\":{\"field\":\"email.subject\"}},\"_source\":[\"email.subject\",\"email.to.address\",\"email.cc.address\",\"email.bcc.address\",\"email.bccPresent\",\"kind\"]}')",
-      "Bash(git commit -q -m 'M7/M8 pipeline correctness: safe-preview return shape, attachment streaming, stage-keyed reindex *)"
+      "Bash(git commit -q -m 'M7/M8 pipeline correctness: safe-preview return shape, attachment streaming, stage-keyed reindex *)",
+      "Bash(cd /Users/ic/Documents/CloudDiscovery; git status --short | head; echo \"=== clean rebuild ===\"; rm -rf packages/*/dist apps/*/dist .turbo 2>/dev/null; pnpm build 2>&1 | tail -3; echo \"=== test ===\"; pnpm test 2>&1 | sed 's/\\\\x1b\\\\[[0-9;]*m//g' | grep -E 'Tasks:' | tail -1)",
+      "Bash(pnpm --filter @evidencevault/ui build)",
+      "Bash(node_modules/.bin/tsc -p tsconfig.json)"
     ]
   }
 }
