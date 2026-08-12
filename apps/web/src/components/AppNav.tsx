@@ -15,6 +15,7 @@ const LINKS: Array<{ href: string; label: string; adminOnly?: boolean }> = [
   { href: '/connectors', label: 'Connectors' },
   { href: '/audit', label: 'Audit' },
   { href: '/admin/members', label: 'Members', adminOnly: true },
+  { href: '/auth', label: 'Identity', adminOnly: true },
 ];
 
 export function AppNav() {
