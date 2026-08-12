@@ -42,7 +42,7 @@ export const wizardStateSchema = z.object({
   provider: z.enum(['microsoft', 'google', '']),
   connectorAccountId: z.string(),
   connectorMode: z.enum(['delegated', 'organization', '']),
-  sources: z.object({ email: z.boolean(), drive: z.boolean() }),
+  sources: z.object({ email: z.boolean(), drive: z.boolean(), audit: z.boolean() }),
   custodians: z.array(wizardCustodian),
   scope: z.object({
     dateKind: z.enum(['all_time', 'range']),
@@ -58,10 +58,33 @@ export const wizardStateSchema = z.object({
     driveRootIdsText: z.string(),
     includeSharedDrives: z.boolean(),
     includeTrashed: z.boolean(),
+    audit: z.object({
+      /** Microsoft Office 365 Management Activity content types. */
+      msContentTypes: z.array(
+        z.enum([
+          'Audit.Exchange',
+          'Audit.SharePoint',
+          'Audit.AzureActiveDirectory',
+          'Audit.General',
+          'DLP.All',
+        ]),
+      ),
+      includeGraphSignins: z.boolean(),
+      includeGraphDirectoryAudits: z.boolean(),
+      /** Google Admin SDK Reports application names. */
+      googleReportApplications: z.array(
+        z.enum(['login', 'drive', 'admin', 'token', 'mobile', 'user_accounts', 'groups', 'saml']),
+      ),
+      includeVault: z.boolean(),
+      vaultMatterIdsText: z.string(),
+      /** Optional actor (UPN/email) filter, one per line/comma. */
+      actorFilterText: z.string(),
+    }),
   }),
   kind: z.enum(['snapshot', 'continuous']),
 });
 export type WizardState = z.infer<typeof wizardStateSchema>;
+export type WizardAuditScope = WizardState['scope']['audit'];
 
 export function freshWizard(idempotencyKey: string): WizardState {
   return {
@@ -73,7 +96,7 @@ export function freshWizard(idempotencyKey: string): WizardState {
     provider: '',
     connectorAccountId: '',
     connectorMode: '',
-    sources: { email: true, drive: false },
+    sources: { email: true, drive: false, audit: false },
     custodians: [],
     scope: {
       dateKind: 'all_time',
@@ -89,9 +112,35 @@ export function freshWizard(idempotencyKey: string): WizardState {
       driveRootIdsText: '',
       includeSharedDrives: false,
       includeTrashed: false,
+      audit: {
+        msContentTypes: [],
+        includeGraphSignins: false,
+        includeGraphDirectoryAudits: false,
+        googleReportApplications: [],
+        includeVault: false,
+        vaultMatterIdsText: '',
+        actorFilterText: '',
+      },
     },
     kind: 'snapshot',
   };
+}
+
+/** True when the collection selects only the audit source (no email/drive). */
+export function isAuditOnly(state: WizardState): boolean {
+  return state.sources.audit && !state.sources.email && !state.sources.drive;
+}
+
+/** True when any audit source is configured for the selected provider. */
+export function auditScopeConfigured(state: WizardState): boolean {
+  const a = state.scope.audit;
+  if (state.provider === 'microsoft') {
+    return a.msContentTypes.length > 0 || a.includeGraphSignins || a.includeGraphDirectoryAudits;
+  }
+  if (state.provider === 'google') {
+    return a.googleReportApplications.length > 0 || a.includeVault;
+  }
+  return false;
 }
 
 /** Validation errors for a single step (empty array = step is valid). */
@@ -107,14 +156,29 @@ export function validateStep(state: WizardState, step: number): string[] {
       if (!state.connectorAccountId) errors.push('Select a connected account.');
       break;
     case STEP_SOURCES:
-      if (!state.sources.email && !state.sources.drive)
-        errors.push('Select at least one source (email, drive, or both).');
+      if (!state.sources.email && !state.sources.drive && !state.sources.audit)
+        errors.push('Select at least one source (email, drive, or audit logs).');
+      // Audit logs are organization-wide (app permission / domain-wide
+      // delegation); a delegated connector cannot collect them.
+      if (state.sources.audit && state.connectorMode !== 'organization')
+        errors.push(
+          'Audit logs require an organization-mode connector. Connect one in Connectors, or deselect audit logs.',
+        );
       break;
     case STEP_CUSTODIANS:
-      if (state.custodians.length === 0) errors.push('Add at least one custodian.');
+      // Audit is org-scoped and selects no custodian; only email/drive need one.
+      if ((state.sources.email || state.sources.drive) && state.custodians.length === 0)
+        errors.push('Add at least one custodian.');
       break;
     case STEP_SCOPE: {
       const s = state.scope;
+      if (state.sources.audit && !auditScopeConfigured(state)) {
+        errors.push(
+          state.provider === 'google'
+            ? 'Select at least one Google audit source (a report application or Vault).'
+            : 'Select at least one Microsoft audit source (a content type or Graph sign-ins/directory audits).',
+        );
+      }
       if (s.dateKind === 'range') {
         if (!DATE_RE.test(s.startDate)) errors.push('Start date must be YYYY-MM-DD.');
         if (!DATE_RE.test(s.endDate)) errors.push('End date must be YYYY-MM-DD.');
@@ -157,7 +221,8 @@ export type WizardAction =
         Omit<WizardState, 'v' | 'scope' | 'step' | 'maxStepReached' | 'idempotencyKey'>
       >;
     }
-  | { type: 'patchScope'; patch: Partial<WizardState['scope']> }
+  | { type: 'patchScope'; patch: Partial<Omit<WizardState['scope'], 'audit'>> }
+  | { type: 'patchAudit'; patch: Partial<WizardAuditScope> }
   | { type: 'next' }
   | { type: 'back' }
   | { type: 'goto'; step: number };
@@ -168,6 +233,11 @@ export function wizardReducer(state: WizardState, action: WizardAction): WizardS
       return { ...state, ...action.patch };
     case 'patchScope':
       return { ...state, scope: { ...state.scope, ...action.patch } };
+    case 'patchAudit':
+      return {
+        ...state,
+        scope: { ...state.scope, audit: { ...state.scope.audit, ...action.patch } },
+      };
     case 'next': {
       if (state.step >= STEP_START) return state;
       if (!canAdvance(state)) return state; // gate: invalid step never advances
@@ -206,11 +276,56 @@ export function parseIdList(text: string): string[] {
     .filter((s) => s.length > 0);
 }
 
+/**
+ * API-relaxed create schema: audit-only collections legitimately select no
+ * custodian, but the shared contract requires at least one. The API mirrors
+ * this relaxation server-side, so the web builds against the same shape.
+ */
+const relaxedCreateRequest = createCollectionRequest
+  .extend({ custodianIds: z.array(z.string().uuid()) })
+  .superRefine((value, ctx) => {
+    const needsCustodian = value.sources.some((s) => s !== 'audit');
+    if (needsCustodian && value.custodianIds.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['custodianIds'],
+        message: 'email and drive collections require at least one custodian',
+      });
+    }
+  });
+
+function buildAuditScope(state: WizardState): CreateCollectionRequest['scope']['audit'] {
+  const a = state.scope.audit;
+  const actorFilter = parseIdList(a.actorFilterText);
+  return {
+    ...(state.provider === 'microsoft'
+      ? {
+          microsoft: {
+            managementContentTypes: a.msContentTypes,
+            includeGraphSignins: a.includeGraphSignins,
+            includeGraphDirectoryAudits: a.includeGraphDirectoryAudits,
+          },
+        }
+      : {}),
+    ...(state.provider === 'google'
+      ? {
+          google: {
+            reportApplications: a.googleReportApplications,
+            includeVault: a.includeVault,
+            vaultMatterIds: parseIdList(a.vaultMatterIdsText),
+          },
+        }
+      : {}),
+    actorFilter,
+  };
+}
+
 /** Build the POST /api/v1/collections body; throws if the wizard is invalid. */
 export function buildCreateRequest(state: WizardState): CreateCollectionRequest {
-  const sources: Array<'email' | 'drive'> = [];
+  const sources: Array<'email' | 'drive' | 'audit'> = [];
   if (state.sources.email) sources.push('email');
   if (state.sources.drive) sources.push('drive');
+  if (state.sources.audit) sources.push('audit');
 
   const body = {
     idempotencyKey: state.idempotencyKey,
@@ -253,7 +368,8 @@ export function buildCreateRequest(state: WizardState): CreateCollectionRequest 
             },
           }
         : {}),
+      ...(state.sources.audit ? { audit: buildAuditScope(state) } : {}),
     },
   };
-  return createCollectionRequest.parse(body);
+  return relaxedCreateRequest.parse(body);
 }

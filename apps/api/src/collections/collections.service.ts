@@ -13,6 +13,7 @@ import {
   withTenantContext,
   type PrismaClient,
 } from '@evidencevault/database';
+import { z } from 'zod';
 import {
   collectionAction,
   createCollectionRequest,
@@ -36,6 +37,25 @@ const ACTIVE_STATUSES: CollectionStatus[] = [
   CollectionStatus.processing,
   CollectionStatus.finalizing,
 ];
+
+/**
+ * API-level create schema. The shared contract requires at least one custodian,
+ * but audit-log collections are organization-scoped and select no custodians, so
+ * we relax that field to `[]` and re-require it only when an email/drive source
+ * is present. (The contract stays strict for other consumers.)
+ */
+const createCollectionApiSchema = createCollectionRequest
+  .extend({ custodianIds: z.array(z.string().uuid()).max(10000) })
+  .superRefine((value, ctx) => {
+    const needsCustodian = value.sources.some((s) => s !== 'audit');
+    if (needsCustodian && value.custodianIds.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['custodianIds'],
+        message: 'email and drive collections require at least one custodian',
+      });
+    }
+  });
 
 export type CollectionActionName = 'pause' | 'resume' | 'cancel' | 'retry';
 
@@ -145,7 +165,8 @@ export class CollectionsService {
     body: unknown,
     request: FastifyRequest,
   ): Promise<{ id: string; status: string; replayed: boolean }> {
-    const input = zodValidate(createCollectionRequest, body);
+    const input = zodValidate(createCollectionApiSchema, body);
+    const includesAudit = input.sources.includes('audit');
 
     try {
       const result = await withTenantContext(this.prisma, auth.tenantId, async (tx) => {
@@ -163,17 +184,28 @@ export class CollectionsService {
         if (connector.status !== ConnectorStatus.connected) {
           throw new ConflictException('connector is not connected');
         }
+        // Audit logs are tenant/organization-wide (app permission / DWD); a
+        // delegated connector cannot collect them.
+        if (includesAudit && connector.mode !== 'organization') {
+          throw new ConflictException(
+            'audit-log collection requires an organization-mode connector; delegated connectors cannot collect audit logs',
+          );
+        }
 
-        const custodians = await tx.custodian.findMany({
-          where: {
-            id: { in: input.custodianIds },
-            tenantId: auth.tenantId,
-            connectorAccountId: connector.id,
-          },
-          select: { id: true },
-        });
-        if (custodians.length !== input.custodianIds.length) {
-          throw new BadRequestException('every custodianId must belong to the selected connector');
+        if (input.custodianIds.length > 0) {
+          const custodians = await tx.custodian.findMany({
+            where: {
+              id: { in: input.custodianIds },
+              tenantId: auth.tenantId,
+              connectorAccountId: connector.id,
+            },
+            select: { id: true },
+          });
+          if (custodians.length !== input.custodianIds.length) {
+            throw new BadRequestException(
+              'every custodianId must belong to the selected connector',
+            );
+          }
         }
 
         const tenant = await tx.tenant.findUnique({ where: { id: auth.tenantId } });
@@ -200,13 +232,15 @@ export class CollectionsService {
             createdById: auth.userId,
           },
         });
-        await tx.collectionCustodian.createMany({
-          data: input.custodianIds.map((custodianId) => ({
-            tenantId: auth.tenantId,
-            collectionId: collection.id,
-            custodianId,
-          })),
-        });
+        if (input.custodianIds.length > 0) {
+          await tx.collectionCustodian.createMany({
+            data: input.custodianIds.map((custodianId) => ({
+              tenantId: auth.tenantId,
+              collectionId: collection.id,
+              custodianId,
+            })),
+          });
+        }
         // Payload shape is the worker contract (apps/worker payloads.ts).
         await tx.outboxEvent.create({
           data: {

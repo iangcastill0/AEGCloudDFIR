@@ -30,7 +30,10 @@ test('tag family → case → native + CSV export with hash verification', async
 
   // Find an email with an attachment family.
   const search = (await (
-    await page.request.post(`${API}/api/v1/search`, { headers: H, data: { query: 'subject:vendor' } })
+    await page.request.post(`${API}/api/v1/search`, {
+      headers: H,
+      data: { query: 'subject:vendor' },
+    })
   ).json()) as { total: number; items: { id: string }[] };
   expect(search.total).toBeGreaterThan(0);
   const evidenceId = search.items[0]!.id;

@@ -60,6 +60,7 @@ never in a production code path.
   [Authentik](docs/guides/authentik-setup.md) ·
   [Microsoft Entra](docs/guides/microsoft-setup.md) ·
   [Google / Workspace DWD](docs/guides/google-setup.md) ·
+  [Audit log collection](docs/guides/audit-logs.md) ·
   [Key management](docs/guides/key-management.md)
 - Operations: [runbooks](docs/runbooks/) (backup/restore, DR, key rotation,
   connector revocation, reindexing, audit verification, upgrades, incident
@@ -90,6 +91,14 @@ license report).
   become recorded exceptions.
 - **Encrypted/rights-managed/corrupt/unavailable content** produces
   exceptions; nothing is brute-forced.
+- **Audit logs** are bounded by provider retention (Microsoft Purview and
+  Google Workspace Reports both retain ~180 days). Events outside the retained
+  window, or never captured because auditing was disabled when they occurred,
+  cannot be collected and are reported as scope limitations — not silently
+  omitted. Audit collection is organization-scoped only.
+- **Google Vault** integration is metadata-only for now: it enumerates
+  matters/exports but does not yet download the export archive from the GCS
+  export sink.
 - **WORM immutability** is claimed only when bucket versioning + Object Lock
   are actually detected; otherwise the UI says exactly what protects the data.
 - **OCR/rasterization** require the worker container's tools (Tesseract,

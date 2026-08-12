@@ -6,16 +6,16 @@ could not be fully completed. It reflects the state at commit `c5a283a`.
 
 ## Environment
 
-| Component | Value |
-|---|---|
-| Build host | macOS (darwin arm64), Homebrew |
-| Node.js | v22.23.2 |
-| pnpm | 11.20.0 |
-| Container runtime | Colima + Docker 29.5.2 (installed during verification) |
-| Database | PostgreSQL 16 (compose), migrations applied under a NOBYPASSRLS runtime role |
-| Search | OpenSearch 2.19.1 (compose) |
-| Object store | MinIO (compose), S3-compatible; Wasabi in production |
-| IdP | Authentik 2025.4 (compose), OIDC code+PKCE |
+| Component         | Value                                                                        |
+| ----------------- | ---------------------------------------------------------------------------- |
+| Build host        | macOS (darwin arm64), Homebrew                                               |
+| Node.js           | v22.23.2                                                                     |
+| pnpm              | 11.20.0                                                                      |
+| Container runtime | Colima + Docker 29.5.2 (installed during verification)                       |
+| Database          | PostgreSQL 16 (compose), migrations applied under a NOBYPASSRLS runtime role |
+| Search            | OpenSearch 2.19.1 (compose)                                                  |
+| Object store      | MinIO (compose), S3-compatible; Wasabi in production                         |
+| IdP               | Authentik 2025.4 (compose), OIDC code+PKCE                                   |
 
 The full local stack (Postgres, Redis, OpenSearch, MinIO, ClamAV, Tika,
 Authentik ×2, Authentik Postgres/Redis — 10 containers) was started with
@@ -24,33 +24,33 @@ Authentik ×2, Authentik Postgres/Redis — 10 containers) was started with
 
 ## Static gates (whole workspace)
 
-| Command | Result |
-|---|---|
-| `pnpm install` | clean install from lockfile |
-| `pnpm format:check` | PASS |
-| `pnpm lint` | PASS (19/19 tasks) |
-| `pnpm typecheck` | PASS (19/19 tasks) |
-| `pnpm build` | PASS (all packages + Next build) |
-| `pnpm exec tsc -p scripts/tsconfig.json` | PASS (ops scripts typecheck) |
-| `docker compose ... config -q` | PASS (compose file valid) |
+| Command                                  | Result                           |
+| ---------------------------------------- | -------------------------------- |
+| `pnpm install`                           | clean install from lockfile      |
+| `pnpm format:check`                      | PASS                             |
+| `pnpm lint`                              | PASS (19/19 tasks)               |
+| `pnpm typecheck`                         | PASS (19/19 tasks)               |
+| `pnpm build`                             | PASS (all packages + Next build) |
+| `pnpm exec tsc -p scripts/tsconfig.json` | PASS (ops scripts typecheck)     |
+| `docker compose ... config -q`           | PASS (compose file valid)        |
 
 ## Unit tests — `pnpm test`
 
 **785 unit tests passing** across all 11 workspace packages:
 
-| Package | Tests | Notable coverage |
-|---|---:|---|
-| `@evidencevault/config` | 6 | env validation, fail-fast, secret redaction, demo-in-prod refusal |
-| `@evidencevault/database` | 14 | canonical JSON, audit hash chain determinism/tamper, envelope encryption (AAD tenant binding, rotation) |
-| `@evidencevault/contracts` | 8 | completeness vocabulary rejects "complete"/"all data"; production/export DTOs; truthfulness notices present |
-| `@evidencevault/evidence` | 162 | streaming SHA-256, content-addressed store (stage→verify→promote, dedup, presign refusal, Object Lock honesty), Merkle manifests, MIME parse edge cases, safe-preview sanitizer, OCR/Tika/ClamAV clients, archive-bomb guards |
-| `@evidencevault/connectors` | 69 | Graph mail/drive + Gmail/Drive (delegated + org), Retry-After/backoff, delta/history resume + expiry, DWD domain allowlist, no-auth content redirect |
-| `@evidencevault/search` | 173 | query AST parse/validate/compile, **unconditional tenant-filter injection (adversarial matrix)**, cost limits, facets, reindex alias swap |
-| `@evidencevault/production` | 103 | Bates overflow, family-adjacent sort, 18-flag validation incl. non-overridable redaction leak, stamping, redaction burn-in + no-text-layer gate, TIFF G4, OPT/DAT/CSV escaping |
-| `@evidencevault/ui` | 16 | dialog focus trap, roving tabindex (DOM-free logic) |
-| `@evidencevault/web` | 39 | wizard reducer gating + resume + stable idempotency key, mark-token-only highlight parsing, CSRF header logic |
-| `@evidencevault/api` | 127 | OIDC helpers, sealed sessions, CSRF, guards, audit pagination + chain verify, connectors, collections lifecycle, search authz, evidence authz, tags/families, cases, exports, production validation/submit |
-| `@evidencevault/worker` | 68 | outbox dispatch (SKIP LOCKED, dedup, failure accounting), DST-safe date scoping, checkpoint version guard, fetch-item idempotency, finalize completeness matrix, scan/quarantine, production run |
+| Package                     | Tests | Notable coverage                                                                                                                                                                                                              |
+| --------------------------- | ----: | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@evidencevault/config`     |     6 | env validation, fail-fast, secret redaction, demo-in-prod refusal                                                                                                                                                             |
+| `@evidencevault/database`   |    14 | canonical JSON, audit hash chain determinism/tamper, envelope encryption (AAD tenant binding, rotation)                                                                                                                       |
+| `@evidencevault/contracts`  |     8 | completeness vocabulary rejects "complete"/"all data"; production/export DTOs; truthfulness notices present                                                                                                                   |
+| `@evidencevault/evidence`   |   162 | streaming SHA-256, content-addressed store (stage→verify→promote, dedup, presign refusal, Object Lock honesty), Merkle manifests, MIME parse edge cases, safe-preview sanitizer, OCR/Tika/ClamAV clients, archive-bomb guards |
+| `@evidencevault/connectors` |    69 | Graph mail/drive + Gmail/Drive (delegated + org), Retry-After/backoff, delta/history resume + expiry, DWD domain allowlist, no-auth content redirect                                                                          |
+| `@evidencevault/search`     |   173 | query AST parse/validate/compile, **unconditional tenant-filter injection (adversarial matrix)**, cost limits, facets, reindex alias swap                                                                                     |
+| `@evidencevault/production` |   103 | Bates overflow, family-adjacent sort, 18-flag validation incl. non-overridable redaction leak, stamping, redaction burn-in + no-text-layer gate, TIFF G4, OPT/DAT/CSV escaping                                                |
+| `@evidencevault/ui`         |    16 | dialog focus trap, roving tabindex (DOM-free logic)                                                                                                                                                                           |
+| `@evidencevault/web`        |    39 | wizard reducer gating + resume + stable idempotency key, mark-token-only highlight parsing, CSRF header logic                                                                                                                 |
+| `@evidencevault/api`        |   127 | OIDC helpers, sealed sessions, CSRF, guards, audit pagination + chain verify, connectors, collections lifecycle, search authz, evidence authz, tags/families, cases, exports, production validation/submit                    |
+| `@evidencevault/worker`     |    68 | outbox dispatch (SKIP LOCKED, dedup, failure accounting), DST-safe date scoping, checkpoint version guard, fetch-item idempotency, finalize completeness matrix, scan/quarantine, production run                              |
 
 ## Migrations — applied to an empty database
 
@@ -113,10 +113,10 @@ session. Demo data seeded via `scripts/demo-seed.ts`; the fake provider server
    `apply_to_family`, create a case, add the tagged family by reference
    (≥2 items: email + attachment), then run **native and CSV exports**; both
    reach `ready` (the worker verifies every output hash before marking ready).
-6. **Cross-tenant isolation (scenario 6)** — evidence/collection/export/
+4. **Cross-tenant isolation (scenario 6)** — evidence/collection/export/
    production/case routes for a foreign id all return **404 without existence
    leakage**; search never returns another tenant's items.
-7. **Kill-and-resume (scenario 7)** — during verification the worker process
+5. **Kill-and-resume (scenario 7)** — during verification the worker process
    died mid-collection with a pending `collection.discover` outbox row;
    restarting it **resumed and completed** the collection with no duplicate
    logical items and no lost checkpoint (the outbox re-dispatched; BullMQ
@@ -129,6 +129,7 @@ primary pages.
 **Scenarios 4 and 5 (production: final-redacted TIFF/PDF with Bates + load
 files; redacted-native leakage blocked)** are verified at the unit and
 integration level, not via a live E2E run:
+
 - `@evidencevault/production` (103 tests) covers Bates continuity across
   families, stamping, **redaction burn-in validated by pixel readback and a
   no-text-layer gate**, TIFF G4, and DAT/OPT/CSV escaping.
@@ -139,16 +140,16 @@ integration level, not via a live E2E run:
   requesting native output becomes a **placeholder with a security exception**
   rather than shipping the native, and that a `validateNoTextLayer` failure
   forces a placeholder.
-A live production render was not exercised end-to-end because PDF
-rasterization (pdftoppm/TIFF) is not installed on the host API/worker used
-for verification; the worker records honest exceptions and downgrades image
-formats in that case (see Residual risks).
+  A live production render was not exercised end-to-end because PDF
+  rasterization (pdftoppm/TIFF) is not installed on the host API/worker used
+  for verification; the worker records honest exceptions and downgrades image
+  formats in that case (see Residual risks).
 
 ## Security spot-checks (live API)
 
 - Secure headers present on every response: `Content-Security-Policy:
-  default-src 'none'; …`, `X-Frame-Options: DENY`, `X-Content-Type-Options:
-  nosniff`, `Strict-Transport-Security`, echoed `x-request-id`.
+default-src 'none'; …`, `X-Frame-Options: DENY`, `X-Content-Type-Options:
+nosniff`, `Strict-Transport-Security`, echoed `x-request-id`.
 - CSRF: a mutating POST without `x-csrf-token` → **403**.
 - No presigned URLs and no tokens/secrets/private keys found in api or worker
   logs (`grep -ci` → 0).

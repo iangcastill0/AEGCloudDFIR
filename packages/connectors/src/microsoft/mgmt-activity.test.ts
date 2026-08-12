@@ -149,7 +149,9 @@ describe('O365ManagementActivityConnector.fetchAuditPage', () => {
     expect(guard).toBeLessThan(20);
 
     const windows = server.requests
-      .filter((r) => r.path.endsWith('/subscriptions/content') && r.query['startTime'] !== undefined)
+      .filter(
+        (r) => r.path.endsWith('/subscriptions/content') && r.query['startTime'] !== undefined,
+      )
       .map((r) => ({ start: r.query['startTime'] as string, end: r.query['endTime'] as string }));
 
     expect(windows).toHaveLength(3);
@@ -187,10 +189,10 @@ describe('O365ManagementActivityConnector.fetchAuditPage', () => {
       }
       return fetch(url, init);
     };
-    const page = await connector({ fetchImpl, onRateLimit: (info) => waits.push(info) }).fetchAuditPage(
-      'Audit.Exchange',
-      {},
-    );
+    const page = await connector({
+      fetchImpl,
+      onRateLimit: (info) => waits.push(info),
+    }).fetchAuditPage('Audit.Exchange', {});
     expect(page.batches).toHaveLength(1);
     expect(waits).toEqual([expect.objectContaining({ reason: 'retry-after', waitMs: 1000 })]);
   });

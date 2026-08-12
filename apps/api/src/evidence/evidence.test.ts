@@ -197,3 +197,105 @@ describe('EvidenceService.preview', () => {
     expect(presignGet).not.toHaveBeenCalledWith(TENANT_ID, 'k-html-v1', expect.anything());
   });
 });
+
+describe('EvidenceService.auditRecords', () => {
+  it('returns cursor-paginated records for an audit_batch item', async () => {
+    const { store } = makeStore();
+    const findFirst = vi.fn(async () => ({
+      id: ITEM_A,
+      name: 'o365_management_activity/Audit.Exchange/b1.json',
+      sha256: 'abcd',
+    }));
+    const findMany = vi.fn(async () => [
+      {
+        id: 'rec-1',
+        system: 'o365_management_activity',
+        providerRecordId: 'r1',
+        workload: 'Exchange',
+        operation: 'MailItemsAccessed',
+        recordType: '2',
+        actorId: 'u1',
+        actorEmail: 'alice@example.com',
+        actorIp: '10.0.0.1',
+        targetId: 't1',
+        targetType: 'Message',
+        resultStatus: 'Succeeded',
+        occurredAt: new Date('2026-01-01T00:00:00Z'),
+        raw: { Id: 'r1' },
+      },
+    ]);
+    const { service } = makeService(
+      { evidenceItem: { findFirst }, auditRecord: { findMany } },
+      store,
+    );
+
+    const result = await service.auditRecords(makeAuth([TenantRole.case_manager]), ITEM_A, {
+      limit: 50,
+    });
+    // The item lookup is constrained to audit_batch kind.
+    const where = findFirst.mock.calls[0]?.[0] as { where: Record<string, unknown> };
+    expect(where.where['kind']).toBe('audit_batch');
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]?.operation).toBe('MailItemsAccessed');
+    expect(result.items[0]?.occurredAt).toBe('2026-01-01T00:00:00.000Z');
+    expect(result.nextCursor).toBeNull();
+    expect(result.batch.id).toBe(ITEM_A);
+  });
+
+  it('returns 404 for a non-audit or foreign id (no leakage)', async () => {
+    const { store } = makeStore();
+    const { service } = makeService(
+      { evidenceItem: { findFirst: vi.fn(async () => null) } },
+      store,
+    );
+    await expect(
+      service.auditRecords(makeAuth([TenantRole.case_manager]), ITEM_A, { limit: 50 }),
+    ).rejects.toThrow(NotFoundException);
+  });
+
+  it('read_only callers get 404 for audit batches outside their assigned cases', async () => {
+    const { store } = makeStore();
+    const caseItemCount = vi.fn(async () => 0);
+    const findFirst = vi.fn(async () => ({ id: ITEM_A, name: 'b.json', sha256: 'abcd' }));
+    const { service } = makeService(
+      { caseItem: { count: caseItemCount }, evidenceItem: { findFirst } },
+      store,
+    );
+    await expect(
+      service.auditRecords(makeAuth([TenantRole.read_only]), ITEM_A, { limit: 50 }),
+    ).rejects.toThrow(NotFoundException);
+    expect(caseItemCount).toHaveBeenCalledTimes(1);
+    expect(findFirst).not.toHaveBeenCalled();
+  });
+
+  it('paginates: a full page yields a nextCursor', async () => {
+    const { store } = makeStore();
+    const findFirst = vi.fn(async () => ({ id: ITEM_A, name: 'b.json', sha256: 'abcd' }));
+    const rows = Array.from({ length: 3 }, (_, i) => ({
+      id: `rec-${i}`,
+      system: 'google_reports',
+      providerRecordId: `r${i}`,
+      workload: 'login',
+      operation: 'login_success',
+      recordType: '',
+      actorId: '',
+      actorEmail: `user${i}@example.com`,
+      actorIp: '',
+      targetId: '',
+      targetType: '',
+      resultStatus: '',
+      occurredAt: null,
+      raw: {},
+    }));
+    const findMany = vi.fn(async () => rows);
+    const { service } = makeService(
+      { evidenceItem: { findFirst }, auditRecord: { findMany } },
+      store,
+    );
+    const result = await service.auditRecords(makeAuth([TenantRole.case_manager]), ITEM_A, {
+      limit: 2,
+    });
+    expect(result.items).toHaveLength(2);
+    expect(result.nextCursor).toBe('rec-1');
+  });
+});

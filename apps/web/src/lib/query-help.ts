@@ -31,6 +31,18 @@ export const QUERY_EXAMPLES: QueryExample[] = [
     query: 'path:"/Shared drives/Finance" AND has:attachment',
     description: 'Drive location plus attachment presence',
   },
+  {
+    query: 'operation:MailItemsAccessed AND actor:alice@example.com',
+    description: 'Audit events for one operation by one actor',
+  },
+  {
+    query: 'auditsystem:google_reports AND workload:login',
+    description: 'Google Reports sign-in audit batches',
+  },
+  {
+    query: 'auditsystem:o365_management_activity AND workload:SharePoint',
+    description: 'Office 365 SharePoint audit batches',
+  },
 ];
 
 /** Returns a list of problems with a query example (empty list = ok). */

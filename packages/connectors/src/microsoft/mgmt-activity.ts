@@ -161,9 +161,7 @@ export class O365ManagementActivityConnector implements AuditConnector {
   }
 
   listAuditScopes(): Promise<{ scopeKey: string; label: string }[]> {
-    return Promise.resolve(
-      this.options.contentTypes.map((ct) => ({ scopeKey: ct, label: ct })),
-    );
+    return Promise.resolve(this.options.contentTypes.map((ct) => ({ scopeKey: ct, label: ct })));
   }
 
   /**
@@ -255,7 +253,10 @@ export class O365ManagementActivityConnector implements AuditConnector {
       }
     }
 
-    const listRes = await ensureOk(await this.request(currentUri, 'GET'), 'fetchAuditPage(content)');
+    const listRes = await ensureOk(
+      await this.request(currentUri, 'GET'),
+      'fetchAuditPage(content)',
+    );
     const nextPageUri = listRes.headers.get('NextPageUri') ?? undefined;
     const list = contentListSchema.parse(JSON.parse(await listRes.text()));
 

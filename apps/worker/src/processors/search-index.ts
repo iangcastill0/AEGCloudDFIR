@@ -1,13 +1,20 @@
-import { withTenantContext } from '@evidencevault/database';
+import { ProcessingStatus, withTenantContext } from '@evidencevault/database';
 import {
   MAPPING_VERSION,
   type BatesRecord,
   type EmailAddress,
+  type EvidenceKind,
   type EvidenceSearchDoc,
   type EvidenceTag,
   type OcrPage as SearchOcrPage,
   type RawHeader,
 } from '@evidencevault/search';
+
+/**
+ * Structural mirror of the search package's EvidenceAuditFields (not re-exported
+ * from its public entrypoint). Assignable to EvidenceSearchDoc['audit'].
+ */
+type EvidenceAuditFields = NonNullable<EvidenceSearchDoc['audit']>;
 import { sanitizeError, type WorkerContext } from '../context.js';
 import { incrementProgress } from '../progress.js';
 import { QUEUES } from '../queues.js';
@@ -16,7 +23,84 @@ import type { EvidenceStagePayload } from './payloads.js';
 
 export const MAX_HEADERS_INDEXED = 200;
 export const MAX_OCR_PAGES_INDEXED = 500;
+export const MAX_AUDIT_RECORDS_INDEXED = 5000;
 const MAX_TEXT_TOTAL_BYTES = 1024 * 1024;
+
+interface AuditRecordRow {
+  system: string;
+  workload: string;
+  operation: string;
+  recordType: string;
+  actorId: string;
+  actorEmail: string;
+  actorIp: string;
+  targetId: string;
+  targetType: string;
+  resultStatus: string;
+  occurredAt: Date | null;
+}
+
+/** The single non-empty distinct value of a field across records, else ''. */
+function uniformValue(records: AuditRecordRow[], pick: (r: AuditRecordRow) => string): string {
+  const distinct = new Set(records.map(pick).filter((v) => v !== ''));
+  return distinct.size === 1 ? [...distinct][0]! : '';
+}
+
+/**
+ * Build the batch-level audit field group and a compact free-text rendering of
+ * every record. Fielded audit filters (auditsystem:, workload:, operation:,
+ * actor:) match at batch granularity when the batch is uniform on that field;
+ * per-record precision is available through the audit-records drill-in API.
+ */
+export function buildAuditBatchIndex(records: AuditRecordRow[]): {
+  audit: EvidenceAuditFields;
+  text: string;
+} {
+  const occurred = records
+    .map((r) => r.occurredAt)
+    .filter((d): d is Date => d !== null)
+    .sort((a, b) => a.getTime() - b.getTime());
+  const audit: EvidenceAuditFields = {
+    system: records[0]?.system ?? '',
+  };
+  const workload = uniformValue(records, (r) => r.workload);
+  const operation = uniformValue(records, (r) => r.operation);
+  const recordType = uniformValue(records, (r) => r.recordType);
+  const actorId = uniformValue(records, (r) => r.actorId);
+  const actorEmail = uniformValue(records, (r) => r.actorEmail);
+  const actorIp = uniformValue(records, (r) => r.actorIp);
+  const targetId = uniformValue(records, (r) => r.targetId);
+  const targetType = uniformValue(records, (r) => r.targetType);
+  const resultStatus = uniformValue(records, (r) => r.resultStatus);
+  if (workload !== '') audit.workload = workload;
+  if (operation !== '') audit.operation = operation;
+  if (recordType !== '') audit.recordType = recordType;
+  if (actorId !== '') audit.actorId = actorId;
+  if (actorEmail !== '') audit.actorEmail = actorEmail;
+  if (actorIp !== '') audit.actorIp = actorIp;
+  if (targetId !== '') audit.targetId = targetId;
+  if (targetType !== '') audit.targetType = targetType;
+  if (resultStatus !== '') audit.resultStatus = resultStatus;
+  if (occurred.length > 0) audit.occurredAt = occurred[0]!.toISOString();
+
+  const lines = records.map((r) => {
+    const when = r.occurredAt !== null ? r.occurredAt.toISOString() : '';
+    return [
+      when,
+      r.actorEmail || r.actorId,
+      r.workload,
+      r.operation,
+      r.recordType,
+      r.resultStatus,
+      r.actorIp,
+      r.targetType,
+      r.targetId,
+    ]
+      .filter((v) => v !== '')
+      .join(' ');
+  });
+  return { audit, text: lines.join('\n') };
+}
 
 interface ParticipantInput {
   role: string;
@@ -59,6 +143,8 @@ export interface SearchDocInput {
     sentAt: Date | null;
     receivedAt: Date | null;
   } | null;
+  /** Present for audit_batch / audit_record evidence. */
+  audit?: EvidenceAuditFields;
   participants: ParticipantInput[];
   headers: { rawName: string; value: string }[];
   texts: { body?: string; bodyHtml?: string; attachment?: string; file?: string; ocr?: string };
@@ -89,8 +175,18 @@ function addressesFor(participants: ParticipantInput[], role: string): EmailAddr
 }
 
 /** Pure document assembly — the unit-testable core of search indexing. */
+const KNOWN_KINDS: ReadonlySet<EvidenceKind> = new Set([
+  'email',
+  'attachment',
+  'file',
+  'audit_record',
+  'audit_batch',
+]);
+
 export function buildSearchDoc(input: SearchDocInput): EvidenceSearchDoc {
-  const kind = input.kind === 'email' || input.kind === 'attachment' ? input.kind : 'file';
+  const kind: EvidenceKind = KNOWN_KINDS.has(input.kind as EvidenceKind)
+    ? (input.kind as EvidenceKind)
+    : 'file';
 
   const headers: RawHeader[] = input.headers
     .slice(0, MAX_HEADERS_INDEXED)
@@ -164,6 +260,10 @@ export function buildSearchDoc(input: SearchDocInput): EvidenceSearchDoc {
     docVersion: MAPPING_VERSION,
   };
 
+  if (input.audit !== undefined) {
+    doc.audit = input.audit;
+  }
+
   if (input.email !== null) {
     doc.email = {
       subject: input.email.subject || undefined,
@@ -217,6 +317,10 @@ export async function processSearchIndex(
         },
         childRelationships: true,
         parentRelationships: { select: { kind: true } },
+        auditRecords: {
+          orderBy: { occurredAt: 'asc' },
+          take: MAX_AUDIT_RECORDS_INDEXED,
+        },
       },
     }),
   );
@@ -224,6 +328,8 @@ export async function processSearchIndex(
     ctx.log.warn({ evidenceItemId }, 'index: evidence item not found; dropping');
     return;
   }
+
+  const isAuditBatch = item.kind === 'audit_batch';
 
   // Family linkage: a child points at its parent; a parent with attachment
   // children heads its own family.
@@ -263,10 +369,19 @@ export async function processSearchIndex(
     }
   }
 
+  let auditFields: EvidenceAuditFields | undefined;
+  if (isAuditBatch) {
+    const built = buildAuditBatchIndex(item.auditRecords);
+    auditFields = built.audit;
+    // A batch's records are the searchable text surface for the batch doc.
+    if (built.text !== '') texts.file = built.text;
+  }
+
   const doc = buildSearchDoc({
     evidenceItemId: item.id,
     tenantId,
     kind: item.kind,
+    audit: auditFields,
     name: item.name,
     extension: item.extension,
     mimeType: item.mimeType,
@@ -340,11 +455,29 @@ export async function processSearchIndex(
     return;
   }
 
+  // Audit batches never pass through parse/extract, so they index straight from
+  // 'pending'; other kinds index from a processed state.
+  const indexableFrom: ProcessingStatus[] = isAuditBatch
+    ? [
+        ProcessingStatus.pending,
+        ProcessingStatus.parsed,
+        ProcessingStatus.extracted,
+        ProcessingStatus.ocr_complete,
+        ProcessingStatus.preview_ready,
+      ]
+    : [
+        ProcessingStatus.parsed,
+        ProcessingStatus.extracted,
+        ProcessingStatus.ocr_complete,
+        ProcessingStatus.preview_ready,
+      ];
+  const progressSource = isAuditBatch ? 'audit' : item.kind === 'email' ? 'email' : 'drive';
+
   await withTenantContext(ctx.prisma, tenantId, async (tx) => {
     await tx.evidenceItem.updateMany({
       where: {
         id: evidenceItemId,
-        processingStatus: { in: ['parsed', 'extracted', 'ocr_complete', 'preview_ready'] },
+        processingStatus: { in: indexableFrom },
       },
       data: { processingStatus: 'indexed' },
     });
@@ -353,13 +486,9 @@ export async function processSearchIndex(
       data: { state: 'indexed' },
     });
     if (updated.count > 0 && item.collectionId !== null && item.custodianId !== null) {
-      await incrementProgress(
-        tx,
-        item.collectionId,
-        item.custodianId,
-        item.kind === 'email' ? 'email' : 'drive',
-        { indexed: updated.count },
-      );
+      await incrementProgress(tx, item.collectionId, item.custodianId, progressSource, {
+        indexed: updated.count,
+      });
     }
   });
 }

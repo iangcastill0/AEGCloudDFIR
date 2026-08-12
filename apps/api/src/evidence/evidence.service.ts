@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import type { AppConfig } from '@evidencevault/config';
 import {
+  EvidenceKind,
   MalwareStatus,
   TenantRole,
   withTenantContext,
@@ -24,6 +25,23 @@ import { AuditService } from '../audit/audit.service.js';
 
 const PREVIEW_SAFETY_NOTE =
   'Previews are rendered offline and never load remote content (images, trackers, scripts).';
+
+export interface AuditRecordDto {
+  id: string;
+  system: string;
+  providerRecordId: string;
+  workload: string;
+  operation: string;
+  recordType: string;
+  actorId: string;
+  actorEmail: string;
+  actorIp: string;
+  targetId: string;
+  targetType: string;
+  resultStatus: string;
+  occurredAt: string | null;
+  raw: unknown;
+}
 
 export interface EvidenceDetailDto {
   id: string;
@@ -173,6 +191,58 @@ export class EvidenceService {
       }),
     );
     return { items: rows };
+  }
+
+  /**
+   * Parsed audit records for an audit_batch evidence item, cursor-paginated.
+   * Non-audit or foreign ids are an indistinguishable 404 (requireItem enforces
+   * tenant scope and case-membership ACL; the kind filter hides non-audit ids).
+   */
+  async auditRecords(
+    auth: AuthContext,
+    id: string,
+    page: { cursor?: string; limit: number },
+  ): Promise<{
+    items: AuditRecordDto[];
+    nextCursor: string | null;
+    batch: { id: string; name: string; sha256: string };
+  }> {
+    const item = await this.requireItem(auth, id, (tx) =>
+      tx.evidenceItem.findFirst({
+        where: { id, tenantId: auth.tenantId, kind: EvidenceKind.audit_batch },
+        select: { id: true, name: true, sha256: true },
+      }),
+    );
+    const rows = await withTenantContext(this.prisma, auth.tenantId, (tx) =>
+      tx.auditRecord.findMany({
+        where: { tenantId: auth.tenantId, evidenceItemId: item.id },
+        orderBy: [{ occurredAt: 'asc' }, { id: 'asc' }],
+        take: page.limit + 1,
+        ...(page.cursor ? { cursor: { id: page.cursor }, skip: 1 } : {}),
+      }),
+    );
+    const slice = rows.slice(0, page.limit);
+    const last = slice[slice.length - 1];
+    return {
+      items: slice.map((r) => ({
+        id: r.id,
+        system: r.system,
+        providerRecordId: r.providerRecordId,
+        workload: r.workload,
+        operation: r.operation,
+        recordType: r.recordType,
+        actorId: r.actorId,
+        actorEmail: r.actorEmail,
+        actorIp: r.actorIp,
+        targetId: r.targetId,
+        targetType: r.targetType,
+        resultStatus: r.resultStatus,
+        occurredAt: r.occurredAt?.toISOString() ?? null,
+        raw: r.raw,
+      })),
+      nextCursor: rows.length > page.limit && last ? last.id : null,
+      batch: { id: item.id, name: item.name, sha256: item.sha256 },
+    };
   }
 
   async family(

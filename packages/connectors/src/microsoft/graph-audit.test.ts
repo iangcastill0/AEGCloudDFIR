@@ -122,7 +122,9 @@ describe('GraphAuditConnector sanitized errors', () => {
       graphBaseUrl: `${server.url}/graph`,
       sleepImpl: () => Promise.resolve(),
       fetchImpl: () =>
-        Promise.resolve(new Response('{}', { status: 500, headers: { 'content-type': 'application/json' } })),
+        Promise.resolve(
+          new Response('{}', { status: 500, headers: { 'content-type': 'application/json' } }),
+        ),
     });
     try {
       await bad.fetchAuditPage('directoryAudits', {});

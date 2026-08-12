@@ -67,6 +67,52 @@ A Workspace **super administrator** performs steps 2–3.
   reconciliation scan and records an `expired_checkpoint` exception — visible
   in the collection report.
 
+## Audit log collection
+
+Audit logs are collected **organization-wide only** — they rely on domain-wide
+delegation, never per-custodian delegated OAuth. A delegated-only connector
+cannot collect audit logs; the connector must be in **Organization mode**
+(section B above).
+
+EvidenceVault collects Google audit events from two upstream systems:
+
+- **`google_reports`** — the Admin SDK Reports API, covering the activity
+  applications: login, drive, admin, token, mobile, user_accounts, groups, and
+  SAML applications.
+- **`google_vault`** — Google Vault (metadata-only; see caveat below).
+
+### 1. Add the audit DWD scopes
+
+Extend the existing domain-wide delegation grant (Admin console → Security →
+Access and data control → API controls → **Domain-wide delegation** → edit the
+`evidencevault-collector` client) with these two scopes alongside the
+collection scopes already listed in section B:
+
+```
+https://www.googleapis.com/auth/admin.reports.audit.readonly,
+https://www.googleapis.com/auth/ediscovery.readonly
+```
+
+- `admin.reports.audit.readonly` → Admin SDK Reports API (`google_reports`).
+- `ediscovery.readonly` → Google Vault (`google_vault`).
+
+The Admin SDK API must be enabled in the Cloud project (see section B, step 2).
+
+### 2. Retention caveat (honest limitation)
+
+Google Workspace Reports retains audit activity for approximately **180 days**.
+Events older than the retained window — or never captured because the relevant
+audit configuration was not enabled when they occurred — cannot be collected
+and are reported as **scope limitations** in the collection's completeness
+state, not silently omitted.
+
+### 3. Vault is metadata-only (for now)
+
+The Google Vault integration is **metadata-only**: it enumerates matters and
+exports, but **downloading the export archive from the GCS export sink is a
+documented follow-up and is not yet implemented**. Vault collections surface
+the matter/export inventory only; the exported content itself is not retrieved.
+
 ### Revocation
 
 Remove the domain-wide delegation entry (Admin console) and delete/disable the

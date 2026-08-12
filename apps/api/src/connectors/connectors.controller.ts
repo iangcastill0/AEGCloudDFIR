@@ -84,7 +84,7 @@ export class ConnectorsController {
     @Param('id') id: string,
     @Body() body: unknown,
     @Req() request: FastifyRequest,
-  ): Promise<{ ok: true; adminConsentUrl?: string }> {
+  ): Promise<{ ok: true; adminConsentUrl?: string; auditScopes?: string[] }> {
     return this.connectors.configureOrg(requireAuth(request), id, body, request);
   }
 

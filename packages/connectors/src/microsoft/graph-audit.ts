@@ -174,9 +174,7 @@ export class GraphAuditConnector implements AuditConnector {
     const rawBytes = new TextEncoder().encode(text);
 
     const records = page.value.map((el) =>
-      scopeKey === 'directoryAudits'
-        ? this.mapDirectoryAudit(el)
-        : this.mapSignIn(el),
+      scopeKey === 'directoryAudits' ? this.mapDirectoryAudit(el) : this.mapSignIn(el),
     );
 
     const batch: AuditBatch = {
@@ -215,7 +213,9 @@ export class GraphAuditConnector implements AuditConnector {
     let resultStatus: string | undefined;
     if (e.status?.errorCode !== undefined) {
       resultStatus =
-        e.status.errorCode === 0 ? 'success' : (e.status.failureReason ?? String(e.status.errorCode));
+        e.status.errorCode === 0
+          ? 'success'
+          : (e.status.failureReason ?? String(e.status.errorCode));
     }
     return {
       system: 'graph_signins',

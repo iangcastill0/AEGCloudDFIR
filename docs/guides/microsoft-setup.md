@@ -73,6 +73,50 @@ EvidenceVault honors the resulting 403s as **permission_denied exceptions** in
 the collection's exception ledger — it never tries to bypass tenant-side
 scoping, and the completeness state reflects them.
 
+## Audit log collection
+
+Audit logs are collected **organization-wide only** — they use application
+permissions and tenant admin consent, never per-custodian delegated access. A
+delegated-only connector cannot collect audit logs; the connector must be in
+**Organization mode** (section B above).
+
+EvidenceVault collects Microsoft audit events from two upstream systems:
+
+- **`o365_management_activity`** — the Office 365 Management Activity API, for
+  unified audit content types: `Audit.Exchange`, `Audit.SharePoint`,
+  `Audit.AzureActiveDirectory`, `Audit.General`, and `DLP.All`.
+- **`graph_directory_audits`** and **`graph_signins`** — Microsoft Graph
+  directory audit logs and sign-in logs.
+
+### 1. Enable the Unified Audit Log
+
+Auditing must be turned on **in the tenant** for events to exist at all.
+Enable the Purview / Unified Audit Log (Microsoft Purview compliance portal →
+Audit → _Turn on auditing_, or `Enable-OrganizationCustomization` +
+`Set-AdminAuditLogConfig -UnifiedAuditLogIngestionEnabled $true`). Events that
+occurred while auditing was disabled were never recorded and cannot be
+collected.
+
+### 2. Grant application permissions
+
+Add these **Application** permissions to the app registration used for
+Organization mode, then obtain tenant admin consent:
+
+- **Office 365 Management APIs** → `ActivityFeed.Read` — unified audit content
+  (`o365_management_activity`).
+- **Microsoft Graph** → `AuditLog.Read.All` — directory audits
+  (`graph_directory_audits`) and sign-in logs (`graph_signins`).
+
+Consent as a Global Administrator via the generated admin-consent URL, the same
+way as the other Organization-mode permissions.
+
+### 3. Retention caveat (honest limitation)
+
+Standard Purview Audit retains audit events for approximately **180 days**.
+Events older than the retained window — or never captured because auditing was
+disabled when they occurred — cannot be collected and are reported as **scope
+limitations** in the collection's completeness state, not silently omitted.
+
 ## Verification
 
 - Connectors → _Test_ runs a folder listing under the configured identity.

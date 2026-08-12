@@ -22,6 +22,7 @@ import {
   canAdvance,
   freshWizard,
   hydrateWizard,
+  isAuditOnly,
   serializeWizard,
   validateStep,
   wizardReducer,
@@ -32,6 +33,29 @@ import { useConnectors, useCreateCollection, useCustodians } from '@/lib/hooks';
 import { errorMessage } from '@/lib/errors';
 
 const STORAGE_KEY = 'ev-collection-wizard-v1';
+
+const MS_CONTENT_TYPES = [
+  { value: 'Audit.Exchange', label: 'Exchange' },
+  { value: 'Audit.SharePoint', label: 'SharePoint' },
+  { value: 'Audit.AzureActiveDirectory', label: 'Entra ID (Azure AD)' },
+  { value: 'Audit.General', label: 'General' },
+  { value: 'DLP.All', label: 'DLP' },
+] as const;
+
+const GOOGLE_REPORT_APPS = [
+  'login',
+  'drive',
+  'admin',
+  'token',
+  'mobile',
+  'user_accounts',
+  'groups',
+  'saml',
+] as const;
+
+function toggle<T>(list: readonly T[], value: T, on: boolean): T[] {
+  return on ? [...list.filter((v) => v !== value), value] : list.filter((v) => v !== value);
+}
 
 function newIdempotencyKey(): string {
   return crypto.randomUUID();
@@ -263,6 +287,7 @@ function AccountStep({ state, dispatch }: StepProps) {
 }
 
 function SourcesStep({ state, dispatch }: StepProps) {
+  const auditNeedsOrg = state.sources.audit && state.connectorMode !== 'organization';
   return (
     <section aria-label="Step 3: sources">
       <fieldset className="ev-fieldset">
@@ -287,7 +312,30 @@ function SourcesStep({ state, dispatch }: StepProps) {
             })
           }
         />
+        <Checkbox
+          label="Audit logs (organization-wide)"
+          checked={state.sources.audit}
+          onChange={(e) =>
+            dispatch({
+              type: 'patch',
+              patch: { sources: { ...state.sources, audit: e.target.checked } },
+            })
+          }
+        />
       </fieldset>
+      {state.sources.audit ? (
+        <Notice variant={auditNeedsOrg ? 'warning' : 'info'}>
+          Audit logs are collected for the whole organization (app permission / domain-wide
+          delegation), not per custodian.{' '}
+          {auditNeedsOrg ? (
+            <>
+              This connector is not in organization mode.{' '}
+              <Link href="/connectors">Connect an organization account</Link> or deselect audit
+              logs.
+            </>
+          ) : null}
+        </Notice>
+      ) : null}
     </section>
   );
 }
@@ -296,6 +344,18 @@ function CustodiansStep({ state, dispatch }: StepProps) {
   const [search, setSearch] = useState('');
   const custodians = useCustodians(state.connectorAccountId, search);
   const delegated = state.connectorMode === 'delegated';
+
+  // Audit-only collections are organization-scoped: no custodian to choose.
+  if (isAuditOnly(state)) {
+    return (
+      <section aria-label="Step 4: custodians">
+        <Notice variant="info">
+          This is an audit-log collection. Audit logs are organization-wide, so there is no
+          custodian to select — collection runs against the whole tenant’s audit feeds.
+        </Notice>
+      </section>
+    );
+  }
 
   // Delegated connections collect for the signed-in identity only.
   useEffect(() => {
@@ -497,7 +557,108 @@ function ScopeStep({ state, dispatch }: StepProps) {
           {state.provider === 'google' ? <TruthNotice kind="googleNativeExports" /> : null}
         </fieldset>
       ) : null}
+
+      {state.sources.audit ? <AuditScopeFields state={state} dispatch={dispatch} /> : null}
     </section>
+  );
+}
+
+function AuditScopeFields({ state, dispatch }: StepProps) {
+  const a = state.scope.audit;
+  return (
+    <fieldset className="ev-fieldset">
+      <legend>Audit-log scope</legend>
+      <TruthNotice kind="auditScope" />
+
+      {state.provider === 'microsoft' ? (
+        <>
+          <p>Office 365 Management Activity content types</p>
+          {MS_CONTENT_TYPES.map((ct) => (
+            <Checkbox
+              key={ct.value}
+              label={ct.label}
+              checked={a.msContentTypes.includes(ct.value)}
+              onChange={(e) =>
+                dispatch({
+                  type: 'patchAudit',
+                  patch: { msContentTypes: toggle(a.msContentTypes, ct.value, e.target.checked) },
+                })
+              }
+            />
+          ))}
+          <Checkbox
+            label="Include Graph sign-in logs"
+            checked={a.includeGraphSignins}
+            onChange={(e) =>
+              dispatch({ type: 'patchAudit', patch: { includeGraphSignins: e.target.checked } })
+            }
+          />
+          <Checkbox
+            label="Include Graph directory audits"
+            checked={a.includeGraphDirectoryAudits}
+            onChange={(e) =>
+              dispatch({
+                type: 'patchAudit',
+                patch: { includeGraphDirectoryAudits: e.target.checked },
+              })
+            }
+          />
+        </>
+      ) : null}
+
+      {state.provider === 'google' ? (
+        <>
+          <p>Admin SDK Reports applications</p>
+          {GOOGLE_REPORT_APPS.map((app) => (
+            <Checkbox
+              key={app}
+              label={app}
+              checked={a.googleReportApplications.includes(app)}
+              onChange={(e) =>
+                dispatch({
+                  type: 'patchAudit',
+                  patch: {
+                    googleReportApplications: toggle(
+                      a.googleReportApplications,
+                      app,
+                      e.target.checked,
+                    ),
+                  },
+                })
+              }
+            />
+          ))}
+          <Checkbox
+            label="Include Google Vault (matters / exports — metadata only)"
+            checked={a.includeVault}
+            onChange={(e) =>
+              dispatch({ type: 'patchAudit', patch: { includeVault: e.target.checked } })
+            }
+          />
+          {a.includeVault ? (
+            <TextArea
+              label="Vault matter ids (optional)"
+              hint="One matter id per line (or comma-separated). Leave blank for all accessible matters."
+              rows={3}
+              value={a.vaultMatterIdsText}
+              onChange={(e) =>
+                dispatch({ type: 'patchAudit', patch: { vaultMatterIdsText: e.target.value } })
+              }
+            />
+          ) : null}
+        </>
+      ) : null}
+
+      <TextArea
+        label="Actor filter (optional)"
+        hint="Restrict to specific actor principals (UPN/email), one per line or comma-separated, where the provider supports it."
+        rows={2}
+        value={a.actorFilterText}
+        onChange={(e) =>
+          dispatch({ type: 'patchAudit', patch: { actorFilterText: e.target.value } })
+        }
+      />
+    </fieldset>
   );
 }
 
@@ -547,7 +708,11 @@ function ReviewStep({ state }: { state: WizardState }) {
           <tr>
             <th scope="row">Sources</th>
             <td>
-              {[state.sources.email ? 'email' : null, state.sources.drive ? 'drive' : null]
+              {[
+                state.sources.email ? 'email' : null,
+                state.sources.drive ? 'drive' : null,
+                state.sources.audit ? 'audit logs' : null,
+              ]
                 .filter(Boolean)
                 .join(', ') || '—'}
             </td>
@@ -581,6 +746,7 @@ function ReviewStep({ state }: { state: WizardState }) {
       {state.provider === 'google' && state.sources.drive ? (
         <TruthNotice kind="googleNativeExports" />
       ) : null}
+      {state.sources.audit ? <TruthNotice kind="auditScope" /> : null}
       <TruthNotice kind="exceptions" variant="warning" />
     </section>
   );
@@ -590,9 +756,19 @@ function StartStep({ state }: { state: WizardState }) {
   return (
     <section aria-label="Step 8: start">
       <p>
-        Starting will queue discovery and preservation for{' '}
-        <strong>{state.custodians.length}</strong> custodian(s). Progress is visible on the
-        collection status page, per custodian and per source.
+        {isAuditOnly(state) ? (
+          <>
+            Starting will queue organization-wide audit-log discovery and preservation. Progress is
+            visible on the collection status page.
+          </>
+        ) : (
+          <>
+            Starting will queue discovery and preservation for{' '}
+            <strong>{state.custodians.length}</strong> custodian(s)
+            {state.sources.audit ? ' plus organization-wide audit logs' : ''}. Progress is visible
+            on the collection status page, per custodian and per source.
+          </>
+        )}
       </p>
       <Notice variant="info">
         This start request carries a stable idempotency key, so retrying after a network failure

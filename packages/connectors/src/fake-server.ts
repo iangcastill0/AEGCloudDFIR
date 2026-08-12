@@ -402,7 +402,9 @@ export async function startFakeProviderServer(
     }
 
     // ---- Workspace Admin SDK Reports (audit activities) ----
-    m = /^\/google\/admin\/reports\/v1\/activity\/users\/([^/]+)\/applications\/([^/]+)$/.exec(path);
+    m = /^\/google\/admin\/reports\/v1\/activity\/users\/([^/]+)\/applications\/([^/]+)$/.exec(
+      path,
+    );
     if (m !== null) {
       await sendJsonFile(res, `google/reports.${m[2]}.${googleSuffix(q)}.json`, true);
       return;

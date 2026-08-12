@@ -7,6 +7,7 @@ import { SessionGuard } from '../auth/guards/session.guard.js';
 import { TenantGuard } from '../auth/guards/tenant.guard.js';
 import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { RequireRoles } from '../auth/guards/require-roles.decorator.js';
+import { parseCursorQuery } from '../common/pagination.js';
 import { EvidenceService, type EvidenceDetailDto } from './evidence.service.js';
 
 function requireAuth(request: FastifyRequest): AuthContext {
@@ -36,6 +37,16 @@ export class EvidenceController {
     @Req() request: FastifyRequest,
   ): Promise<{ items: { name: string; rawName: string; value: string; position: number }[] }> {
     return this.evidence.headers(requireAuth(request), id);
+  }
+
+  @Get(':id/audit-records')
+  @RequireRoles(TenantRole.case_manager, TenantRole.reviewer, TenantRole.read_only)
+  async auditRecords(
+    @Param('id') id: string,
+    @Query() query: Record<string, unknown>,
+    @Req() request: FastifyRequest,
+  ): ReturnType<EvidenceService['auditRecords']> {
+    return this.evidence.auditRecords(requireAuth(request), id, parseCursorQuery(query));
   }
 
   @Get(':id/family')

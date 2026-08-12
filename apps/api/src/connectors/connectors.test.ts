@@ -147,6 +147,7 @@ describe('ConnectorsService.configureOrg (google)', () => {
         update: vi.fn(async () => account),
       },
       connectorSecret: { deleteMany: vi.fn(async () => ({ count: 0 })), create: secretCreate },
+      connectorScope: { createMany: vi.fn(async () => ({ count: 2 })) },
     });
 
     const result = await service.configureOrg(
@@ -160,7 +161,12 @@ describe('ConnectorsService.configureOrg (google)', () => {
       fakeRequest(),
     );
 
-    expect(result).toEqual({ ok: true });
+    expect(result.ok).toBe(true);
+    // Audit DWD scopes are surfaced for setup guidance.
+    expect(result.auditScopes).toContain(
+      'https://www.googleapis.com/auth/admin.reports.audit.readonly',
+    );
+    expect(result.auditScopes).toContain('https://www.googleapis.com/auth/ediscovery.readonly');
     expect(JSON.stringify(result)).not.toContain('PRIVATE KEY');
 
     // Stored ciphertext only — never the raw key.

@@ -22,7 +22,7 @@ export const PROGRESS_COUNTERS = [
 export type ProgressCounter = (typeof PROGRESS_COUNTERS)[number];
 export type ProgressDeltas = Partial<Record<ProgressCounter, number>>;
 
-type CollectionSourceValue = 'email' | 'drive';
+type CollectionSourceValue = 'email' | 'drive' | 'audit';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);

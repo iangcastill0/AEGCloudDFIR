@@ -16,6 +16,7 @@ import { incrementProgress, recordException } from '../progress.js';
 import { QUEUES, dedupKeys } from '../queues.js';
 import { dateRangeToInstants, parseCollectionScope } from '../scope.js';
 import { DEFAULT_DRIVE_SCOPE_KEY } from './collection-discover.js';
+import { processAuditFetchPage } from './collection-audit-fetch-page.js';
 import type { DriveEntryPayload, FetchPagePayload } from './payloads.js';
 
 export function cursorHash(cursor: string): string {
@@ -116,6 +117,13 @@ export async function processCollectionFetchPage(
   payload: FetchPagePayload,
 ): Promise<void> {
   const { tenantId, collectionId, custodianId, source, scopeKey } = payload;
+
+  // Audit is org-scoped and stages+persists records inline (no per-item fetch
+  // stage), so it has a dedicated page processor.
+  if (source === 'audit') {
+    await processAuditFetchPage(ctx, payload);
+    return;
+  }
 
   const loaded = await withTenantContext(ctx.prisma, tenantId, async (tx) => {
     const collection = await tx.collection.findUnique({

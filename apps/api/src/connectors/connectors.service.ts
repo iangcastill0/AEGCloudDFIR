@@ -31,7 +31,9 @@ import {
   GoogleCustodianDirectory,
   GraphCustodianDirectory,
   GraphEmailConnector,
+  GOOGLE_AUDIT_DWD_SCOPES,
   GOOGLE_DELEGATED_SCOPES,
+  MICROSOFT_AUDIT_ORG_APP_PERMISSIONS,
   MICROSOFT_DELEGATED_SCOPES,
   type CustodianDirectory,
   type ExchangedTokens,
@@ -550,7 +552,7 @@ export class ConnectorsService {
     connectorId: string,
     body: unknown,
     request: FastifyRequest,
-  ): Promise<{ ok: true; adminConsentUrl?: string }> {
+  ): Promise<{ ok: true; adminConsentUrl?: string; auditScopes?: string[] }> {
     return withTenantContext(this.prisma, auth.tenantId, async (tx) => {
       const account = await tx.connectorAccount.findFirst({
         where: { id: connectorId, tenantId: auth.tenantId },
@@ -576,6 +578,16 @@ export class ConnectorsService {
             statusDetail: 'awaiting admin consent; run a connection test after consenting',
           },
         });
+        // Record the audit app permissions expected on this org connector so
+        // admin-consent guidance and later verification can reference them.
+        await tx.connectorScope.createMany({
+          data: MICROSOFT_AUDIT_ORG_APP_PERMISSIONS.map((scope) => ({
+            tenantId: auth.tenantId,
+            connectorAccountId: account.id,
+            scope,
+          })),
+          skipDuplicates: true,
+        });
         const adminConsentUrl = buildMicrosoftAdminConsentUrl({
           msLoginBaseUrl: this.config.EV_MS_LOGIN_BASE_URL,
           tenantId: input.externalTenantId,
@@ -590,10 +602,18 @@ export class ConnectorsService {
           action: 'connector.org_configured',
           targetType: 'connector_account',
           targetId: account.id,
-          summary: { provider: 'microsoft', externalTenantId: input.externalTenantId },
+          summary: {
+            provider: 'microsoft',
+            externalTenantId: input.externalTenantId,
+            auditScopes: [...MICROSOFT_AUDIT_ORG_APP_PERMISSIONS],
+          },
           request,
         });
-        return { ok: true as const, adminConsentUrl };
+        return {
+          ok: true as const,
+          adminConsentUrl,
+          auditScopes: [...MICROSOFT_AUDIT_ORG_APP_PERMISSIONS],
+        };
       }
 
       // Google: domain-wide delegation with an uploaded service-account key.
@@ -630,6 +650,16 @@ export class ConnectorsService {
           statusDetail: '',
         },
       });
+      // Record the audit DWD scopes expected on the domain-wide delegation grant
+      // so setup guidance and verification can reference them.
+      await tx.connectorScope.createMany({
+        data: GOOGLE_AUDIT_DWD_SCOPES.map((scope) => ({
+          tenantId: auth.tenantId,
+          connectorAccountId: account.id,
+          scope,
+        })),
+        skipDuplicates: true,
+      });
       // Summary NEVER contains key material — only the delegation shape.
       await this.audit.appendTx(tx, {
         tenantId: auth.tenantId,
@@ -644,10 +674,11 @@ export class ConnectorsService {
           allowedDomains: input.allowedDomains,
           adminEmail: input.adminEmail,
           serviceAccountEmail: key.client_email,
+          auditScopes: [...GOOGLE_AUDIT_DWD_SCOPES],
         },
         request,
       });
-      return { ok: true as const };
+      return { ok: true as const, auditScopes: [...GOOGLE_AUDIT_DWD_SCOPES] };
     });
   }
 

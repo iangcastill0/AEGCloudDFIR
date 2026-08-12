@@ -17,6 +17,7 @@ import {
 } from '@evidencevault/ui';
 import { HighlightText, QueryBoundary, TruthNotice } from '@/components/shared';
 import {
+  useAuditRecords,
   useBulkTag,
   useCases,
   useCreateTag,
@@ -728,6 +729,9 @@ function PreviewPane({
                   label: 'Content',
                   panel: <ContentTab previewState={preview} />,
                 },
+                ...((item.kind as string) === 'audit_batch'
+                  ? [{ id: 'audit', label: 'Audit', panel: <AuditTab itemId={item.id} /> }]
+                  : []),
                 {
                   id: 'metadata',
                   label: 'Metadata',
@@ -932,6 +936,62 @@ function ContentTab({ previewState }: { previewState: ReturnType<typeof useEvide
     );
   }
   return <pre className="preview-pre">{preview.content}</pre>;
+}
+
+function AuditTab({ itemId }: { itemId: string }) {
+  const records = useAuditRecords(itemId, true);
+  if (records.isPending) return <Skeleton label="Loading audit records" lines={6} />;
+  if (records.error != null)
+    return <p role="alert">Audit records unavailable: {errorMessage(records.error)}</p>;
+  const data = records.data;
+  if (!data || data.items.length === 0) return <p>No audit records in this batch.</p>;
+  return (
+    <>
+      <p>
+        {data.items.length} record(s){data.nextCursor ? ' (first page)' : ''} in this batch.
+      </p>
+      <div className="table-scroll">
+        <Table caption="Audit records" captionHidden>
+          <thead>
+            <tr>
+              <th scope="col">Occurred</th>
+              <th scope="col">Actor</th>
+              <th scope="col">Workload</th>
+              <th scope="col">Operation</th>
+              <th scope="col">Result</th>
+              <th scope="col">IP</th>
+              <th scope="col">Target</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.items.map((r) => (
+              <tr key={r.id}>
+                <td>{formatDateTime(r.occurredAt)}</td>
+                <td>{r.actorEmail || r.actorId || '—'}</td>
+                <td>{r.workload || '—'}</td>
+                <td>{r.operation || '—'}</td>
+                <td>{r.resultStatus || '—'}</td>
+                <td className="mono">{r.actorIp || '—'}</td>
+                <td>
+                  {r.targetType || r.targetId ? (
+                    <>
+                      {r.targetType} <span className="mono">{r.targetId}</span>
+                    </>
+                  ) : (
+                    '—'
+                  )}
+                  <details>
+                    <summary>Raw event</summary>
+                    <pre className="preview-pre">{JSON.stringify(r.raw, null, 2)}</pre>
+                  </details>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
+      </div>
+    </>
+  );
 }
 
 function TagsTab({

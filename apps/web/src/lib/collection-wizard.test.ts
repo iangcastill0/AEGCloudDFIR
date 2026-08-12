@@ -129,7 +129,10 @@ describe('buildCreateRequest', () => {
 
   it('emits explicit folder ids and the range timezone when set', () => {
     let s = filledWizard();
-    s = wizardReducer(s, { type: 'patch', patch: { sources: { email: true, drive: true } } });
+    s = wizardReducer(s, {
+      type: 'patch',
+      patch: { sources: { email: true, drive: true, audit: false } },
+    });
     s = wizardReducer(s, {
       type: 'patchScope',
       patch: {
@@ -155,5 +158,90 @@ describe('buildCreateRequest', () => {
   it('throws when the wizard state is not contract-valid', () => {
     const s = { ...filledWizard(), custodians: [] };
     expect(() => buildCreateRequest(s)).toThrow();
+  });
+});
+
+describe('audit source', () => {
+  function auditGoogleWizard(): WizardState {
+    let s = freshWizard(KEY);
+    s = wizardReducer(s, {
+      type: 'patch',
+      patch: {
+        name: 'Audit sweep',
+        provider: 'google',
+        connectorAccountId: '4f9a4f4e-7b8b-4b1c-9a3e-1c2d3e4f5a6b',
+        connectorMode: 'organization',
+        sources: { email: false, drive: false, audit: true },
+        custodians: [],
+      },
+    });
+    return s;
+  }
+
+  it('requires an organization-mode connector for audit', () => {
+    let s = auditGoogleWizard();
+    s = wizardReducer(s, { type: 'patch', patch: { connectorMode: 'delegated' } });
+    const errors = validateStep(s, 2 /* STEP_SOURCES */);
+    expect(errors.join(' ')).toContain('organization-mode');
+  });
+
+  it('an audit-only collection needs no custodian', () => {
+    const s = auditGoogleWizard();
+    expect(validateStep(s, STEP_CUSTODIANS)).toEqual([]);
+  });
+
+  it('requires an audit scope before advancing past scope', () => {
+    const s = auditGoogleWizard();
+    // Nothing configured yet.
+    expect(validateStep(s, STEP_SCOPE).length).toBeGreaterThan(0);
+    const configured = wizardReducer(s, {
+      type: 'patchAudit',
+      patch: { googleReportApplications: ['login', 'drive'] },
+    });
+    expect(validateStep(configured, STEP_SCOPE)).toEqual([]);
+  });
+
+  it('compiles the Google audit scope into the create request', () => {
+    let s = auditGoogleWizard();
+    s = wizardReducer(s, {
+      type: 'patchAudit',
+      patch: {
+        googleReportApplications: ['login', 'drive'],
+        includeVault: true,
+        vaultMatterIdsText: 'matter-1, matter-2',
+        actorFilterText: 'alice@example.com',
+      },
+    });
+    const req = buildCreateRequest(s);
+    expect(req.sources).toEqual(['audit']);
+    expect(req.custodianIds).toEqual([]);
+    expect(req.scope.audit?.google?.reportApplications).toEqual(['login', 'drive']);
+    expect(req.scope.audit?.google?.includeVault).toBe(true);
+    expect(req.scope.audit?.google?.vaultMatterIds).toEqual(['matter-1', 'matter-2']);
+    expect(req.scope.audit?.actorFilter).toEqual(['alice@example.com']);
+    expect(req.scope.audit?.microsoft).toBeUndefined();
+  });
+
+  it('compiles the Microsoft audit content types and Graph toggles', () => {
+    let s = freshWizard(KEY);
+    s = wizardReducer(s, {
+      type: 'patch',
+      patch: {
+        name: 'MS audit',
+        provider: 'microsoft',
+        connectorAccountId: '4f9a4f4e-7b8b-4b1c-9a3e-1c2d3e4f5a6b',
+        connectorMode: 'organization',
+        sources: { email: false, drive: false, audit: true },
+        custodians: [],
+      },
+    });
+    s = wizardReducer(s, {
+      type: 'patchAudit',
+      patch: { msContentTypes: ['Audit.Exchange'], includeGraphSignins: true },
+    });
+    const req = buildCreateRequest(s);
+    expect(req.scope.audit?.microsoft?.managementContentTypes).toEqual(['Audit.Exchange']);
+    expect(req.scope.audit?.microsoft?.includeGraphSignins).toBe(true);
+    expect(req.scope.audit?.google).toBeUndefined();
   });
 });

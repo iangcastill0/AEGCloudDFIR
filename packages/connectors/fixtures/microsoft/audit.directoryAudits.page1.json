@@ -7,7 +7,7 @@
       "activityDateTime": "2026-07-01T10:00:00Z",
       "result": "success",
       "initiatedBy": { "user": { "id": "u-1", "userPrincipalName": "admin@example.com" } },
-      "targetResources": [ { "id": "u-2", "type": "User" } ]
+      "targetResources": [{ "id": "u-2", "type": "User" }]
     }
   ],
   "@odata.nextLink": "{{BASE}}/graph/auditLogs/directoryAudits?$skiptoken=da2&page=2"

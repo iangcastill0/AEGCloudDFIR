@@ -104,6 +104,83 @@ describe('CollectionsService.create', () => {
       BadRequestException,
     );
   });
+
+  it('rejects an audit source on a delegated connector with 409', async () => {
+    const { service } = makeService({
+      collection: { findFirst: vi.fn(async () => null) },
+      connectorAccount: {
+        findFirst: vi.fn(async () => ({
+          id: CONNECTOR_ID,
+          status: ConnectorStatus.connected,
+          mode: 'delegated',
+        })),
+      },
+    });
+    const body = {
+      ...createBody,
+      idempotencyKey: 'idem-audit-delegated-1',
+      sources: ['audit'],
+      custodianIds: [],
+      scope: {
+        dateRange: { kind: 'all_time' },
+        audit: { microsoft: { managementContentTypes: ['Audit.Exchange'] } },
+      },
+    };
+    await expect(service.create(auth, body, fakeRequest())).rejects.toThrow(ConflictException);
+  });
+
+  it('allows an audit-only collection with no custodians on an org connector', async () => {
+    const collectionCreate = vi.fn(async () => ({
+      id: COLLECTION_ID,
+      status: CollectionStatus.created,
+    }));
+    const custodiansCreateMany = vi.fn(async () => ({ count: 0 }));
+    const outboxCreate = vi.fn(async () => ({}));
+    const custodianFindMany = vi.fn(async () => []);
+    const { service } = makeService({
+      collection: {
+        findFirst: vi.fn(async () => null),
+        count: vi.fn(async () => 0),
+        create: collectionCreate,
+      },
+      connectorAccount: {
+        findFirst: vi.fn(async () => ({
+          id: CONNECTOR_ID,
+          status: ConnectorStatus.connected,
+          mode: 'organization',
+        })),
+      },
+      custodian: { findMany: custodianFindMany },
+      tenant: { findUnique: vi.fn(async () => ({ id: TENANT_ID, planQuota: {} })) },
+      collectionCustodian: { createMany: custodiansCreateMany },
+      outboxEvent: { create: outboxCreate },
+    });
+
+    const body = {
+      ...createBody,
+      idempotencyKey: 'idem-audit-only-1',
+      sources: ['audit'],
+      custodianIds: [],
+      scope: {
+        dateRange: { kind: 'all_time' },
+        audit: { google: { reportApplications: ['login'], includeVault: false } },
+      },
+    };
+    const result = await service.create(auth, body, fakeRequest());
+    expect(result).toEqual({ id: COLLECTION_ID, status: 'created', replayed: false });
+    // No custodian belong-to-connector lookup and no custodian rows created.
+    expect(custodianFindMany).not.toHaveBeenCalled();
+    expect(custodiansCreateMany).not.toHaveBeenCalled();
+    expect(outboxCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects an email collection with no custodians (contract relaxation is audit-only)', async () => {
+    const { service } = makeService({
+      collection: { findFirst: vi.fn(async () => null) },
+    });
+    const body = { ...createBody, idempotencyKey: 'idem-email-nocust-1', custodianIds: [] };
+    await expect(service.create(auth, body, fakeRequest())).rejects.toThrow();
+  });
 });
 
 describe('CollectionsService.action', () => {

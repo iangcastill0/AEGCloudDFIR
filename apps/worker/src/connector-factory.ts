@@ -2,21 +2,37 @@ import {
   GmailConnector,
   GoogleDelegatedTokenSource,
   GoogleDriveConnector,
+  GoogleReportsConnector,
   GoogleServiceAccountTokenSource,
+  GoogleVaultConnector,
+  GraphAuditConnector,
   GraphDriveConnector,
   GraphEmailConnector,
   GOOGLE_DWD_SCOPES,
+  GOOGLE_REPORTS_APPLICATIONS,
+  GOOGLE_REPORTS_AUDIT_SCOPE,
+  GOOGLE_VAULT_READONLY_SCOPE,
   MICROSOFT_DELEGATED_SCOPES,
+  MICROSOFT_GRAPH_AUDIT_APP_SCOPE,
+  MICROSOFT_MANAGEMENT_ACTIVITY_APP_SCOPE,
   MicrosoftAppTokenSource,
   MicrosoftDelegatedTokenSource,
+  O365_MANAGEMENT_CONTENT_TYPES,
+  O365ManagementActivityConnector,
   type DriveConnector,
   type EmailConnector,
   type RateLimitObserver,
   type TokenProvider,
 } from '@evidencevault/connectors';
 import { decryptSecret, encryptSecret, withTenantContext } from '@evidencevault/database';
+import type { CollectionScope } from '@evidencevault/contracts';
 import type { WorkerContext } from './context.js';
 import { incrementProgress } from './progress.js';
+import {
+  AuditRequiresOrganizationModeError,
+  type AuditConnectorBundle,
+  type TaggedAuditConnector,
+} from './audit.js';
 
 /**
  * SECRET SCOPE CONVENTION (shared with apps/api, which encrypts on the OAuth
@@ -241,6 +257,147 @@ export async function buildConnectorsForAccount(
   };
 }
 
+export interface BuildAuditConnectorsArgs extends BuildConnectorsArgs {
+  /** Audit scope selection from the collection (content types, apps, matters). */
+  auditScope?: CollectionScope['audit'];
+}
+
+/**
+ * Build the org-scoped audit connectors for a connector account. Audit logs
+ * are tenant/organization-wide (app permission / domain-wide delegation), never
+ * per-custodian: a delegated-only connector cannot collect audit logs and
+ * raises AuditRequiresOrganizationModeError so the caller records it as a
+ * permission exception.
+ *
+ * Microsoft (organization): a MicrosoftAppTokenSource for the manage.office.com
+ *   app scope -> O365ManagementActivityConnector (unified audit content types),
+ *   plus a SEPARATE MicrosoftAppTokenSource for the Graph audit app scope ->
+ *   GraphAuditConnector (directory audits / sign-ins).
+ * Google (organization): a GoogleServiceAccountTokenSource impersonating the
+ *   configured admin email, one per source with its least-privilege scope ->
+ *   GoogleReportsConnector + GoogleVaultConnector.
+ *
+ * Base URLs are left at the connectors' production defaults (manage.office.com,
+ * admin.googleapis.com, vault.googleapis.com); only the Graph audit connector
+ * takes the configurable Graph base URL.
+ */
+export async function buildAuditConnectors(
+  ctx: WorkerContext,
+  args: BuildAuditConnectorsArgs,
+): Promise<AuditConnectorBundle> {
+  const { tenantId, connectorAccountId } = args;
+  const account = await withTenantContext(ctx.prisma, tenantId, (tx) =>
+    tx.connectorAccount.findUnique({
+      where: { id: connectorAccountId },
+      include: { secrets: true },
+    }),
+  );
+  if (account === null) {
+    throw new Error(`connector account ${connectorAccountId} not found`);
+  }
+  if (account.mode !== 'organization') {
+    throw new AuditRequiresOrganizationModeError(
+      'audit log collection requires an organization-mode connector (app permission / domain-wide delegation); delegated connectors cannot collect audit logs',
+    );
+  }
+
+  const secrets = account.secrets as unknown as SecretRow[];
+  const auditScope = args.auditScope;
+  const connectors: TaggedAuditConnector[] = [];
+
+  if (account.provider === 'microsoft') {
+    if (account.externalTenantId === '') {
+      throw new Error('microsoft organization mode requires the connector externalTenantId');
+    }
+    const appToken = (scope: string): MicrosoftAppTokenSource =>
+      new MicrosoftAppTokenSource({
+        msLoginBaseUrl: ctx.config.EV_MS_LOGIN_BASE_URL,
+        tenantId: account.externalTenantId,
+        clientId: ctx.config.EV_MS_CLIENT_ID,
+        clientSecret: ctx.config.EV_MS_CLIENT_SECRET,
+        scope,
+      });
+
+    const contentTypes = auditScope?.microsoft?.managementContentTypes ?? [];
+    if (contentTypes.length > 0) {
+      connectors.push({
+        kind: 'o365_management_activity',
+        connector: new O365ManagementActivityConnector({
+          tokenProvider: appToken(MICROSOFT_MANAGEMENT_ACTIVITY_APP_SCOPE),
+          tenantId: account.externalTenantId,
+          contentTypes: contentTypes.length > 0 ? contentTypes : O365_MANAGEMENT_CONTENT_TYPES,
+          onRateLimit: args.onRateLimit,
+        }),
+      });
+    }
+
+    const graphScopes: ('directoryAudits' | 'signIns')[] = [];
+    if (auditScope?.microsoft?.includeGraphDirectoryAudits === true)
+      graphScopes.push('directoryAudits');
+    if (auditScope?.microsoft?.includeGraphSignins === true) graphScopes.push('signIns');
+    if (graphScopes.length > 0) {
+      connectors.push({
+        kind: 'graph_audit',
+        connector: new GraphAuditConnector({
+          tokenProvider: appToken(MICROSOFT_GRAPH_AUDIT_APP_SCOPE),
+          graphBaseUrl: ctx.config.EV_MS_GRAPH_BASE_URL,
+          scopes: graphScopes,
+          onRateLimit: args.onRateLimit,
+        }),
+      });
+    }
+
+    if (connectors.length === 0) {
+      throw new Error('audit collection includes no Microsoft audit sources');
+    }
+    return { provider: 'microsoft', mode: 'organization', connectors };
+  }
+
+  // Google organization: impersonate the configured admin, per-source scope.
+  const row = requireSecret(secrets, 'service_account_key', 'service account key');
+  const keyJson = JSON.parse(
+    (await decryptSecretRow(ctx, tenantId, connectorAccountId, row)).toString('utf8'),
+  ) as unknown;
+  const serviceAccountJson = serviceAccountShape(keyJson);
+  const dwdToken = (scope: string): GoogleServiceAccountTokenSource =>
+    new GoogleServiceAccountTokenSource({
+      googleOauthTokenUrl: ctx.config.EV_GOOGLE_OAUTH_TOKEN_URL,
+      serviceAccountJson,
+      scopes: [scope],
+      impersonateEmail: account.externalIdentity,
+      allowedDomains: account.allowedDomains,
+    });
+
+  const applications = auditScope?.google?.reportApplications ?? [];
+  if (applications.length > 0) {
+    connectors.push({
+      kind: 'google_reports',
+      connector: new GoogleReportsConnector({
+        tokenProvider: dwdToken(GOOGLE_REPORTS_AUDIT_SCOPE),
+        applications: applications.length > 0 ? applications : GOOGLE_REPORTS_APPLICATIONS,
+        onRateLimit: args.onRateLimit,
+      }),
+    });
+  }
+
+  if (auditScope?.google?.includeVault === true) {
+    const matterIds = auditScope.google.vaultMatterIds ?? [];
+    connectors.push({
+      kind: 'google_vault',
+      connector: new GoogleVaultConnector({
+        tokenProvider: dwdToken(GOOGLE_VAULT_READONLY_SCOPE),
+        ...(matterIds.length > 0 ? { vaultMatterIds: matterIds } : {}),
+        onRateLimit: args.onRateLimit,
+      }),
+    });
+  }
+
+  if (connectors.length === 0) {
+    throw new Error('audit collection includes no Google audit sources');
+  }
+  return { provider: 'google', mode: 'organization', connectors };
+}
+
 /**
  * Rate-limit observer that accumulates provider throttling wait time into the
  * custodian's progress counters. Fire-and-forget: bookkeeping failures never
@@ -251,7 +408,7 @@ export function makeRateLimitObserver(
   tenantId: string,
   collectionId: string,
   custodianId: string,
-  source: 'email' | 'drive',
+  source: 'email' | 'drive' | 'audit',
 ): RateLimitObserver {
   return (info) => {
     void withTenantContext(ctx.prisma, tenantId, (tx) =>

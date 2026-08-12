@@ -189,6 +189,30 @@ export const previewResponse = z.object({
   isApiExportDerivative: z.boolean().default(false),
 });
 
+export const auditRecordEntry = z.object({
+  id: z.string(),
+  system: z.string(),
+  providerRecordId: z.string(),
+  workload: z.string(),
+  operation: z.string(),
+  recordType: z.string(),
+  actorId: z.string(),
+  actorEmail: z.string(),
+  actorIp: z.string(),
+  targetId: z.string(),
+  targetType: z.string(),
+  resultStatus: z.string(),
+  occurredAt: z.string().nullable(),
+  raw: z.unknown(),
+});
+export type AuditRecordEntry = z.infer<typeof auditRecordEntry>;
+
+export const auditRecordsResponse = z.object({
+  items: z.array(auditRecordEntry),
+  nextCursor: z.string().nullable(),
+  batch: z.object({ id: z.string(), name: z.string(), sha256: z.string() }),
+});
+
 // --- Tags / saved searches / cases ---
 
 export const tagListResponse = paginated(tagResponse);

@@ -69,9 +69,7 @@ const activitySchema = z.object({
     applicationName: z.string().optional(),
     customerId: z.string().optional(),
   }),
-  actor: z
-    .object({ email: z.string().optional(), profileId: z.string().optional() })
-    .optional(),
+  actor: z.object({ email: z.string().optional(), profileId: z.string().optional() }).optional(),
   ipAddress: z.string().optional(),
   events: z.array(eventSchema).default([]),
 });
@@ -134,7 +132,7 @@ export class GoogleReportsConnector implements AuditConnector {
     // Preserve the untouched event objects (zod parsing strips unknown keys).
     const rawItems =
       typeof parsedJson === 'object' && parsedJson !== null
-        ? ((parsedJson as Record<string, unknown>)['items'] as unknown[] | undefined) ?? []
+        ? (((parsedJson as Record<string, unknown>)['items'] as unknown[] | undefined) ?? [])
         : [];
 
     const records: AuditRecordRaw[] = [];
@@ -149,8 +147,7 @@ export class GoogleReportsConnector implements AuditConnector {
       activity.events.forEach((event, eventIndex) => {
         const idBase = `${qualifier !== undefined ? String(qualifier) : 'na'}:${time ?? 'na'}`;
         // A qualifier+time pair can host several events; disambiguate by index.
-        const providerRecordId =
-          activity.events.length > 1 ? `${idBase}#${eventIndex}` : idBase;
+        const providerRecordId = activity.events.length > 1 ? `${idBase}#${eventIndex}` : idBase;
         records.push({
           system: 'google_reports',
           providerRecordId,

@@ -13,6 +13,7 @@ import type { CreateCollectionRequest } from '@evidencevault/contracts';
 import { apiFetch } from './api';
 import {
   auditListResponse,
+  auditRecordsResponse,
   auditVerifyResponse,
   authTenantsResponse,
   caseListResponse,
@@ -246,6 +247,15 @@ export function useEvidencePreview(id: string | null) {
     queryKey: ['evidence-preview', id],
     queryFn: () => apiFetch(`/api/v1/evidence/${id}/preview`, { schema: previewResponse }),
     enabled: id !== null,
+  });
+}
+
+export function useAuditRecords(id: string | null, enabled: boolean) {
+  return useQuery({
+    queryKey: ['evidence-audit-records', id],
+    queryFn: () =>
+      apiFetch(`/api/v1/evidence/${id}/audit-records?limit=100`, { schema: auditRecordsResponse }),
+    enabled: id !== null && enabled,
   });
 }
 

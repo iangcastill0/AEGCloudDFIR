@@ -81,6 +81,7 @@ const MODEL_NAMES = [
   'productionException',
   'batesReservation',
   'auditEvent',
+  'auditRecord',
 ] as const;
 
 export type FakeTx = Record<(typeof MODEL_NAMES)[number], FakeModel> & {
