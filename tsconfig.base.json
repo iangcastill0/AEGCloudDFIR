@@ -17,7 +17,7 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
-    "incremental": true,
+    "incremental": false,
     "verbatimModuleSyntax": false
   }
 }
