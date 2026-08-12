@@ -209,3 +209,41 @@ pnpm --filter @evidencevault/web start &                           # :3000
 node --env-file=.env node_modules/.bin/tsx scripts/demo-seed.ts
 pnpm exec playwright test
 ```
+
+## Addendum — audit-log collection (Microsoft Purview + Google Workspace)
+
+Added after the initial verification; state as of commit `372bc9e`.
+
+**Feature**: a third collection source `audit` pulling from four read-only
+systems — O365 Management Activity API (the Unified Audit Log behind Purview
+Audit), Microsoft Graph `auditLogs` (directoryAudits + signIns), Google Admin
+SDK Reports API, and Google Vault (matter/export **metadata only**; archive
+download from the GCS sink is a documented follow-up). Each provider payload
+is preserved byte-for-byte as an immutable `audit_batch` native (content-
+addressed, hashed, manifested) with parsed per-event `AuditRecord` rows and
+`audit.*` search fields (`auditsystem:`, `workload:`, `operation:`, `actor:`,
+`actorip:`, `auditresult:`, `occurred:` ranges).
+
+**Verification results**:
+
+| Gate                                                                 | Result                                                                                                  |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Migration `20260812000003_audit_source` (enum + audit_records + RLS) | applied to the live DB                                                                                  |
+| `pnpm build` / `lint` / `typecheck`                                  | PASS (all tasks)                                                                                        |
+| Unit tests                                                           | **834 passing** (connectors 95, worker 79, api 134, web 44, search 173 w/ mapping v2, others unchanged) |
+| Playwright E2E (live stack, index rebuilt at mapping v2)             | **25 passing** — all prior scenarios remain green                                                       |
+
+**Honesty controls carried through**: audit collection requires organization
+mode (409 otherwise); per-scope 403 / config errors become recorded
+exceptions, not silent gaps; the wizard shows the retention-window notice
+(Purview Audit Standard ~180 days, Google Reports ~180 days — events outside
+the retained window or not captured because auditing was disabled cannot be
+collected); Vault batches are explicitly labeled metadata-only.
+
+**Residual (audit-specific)**: live verification against a real Entra tenant
+/ Workspace domain still requires admin credentials (ActivityFeed.Read +
+AuditLog.Read.All admin consent; DWD scopes admin.reports.audit.readonly +
+ediscovery.readonly); a live audit E2E over the fake provider requires config
+overrides for the manage.office.com / admin.googleapis.com / vault.googleapis.com
+base URLs (config keys are a follow-up — the connectors already accept
+injected base URLs and are fixture-tested).
