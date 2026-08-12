@@ -1,5 +1,5 @@
 {
-  "name": "@evidencevault/web",
+  "name": "@aeg-clouddfir/web",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -11,8 +11,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@evidencevault/contracts": "workspace:*",
-    "@evidencevault/ui": "workspace:*",
+    "@aeg-clouddfir/contracts": "workspace:*",
+    "@aeg-clouddfir/ui": "workspace:*",
     "@tanstack/react-query": "5.101.4",
     "@tanstack/react-virtual": "3.14.9",
     "next": "^15.5.23",

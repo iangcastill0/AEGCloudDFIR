@@ -1,6 +1,6 @@
 import { Global, Module } from '@nestjs/common';
-import type { AppConfig } from '@evidencevault/config';
-import { createPrismaClient } from '@evidencevault/database';
+import type { AppConfig } from '@aeg-clouddfir/config';
+import { createPrismaClient } from '@aeg-clouddfir/database';
 import { APP_CONFIG, LOGGER, PRISMA } from '../common/tokens.js';
 import { getAppConfig } from '../common/config.js';
 import { createLogger } from '../common/logger.js';
@@ -17,7 +17,7 @@ import { createLogger } from '../common/logger.js';
     },
     {
       provide: PRISMA,
-      useFactory: (config: AppConfig) => createPrismaClient(config.EV_DATABASE_URL),
+      useFactory: (config: AppConfig) => createPrismaClient(config.CDFIR_DATABASE_URL),
       inject: [APP_CONFIG],
     },
   ],

@@ -1,4 +1,4 @@
-import type { Prisma, TenantScopedTx } from '@evidencevault/database';
+import type { Prisma, TenantScopedTx } from '@aeg-clouddfir/database';
 
 /**
  * Per-custodian, per-source progress counters kept in

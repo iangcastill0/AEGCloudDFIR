@@ -1,4 +1,4 @@
-import type { PrismaClient } from '@evidencevault/database';
+import type { PrismaClient } from '@aeg-clouddfir/database';
 
 export interface OutboxRow {
   id: string;

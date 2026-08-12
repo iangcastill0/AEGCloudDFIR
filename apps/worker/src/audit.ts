@@ -1,7 +1,7 @@
 /**
  * Audit-log wiring helpers. The connector SPI itself (AuditConnector,
  * AuditBatch, AuditListPage, FetchAuditPageOptions) lives in
- * @evidencevault/connectors; this module only adds the worker-side routing that
+ * @aeg-clouddfir/connectors; this module only adds the worker-side routing that
  * maps a persisted checkpoint scopeKey back to the connector that owns it.
  *
  * A collection can enumerate scopes from up to four audit connectors whose
@@ -10,7 +10,7 @@
  * scopeKey is composed as `${kind}::${rawScopeKey}` where kind identifies the
  * owning connector.
  */
-import type { AuditConnector } from '@evidencevault/connectors';
+import type { AuditConnector } from '@aeg-clouddfir/connectors';
 
 /** Identifies which audit connector owns a scope (for routing, not the system). */
 export type AuditConnectorKind =

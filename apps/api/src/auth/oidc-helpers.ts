@@ -1,4 +1,4 @@
-import { TenantRole } from '@evidencevault/database';
+import { TenantRole } from '@aeg-clouddfir/database';
 import { z } from 'zod';
 
 /**
@@ -23,7 +23,7 @@ export function validateRedirectTo(input: unknown): string {
 }
 
 /**
- * Parse EV_OIDC_GROUP_ROLE_MAP ("group:role,group:role"). Unknown roles and
+ * Parse CDFIR_OIDC_GROUP_ROLE_MAP ("group:role,group:role"). Unknown roles and
  * malformed entries are skipped with a warning; an empty string yields an
  * empty map. A group may map to multiple roles via repeated entries.
  */
@@ -37,17 +37,21 @@ export function parseGroupRoleMap(
     if (trimmed.length === 0) continue;
     const idx = trimmed.lastIndexOf(':');
     if (idx <= 0 || idx === trimmed.length - 1) {
-      warn(`EV_OIDC_GROUP_ROLE_MAP entry "${trimmed}" is malformed (expected group:role); ignored`);
+      warn(
+        `CDFIR_OIDC_GROUP_ROLE_MAP entry "${trimmed}" is malformed (expected group:role); ignored`,
+      );
       continue;
     }
     const group = trimmed.slice(0, idx).trim();
     const role = trimmed.slice(idx + 1).trim();
     if (group.length === 0) {
-      warn(`EV_OIDC_GROUP_ROLE_MAP entry "${trimmed}" has an empty group; ignored`);
+      warn(`CDFIR_OIDC_GROUP_ROLE_MAP entry "${trimmed}" has an empty group; ignored`);
       continue;
     }
     if (!VALID_ROLES.has(role)) {
-      warn(`EV_OIDC_GROUP_ROLE_MAP entry "${trimmed}" references unknown role "${role}"; ignored`);
+      warn(
+        `CDFIR_OIDC_GROUP_ROLE_MAP entry "${trimmed}" references unknown role "${role}"; ignored`,
+      );
       continue;
     }
     const tenantRole = role as TenantRole;

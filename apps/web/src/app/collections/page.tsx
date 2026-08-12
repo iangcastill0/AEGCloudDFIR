@@ -1,6 +1,6 @@
 'use client';
 import Link from 'next/link';
-import { EmptyState, Table } from '@evidencevault/ui';
+import { EmptyState, Table } from '@aeg-clouddfir/ui';
 import { QueryBoundary, StatusPill } from '@/components/shared';
 import { useCollections } from '@/lib/hooks';
 import { formatDateTime, humanizeToken } from '@/lib/format';
@@ -11,7 +11,7 @@ export default function CollectionsPage() {
     <>
       <div className="page-header">
         <h1>Collections</h1>
-        <Link className="ev-button ev-button--primary" href="/collections/new">
+        <Link className="cdfir-button cdfir-button--primary" href="/collections/new">
           New collection
         </Link>
       </div>
@@ -27,7 +27,7 @@ export default function CollectionsPage() {
               title="No collections"
               description="Preserved collections will appear here."
               action={
-                <Link className="ev-button ev-button--primary" href="/collections/new">
+                <Link className="cdfir-button cdfir-button--primary" href="/collections/new">
                   Start your first collection
                 </Link>
               }

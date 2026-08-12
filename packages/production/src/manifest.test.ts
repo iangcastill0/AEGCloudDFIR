@@ -43,7 +43,7 @@ function input(): ProductionManifestInput {
         ],
       },
     ],
-    exceptions: [{ evidenceId: 'ev-9', reason: 'unsupported_conversion' }],
+    exceptions: [{ evidenceId: 'cdfir-9', reason: 'unsupported_conversion' }],
     batesStart: 'ABC00000001',
     batesEnd: 'ABC00000001',
     generatedAt: '2026-08-10T00:00:00.000Z',

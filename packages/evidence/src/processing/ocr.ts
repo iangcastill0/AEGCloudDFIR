@@ -216,7 +216,7 @@ export async function rasterizePdf(
   options: RasterizeOptions,
 ): Promise<RasterizeResult> {
   const runner = options.runner ?? spawnRunner;
-  const dir = await mkdtemp(join(tmpdir(), 'ev-raster-'));
+  const dir = await mkdtemp(join(tmpdir(), 'cdfir-raster-'));
   try {
     const pdfPath = join(dir, 'input.pdf');
     const prefix = join(dir, 'page');

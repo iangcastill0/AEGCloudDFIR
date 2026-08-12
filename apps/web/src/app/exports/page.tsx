@@ -10,7 +10,7 @@ import {
   StatusLive,
   Table,
   TextInput,
-} from '@evidencevault/ui';
+} from '@aeg-clouddfir/ui';
 import { QueryBoundary, StatusPill, TruthNotice } from '@/components/shared';
 import { useCases, useCreateExport, useExports, useSavedSearches, useTags } from '@/lib/hooks';
 import { apiDownloadUrl } from '@/lib/api';
@@ -77,7 +77,7 @@ export default function ExportsPage() {
                     <td>
                       <StatusPill status={e.status} />
                       {e.statusDetail ? (
-                        <span className="ev-field__hint"> {e.statusDetail}</span>
+                        <span className="cdfir-field__hint"> {e.statusDetail}</span>
                       ) : null}
                     </td>
                     <td>{e.itemCount}</td>
@@ -225,7 +225,7 @@ function CreateExportDialog({
       />
       {kind === 'csv' ? (
         <>
-          <fieldset className="ev-fieldset">
+          <fieldset className="cdfir-fieldset">
             <legend>CSV columns</legend>
             {CSV_COLUMNS.map((col) => (
               <Checkbox
@@ -252,7 +252,7 @@ function CreateExportDialog({
         </>
       ) : null}
       {createExport.isError ? (
-        <p role="alert" className="ev-field__error">
+        <p role="alert" className="cdfir-field__error">
           {errorMessage(createExport.error)}
         </p>
       ) : null}

@@ -9,7 +9,7 @@ import {
   StatusLive,
   Table,
   TextInput,
-} from '@evidencevault/ui';
+} from '@aeg-clouddfir/ui';
 import { ConfirmDialog, QueryBoundary, StatusPill } from '@/components/shared';
 import {
   useAddCaseItems,
@@ -130,7 +130,7 @@ function AddItemsCard({ caseId, onStatus }: { caseId: string; onStatus: (t: stri
   return (
     <section className="card" aria-labelledby="case-add-items">
       <h2 id="case-add-items">Add items to case</h2>
-      <p className="ev-field__hint">
+      <p className="cdfir-field__hint">
         Membership is reference-only: adding never copies or alters evidence.
       </p>
       <Select

@@ -33,17 +33,17 @@ export interface ToastRegionProps {
 /** Toast stack announced politely; error toasts additionally role=alert. */
 export function ToastRegion({ messages, onDismiss }: ToastRegionProps) {
   return (
-    <div className="ev-toast-region" role="region" aria-live="polite" aria-label="Notifications">
+    <div className="cdfir-toast-region" role="region" aria-live="polite" aria-label="Notifications">
       {messages.map((message) => (
         <div
           key={message.id}
-          className={message.tone === 'error' ? 'ev-toast ev-toast--error' : 'ev-toast'}
+          className={message.tone === 'error' ? 'cdfir-toast cdfir-toast--error' : 'cdfir-toast'}
           role={message.tone === 'error' ? 'alert' : undefined}
         >
           <span>{message.text}</span>
           <button
             type="button"
-            className="ev-button ev-button--ghost ev-button--small"
+            className="cdfir-button cdfir-button--ghost cdfir-button--small"
             onClick={() => onDismiss(message.id)}
           >
             Dismiss

@@ -1,6 +1,6 @@
 import { Inject, Module, type OnApplicationShutdown } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
-import type { PrismaClient } from '@evidencevault/database';
+import type { PrismaClient } from '@aeg-clouddfir/database';
 import { CoreModule } from './core/core.module.js';
 import { HealthModule } from './health/health.module.js';
 import { AuthModule } from './auth/auth.module.js';

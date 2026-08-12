@@ -1,8 +1,8 @@
 'use client';
 import { use, useState } from 'react';
 import Link from 'next/link';
-import { Notice, ProgressBar, StatusLive, Table } from '@evidencevault/ui';
-import type { CollectionStatusResponse } from '@evidencevault/contracts';
+import { Notice, ProgressBar, StatusLive, Table } from '@aeg-clouddfir/ui';
+import type { CollectionStatusResponse } from '@aeg-clouddfir/contracts';
 import { ConfirmDialog, QueryBoundary, StatusPill, TruthNotice } from '@/components/shared';
 import {
   isCollectionActive,
@@ -88,8 +88,8 @@ export default function CollectionDetailPage({ params }: { params: Promise<{ id:
                         type="button"
                         className={
                           a === 'cancel'
-                            ? 'ev-button ev-button--danger'
-                            : 'ev-button ev-button--secondary'
+                            ? 'cdfir-button cdfir-button--danger'
+                            : 'cdfir-button cdfir-button--secondary'
                         }
                         disabled={reason !== null || action.isPending}
                         onClick={() => setConfirming(a)}
@@ -98,7 +98,7 @@ export default function CollectionDetailPage({ params }: { params: Promise<{ id:
                         {ACTION_LABEL[a]}
                       </button>
                       {reason ? (
-                        <span id={`reason-${a}`} className="ev-visually-hidden">
+                        <span id={`reason-${a}`} className="cdfir-visually-hidden">
                           {reason}
                         </span>
                       ) : null}
@@ -107,7 +107,7 @@ export default function CollectionDetailPage({ params }: { params: Promise<{ id:
                 })}
                 {data.manifest?.downloadAvailable ? (
                   <a
-                    className="ev-button ev-button--secondary"
+                    className="cdfir-button cdfir-button--secondary"
                     href={apiDownloadUrl(`/api/v1/collections/${data.id}/manifest`)}
                   >
                     Download manifest (sha256 {data.manifest.sha256.slice(0, 12)}…)
@@ -249,7 +249,7 @@ function ExceptionsLedger({
         <label>
           Filter by kind{' '}
           <select
-            className="ev-select"
+            className="cdfir-select"
             value={kindFilter}
             onChange={(e) => setKindFilter(e.target.value)}
           >

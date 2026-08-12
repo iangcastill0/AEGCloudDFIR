@@ -3,7 +3,7 @@ import type { RateLimitObserver, TokenProvider } from '../types.js';
 
 export interface GoogleConnectorOptions {
   tokenProvider: TokenProvider;
-  /** e.g. https://www.googleapis.com (EV_GOOGLE_API_BASE_URL). */
+  /** e.g. https://www.googleapis.com (CDFIR_GOOGLE_API_BASE_URL). */
   googleApiBaseUrl: string;
   onRateLimit?: RateLimitObserver;
   fetchImpl?: FetchLike;

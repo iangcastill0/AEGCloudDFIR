@@ -8,7 +8,7 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { TenantRole, withTenantContext, type PrismaClient } from '@evidencevault/database';
+import { TenantRole, withTenantContext, type PrismaClient } from '@aeg-clouddfir/database';
 import type { FastifyRequest } from 'fastify';
 import '../common/http.js';
 import { PRISMA } from '../common/tokens.js';
@@ -38,7 +38,7 @@ export class TenantsController {
     @Query() query: Record<string, unknown>,
     @Req() request: FastifyRequest,
   ): Promise<{ items: MemberListItem[]; nextCursor: string | null }> {
-    const auth = request.evAuth;
+    const auth = request.cdfirAuth;
     // Cross-tenant probing is indistinguishable from a missing resource.
     if (!auth || tenantIdParam !== auth.tenantId) {
       throw new NotFoundException();

@@ -1,7 +1,7 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { z } from 'zod';
-import { savedSearchRequest } from '@evidencevault/contracts';
-import { withTenantContext, type Prisma, type PrismaClient } from '@evidencevault/database';
+import { savedSearchRequest } from '@aeg-clouddfir/contracts';
+import { withTenantContext, type Prisma, type PrismaClient } from '@aeg-clouddfir/database';
 import type { FastifyRequest } from 'fastify';
 import '../common/http.js';
 import type { AuthContext } from '../common/http.js';

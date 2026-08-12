@@ -10,8 +10,8 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { TenantRole } from '@evidencevault/database';
-import type { CollectionStatusResponse } from '@evidencevault/contracts';
+import { TenantRole } from '@aeg-clouddfir/database';
+import type { CollectionStatusResponse } from '@aeg-clouddfir/contracts';
 import type { FastifyRequest } from 'fastify';
 import '../common/http.js';
 import type { AuthContext } from '../common/http.js';
@@ -23,7 +23,7 @@ import { RequireRoles } from '../auth/guards/require-roles.decorator.js';
 import { CollectionsService, type CollectionListItem } from './collections.service.js';
 
 function requireAuth(request: FastifyRequest): AuthContext {
-  const auth = request.evAuth;
+  const auth = request.cdfirAuth;
   if (!auth) throw new NotFoundException();
   return auth;
 }

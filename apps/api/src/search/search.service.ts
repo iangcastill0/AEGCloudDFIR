@@ -14,8 +14,8 @@ import {
   type SearchHit,
   type ValidatedAst,
   type ValidatedNode,
-} from '@evidencevault/search';
-import { withTenantContext, type PrismaClient } from '@evidencevault/database';
+} from '@aeg-clouddfir/search';
+import { withTenantContext, type PrismaClient } from '@aeg-clouddfir/database';
 import type { FastifyRequest } from 'fastify';
 import '../common/http.js';
 import type { AuthContext } from '../common/http.js';

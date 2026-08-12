@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { appendAuditEvent, withTenantContext, type Prisma } from '@evidencevault/database';
+import { appendAuditEvent, withTenantContext, type Prisma } from '@aeg-clouddfir/database';
 import { sanitizeError, type WorkerContext } from '../context.js';
 import { incrementProgress, recordException } from '../progress.js';
 import { QUEUES, dedupKeys } from '../queues.js';
@@ -101,7 +101,7 @@ class CliOcrRunner implements OcrRunner {
   }
 
   async pdfToImages(pdf: Buffer, maxPages: number): Promise<Buffer[]> {
-    const dir = await mkdtemp(join(tmpdir(), 'ev-ocr-'));
+    const dir = await mkdtemp(join(tmpdir(), 'cdfir-ocr-'));
     try {
       const pdfPath = join(dir, 'input.pdf');
       await writeFile(pdfPath, pdf);
@@ -199,13 +199,13 @@ export async function processOcr(
   let pages: OcrPageResult[];
   try {
     if (isPdf) {
-      const images = await runner.pdfToImages(input, ctx.config.EV_MAX_OCR_PAGES);
+      const images = await runner.pdfToImages(input, ctx.config.CDFIR_MAX_OCR_PAGES);
       pages = [];
       for (const image of images) {
-        pages.push(await runner.ocrImage(image, ctx.config.EV_OCR_LANGS));
+        pages.push(await runner.ocrImage(image, ctx.config.CDFIR_OCR_LANGS));
       }
     } else {
-      pages = [await runner.ocrImage(input, ctx.config.EV_OCR_LANGS)];
+      pages = [await runner.ocrImage(input, ctx.config.CDFIR_OCR_LANGS)];
     }
   } catch (err) {
     // Engine failure on this item: honest exception, no retry storm.

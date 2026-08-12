@@ -16,7 +16,7 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: migrate
-          image: ghcr.io/OWNER/evidencevault-api:0.1.0
+          image: ghcr.io/OWNER/cdfir-api:0.1.0
           command:
             [
               'npx',
@@ -24,11 +24,11 @@ spec:
               'migrate',
               'deploy',
               '--schema',
-              'node_modules/@evidencevault/database/prisma/schema.prisma',
+              'node_modules/@aeg-clouddfir/database/prisma/schema.prisma',
             ]
           envFrom:
-            - configMapRef: { name: evidencevault-config }
-            - secretRef: { name: evidencevault-secrets }
+            - configMapRef: { name: cdfir-config }
+            - secretRef: { name: cdfir-secrets }
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

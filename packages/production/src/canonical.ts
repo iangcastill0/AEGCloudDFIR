@@ -8,7 +8,7 @@
  *   elements serialized as null
  * - non-finite numbers, functions, and symbols throw
  *
- * NOTE: intentionally duplicated from @evidencevault/evidence — this package
+ * NOTE: intentionally duplicated from @aeg-clouddfir/evidence — this package
  * must not depend on other workspace packages by design.
  */
 export function canonicalJson(value: unknown): string {

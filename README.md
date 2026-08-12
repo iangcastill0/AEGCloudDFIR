@@ -23,19 +23,19 @@ pnpm install
 pnpm build && pnpm test                      # 800+ unit tests
 
 cp .env.example .env                         # safe local defaults; generate real secrets:
-#   EV_SESSION_SECRET:       openssl rand -hex 32
-#   EV_KEK_LOCAL_MASTER_KEY: openssl rand -base64 32
+#   CDFIR_SESSION_SECRET:       openssl rand -hex 32
+#   CDFIR_KEK_LOCAL_MASTER_KEY: openssl rand -base64 32
 
 docker compose -f infra/compose/docker-compose.yml up -d   # postgres redis opensearch minio clamav tika authentik
-pnpm --filter @evidencevault/database run migrate:deploy   # uses EV_DATABASE_MIGRATION_URL
+pnpm --filter @aeg-clouddfir/database run migrate:deploy   # uses CDFIR_DATABASE_MIGRATION_URL
 
-pnpm --filter @evidencevault/api dev        # :4000
-pnpm --filter @evidencevault/worker dev
-pnpm --filter @evidencevault/web dev        # :3000
+pnpm --filter @aeg-clouddfir/api dev        # :4000
+pnpm --filter @aeg-clouddfir/worker dev
+pnpm --filter @aeg-clouddfir/web dev        # :3000
 ```
 
 Login: `http://localhost:3000` → redirects to Authentik
-(`akadmin@localhost` / the `EV_LOCAL_AUTHENTIK_ADMIN_PASSWORD` you set,
+(`akadmin@localhost` / the `CDFIR_LOCAL_AUTHENTIK_ADMIN_PASSWORD` you set,
 default `admin-local-only`).
 
 ### Demo seed mode (clearly labeled; refused in production)
@@ -43,7 +43,7 @@ default `admin-local-only`).
 Evaluate the full pipeline without real provider credentials:
 
 ```bash
-# .env: EV_DEMO_MODE=true and provider base URLs pointed at the fake server
+# .env: CDFIR_DEMO_MODE=true and provider base URLs pointed at the fake server
 pnpm tsx scripts/demo-provider.ts     # sanitized fixture provider on :4010 (keep running)
 # log in once via the web app, then:
 pnpm tsx scripts/demo-seed.ts         # demo tenants + seeded fake connectors
@@ -51,7 +51,7 @@ pnpm tsx scripts/demo-seed.ts         # demo tenants + seeded fake connectors
 
 Then run the collection wizard against the seeded Microsoft/Google accounts.
 Real provider OAuth flows are fully implemented and used whenever
-`EV_MS_CLIENT_ID` / `EV_GOOGLE_CLIENT_ID` are configured — the demo server is
+`CDFIR_MS_CLIENT_ID` / `CDFIR_GOOGLE_CLIENT_ID` are configured — the demo server is
 never in a production code path.
 
 ## Documentation

@@ -1,4 +1,4 @@
-import { TenantRole } from '@evidencevault/database';
+import { TenantRole } from '@aeg-clouddfir/database';
 import type { AuthContext } from './http.js';
 
 /** Roles whose evidence/search visibility is tenant-wide (not case-scoped). */

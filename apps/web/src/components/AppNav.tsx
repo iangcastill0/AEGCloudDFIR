@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { VisuallyHidden } from '@evidencevault/ui';
+import { VisuallyHidden } from '@aeg-clouddfir/ui';
 import { useLogout, useMe, useSelectTenant } from '@/lib/hooks';
 import { API_URL } from '@/lib/api';
 
@@ -66,7 +66,7 @@ export function AppNav() {
             <label>
               <VisuallyHidden>Active tenant</VisuallyHidden>
               <select
-                className="ev-select"
+                className="cdfir-select"
                 value={me.data.tenant?.id ?? ''}
                 onChange={(e) => onTenantChange(e.target.value)}
                 disabled={selectTenant.isPending}
@@ -82,7 +82,7 @@ export function AppNav() {
             <span>{me.data.user.displayName || me.data.user.email}</span>
             <button
               type="button"
-              className="ev-button ev-button--secondary ev-button--small"
+              className="cdfir-button cdfir-button--secondary cdfir-button--small"
               onClick={onLogout}
             >
               Sign out

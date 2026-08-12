@@ -11,7 +11,7 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
  * assertions run against the API so they are deterministic rather than
  * dependent on client-render timing.
  */
-const API = process.env.EV_E2E_API_URL ?? 'http://localhost:4000';
+const API = process.env.CDFIR_E2E_API_URL ?? 'http://localhost:4000';
 
 async function csrf(page: Page): Promise<string> {
   const res = await page.request.get(`${API}/auth/csrf`);

@@ -14,7 +14,7 @@ export interface StepperProps {
 export function Stepper({ label, steps, current, onStepSelect }: StepperProps) {
   return (
     <nav aria-label={label}>
-      <ol className="ev-stepper">
+      <ol className="cdfir-stepper">
         {steps.map((step, index) => {
           const done = index < current;
           const isCurrent = index === current;
@@ -28,13 +28,15 @@ export function Stepper({ label, steps, current, onStepSelect }: StepperProps) {
           return (
             <li
               key={step}
-              className={done ? 'ev-stepper__step ev-stepper__step--done' : 'ev-stepper__step'}
+              className={
+                done ? 'cdfir-stepper__step cdfir-stepper__step--done' : 'cdfir-stepper__step'
+              }
               aria-current={isCurrent ? 'step' : undefined}
             >
               {done && onStepSelect ? (
                 <button
                   type="button"
-                  className="ev-button ev-button--ghost ev-button--small"
+                  className="cdfir-button cdfir-button--ghost cdfir-button--small"
                   onClick={() => onStepSelect(index)}
                 >
                   {content}

@@ -1,6 +1,6 @@
 import { Readable } from 'node:stream';
-import { AuditConfigError, ProviderApiError, type AuditListPage } from '@evidencevault/connectors';
-import { appendAuditEvent, withTenantContext, type Prisma } from '@evidencevault/database';
+import { AuditConfigError, ProviderApiError, type AuditListPage } from '@aeg-clouddfir/connectors';
+import { appendAuditEvent, withTenantContext, type Prisma } from '@aeg-clouddfir/database';
 import { sanitizeError, type WorkerContext } from '../context.js';
 import { buildAuditConnectors, makeRateLimitObserver } from '../connector-factory.js';
 import {

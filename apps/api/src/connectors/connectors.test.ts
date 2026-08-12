@@ -5,9 +5,9 @@ import {
   LocalAesKeyEncryptionProvider,
   SecretKind,
   encryptSecret,
-} from '@evidencevault/database';
-import { TRUTHFULNESS_NOTICES } from '@evidencevault/contracts';
-import { TenantRole } from '@evidencevault/database';
+} from '@aeg-clouddfir/database';
+import { TRUTHFULNESS_NOTICES } from '@aeg-clouddfir/contracts';
+import { TenantRole } from '@aeg-clouddfir/database';
 import { ConnectorsService } from './connectors.service.js';
 import { connectorSecretScope } from './token-provider.factory.js';
 import {
@@ -108,7 +108,7 @@ describe('ConnectorsService.create', () => {
   });
 
   it('refuses with 409 when the provider OAuth app is not configured', async () => {
-    const { service } = makeService({}, { config: testConfig({ EV_MS_CLIENT_ID: '' }) });
+    const { service } = makeService({}, { config: testConfig({ CDFIR_MS_CLIENT_ID: '' }) });
     await expect(
       service.create(auth, { provider: 'microsoft', mode: 'delegated', label: 'X' }, fakeRequest()),
     ).rejects.toThrow(ConflictException);

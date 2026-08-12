@@ -1,5 +1,5 @@
-import { loadConfig } from '@evidencevault/config';
-import { createPrismaClient } from '@evidencevault/database';
+import { loadConfig } from '@aeg-clouddfir/config';
+import { createPrismaClient } from '@aeg-clouddfir/database';
 import { Redis } from 'ioredis';
 import { pino } from 'pino';
 import { BullMqEnqueuer } from './bullmq-enqueuer.js';
@@ -12,16 +12,16 @@ import { createWorkers } from './workers.js';
 async function main(): Promise<void> {
   const config = loadConfig();
   const log = pino({
-    level: config.EV_LOG_LEVEL,
+    level: config.CDFIR_LOG_LEVEL,
     redact: { paths: ['token', 'secret', 'authorization', 'cookie', 'presignedUrl'], remove: true },
   });
   log.info({ config: 'validated' }, 'worker starting');
-  if (config.EV_DEMO_MODE) {
+  if (config.CDFIR_DEMO_MODE) {
     log.warn({}, 'DEMO SEED MODE is active — never enable in production');
   }
 
-  const prisma = createPrismaClient(config.EV_DATABASE_URL);
-  const redis = new Redis(config.EV_REDIS_URL, { maxRetriesPerRequest: null });
+  const prisma = createPrismaClient(config.CDFIR_DATABASE_URL);
+  const redis = new Redis(config.CDFIR_REDIS_URL, { maxRetriesPerRequest: null });
   const enqueuer = new BullMqEnqueuer(redis);
   const dispatcher = new OutboxDispatcher(prisma, enqueuer, log);
   const ctx = buildWorkerContext(config, { prisma, redis, log, enqueuer });
@@ -29,7 +29,7 @@ async function main(): Promise<void> {
   log.info({ workerCount: workers.length }, 'queue workers started');
 
   const metrics = new WorkerMetrics();
-  const metricsServer = metrics.serve(config.EV_METRICS_PORT);
+  const metricsServer = metrics.serve(config.CDFIR_METRICS_PORT);
   const outboxSampler = setInterval(() => {
     void prisma
       .$transaction(async (tx) => {
@@ -42,7 +42,7 @@ async function main(): Promise<void> {
   outboxSampler.unref();
 
   const abort = new AbortController();
-  const health = startHealthServer(config.EV_WORKER_HEALTH_PORT, {
+  const health = startHealthServer(config.CDFIR_WORKER_HEALTH_PORT, {
     ready: async () => {
       const checks: Record<string, boolean> = {};
       try {

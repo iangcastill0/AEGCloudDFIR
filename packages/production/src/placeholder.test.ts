@@ -24,14 +24,14 @@ describe('renderPlaceholderPdf', () => {
   it('renders a single page containing the reason, ids, and metadata', async () => {
     const pdfBytes = await renderPlaceholderPdf({
       reason: 'This document could not be converted to an image format (unsupported file type).',
-      evidenceId: 'ev-1234',
+      evidenceId: 'cdfir-1234',
       batesNumber: 'ABC00000042',
       metadata: { FileName: 'database.mdb', MIME: 'application/x-msaccess' },
     });
     const text = await extractAllText(pdfBytes);
     expect(text).toContain('DOCUMENT PLACEHOLDER');
     expect(text).toContain('could not be converted to an image format');
-    expect(text).toContain('ev-1234');
+    expect(text).toContain('cdfir-1234');
     expect(text).toContain('ABC00000042');
     expect(text).toContain('database.mdb');
     expect(text).toContain('application/x-msaccess');
@@ -41,7 +41,7 @@ describe('renderPlaceholderPdf', () => {
     const longReason = Array.from({ length: 40 }, (_, i) => `word${i}`).join(' ');
     const pdfBytes = await renderPlaceholderPdf({
       reason: longReason,
-      evidenceId: 'ev-long',
+      evidenceId: 'cdfir-long',
       batesNumber: 'ABC00000001',
     });
     const text = await extractAllText(pdfBytes);

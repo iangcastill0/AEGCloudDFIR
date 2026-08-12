@@ -1,5 +1,5 @@
 'use client';
-import { Button, EmptyState, Table } from '@evidencevault/ui';
+import { Button, EmptyState, Table } from '@aeg-clouddfir/ui';
 import { QueryBoundary } from '@/components/shared';
 import { useAuthTenants, useSelectTenant } from '@/lib/hooks';
 
@@ -61,7 +61,7 @@ export default function TenantPickerPage() {
         }
       </QueryBoundary>
       {select.isError ? (
-        <p role="alert" className="ev-field__error">
+        <p role="alert" className="cdfir-field__error">
           Could not select tenant. Try again.
         </p>
       ) : null}

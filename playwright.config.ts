@@ -17,7 +17,7 @@ export default defineConfig({
   timeout: 60_000,
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {
-    baseURL: process.env.EV_E2E_WEB_URL ?? 'http://localhost:3000',
+    baseURL: process.env.CDFIR_E2E_WEB_URL ?? 'http://localhost:3000',
     trace: 'retain-on-failure',
     video: 'retain-on-failure',
   },

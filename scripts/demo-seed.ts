@@ -2,7 +2,7 @@
 /**
  * DEMO SEED MODE — clearly labeled, local evaluation only.
  *
- * Requires EV_DEMO_MODE=true (refused otherwise, and loadConfig refuses that
+ * Requires CDFIR_DEMO_MODE=true (refused otherwise, and loadConfig refuses that
  * in production). Seeds:
  *   - tenant "Demo Matter Workspace" (slug demo-a) with every existing user
  *     as org_admin/case_manager/production_manager/reviewer
@@ -16,25 +16,25 @@
  * Flow: log in once through Authentik (creates your user), then run this,
  * then re-select the tenant in the UI and start a collection.
  */
-import { loadConfig } from '@evidencevault/config';
+import { loadConfig } from '@aeg-clouddfir/config';
 import {
   createPrismaClient,
   withTenantContext,
   encryptSecret,
   LocalAesKeyEncryptionProvider,
   appendAuditEvent,
-} from '@evidencevault/database';
+} from '@aeg-clouddfir/database';
 
 async function main(): Promise<void> {
   const config = loadConfig();
-  if (!config.EV_DEMO_MODE) {
-    console.error('demo-seed refused: EV_DEMO_MODE is not true');
+  if (!config.CDFIR_DEMO_MODE) {
+    console.error('demo-seed refused: CDFIR_DEMO_MODE is not true');
     process.exit(1);
   }
-  const prisma = createPrismaClient(config.EV_DATABASE_URL);
+  const prisma = createPrismaClient(config.CDFIR_DATABASE_URL);
   const kek = new LocalAesKeyEncryptionProvider(
-    { [config.EV_KEK_ACTIVE_KEY_ID]: config.EV_KEK_LOCAL_MASTER_KEY },
-    config.EV_KEK_ACTIVE_KEY_ID,
+    { [config.CDFIR_KEK_ACTIVE_KEY_ID]: config.CDFIR_KEK_LOCAL_MASTER_KEY },
+    config.CDFIR_KEK_ACTIVE_KEY_ID,
   );
 
   try {

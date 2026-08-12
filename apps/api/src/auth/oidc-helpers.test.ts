@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { TenantRole } from '@evidencevault/database';
+import { TenantRole } from '@aeg-clouddfir/database';
 import {
   buildAuthorizationParameters,
   callbackUrl,
@@ -42,18 +42,18 @@ describe('validateRedirectTo', () => {
 describe('parseGroupRoleMap', () => {
   it('parses valid mappings, including multiple roles per group', () => {
     const map = parseGroupRoleMap(
-      'ev-admins:org_admin,ev-reviewers:reviewer,ev-admins:auditor, ev-readers : read_only ',
+      'cdfir-admins:org_admin,cdfir-reviewers:reviewer,cdfir-admins:auditor, cdfir-readers : read_only ',
     );
-    expect(map.get('ev-admins')).toEqual([TenantRole.org_admin, TenantRole.auditor]);
-    expect(map.get('ev-reviewers')).toEqual([TenantRole.reviewer]);
-    expect(map.get('ev-readers')).toEqual([TenantRole.read_only]);
+    expect(map.get('cdfir-admins')).toEqual([TenantRole.org_admin, TenantRole.auditor]);
+    expect(map.get('cdfir-reviewers')).toEqual([TenantRole.reviewer]);
+    expect(map.get('cdfir-readers')).toEqual([TenantRole.read_only]);
   });
 
   it('ignores unknown roles with a warning', () => {
     const warn = vi.fn<(message: string) => void>();
-    const map = parseGroupRoleMap('ev-admins:superuser,ev-reviewers:reviewer', warn);
-    expect(map.has('ev-admins')).toBe(false);
-    expect(map.get('ev-reviewers')).toEqual([TenantRole.reviewer]);
+    const map = parseGroupRoleMap('cdfir-admins:superuser,cdfir-reviewers:reviewer', warn);
+    expect(map.has('cdfir-admins')).toBe(false);
+    expect(map.get('cdfir-reviewers')).toEqual([TenantRole.reviewer]);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0]?.[0]).toContain('superuser');
   });

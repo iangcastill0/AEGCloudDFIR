@@ -1,5 +1,5 @@
 {
-  "name": "@evidencevault/connectors",
+  "name": "@aeg-clouddfir/connectors",
   "version": "0.1.0",
   "private": true,
   "type": "module",

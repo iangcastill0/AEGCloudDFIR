@@ -39,7 +39,7 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_DB: evidencevault
+          POSTGRES_DB: cdfir
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: ci-only
         ports: ['5432:5432']
@@ -56,25 +56,25 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Create runtime/migrator roles
         run: |
-          PGPASSWORD=ci-only psql -h localhost -U postgres -d evidencevault <<'SQL'
-          CREATE ROLE evidencevault_migrator LOGIN PASSWORD 'ci-only' NOSUPERUSER NOCREATEDB NOCREATEROLE;
-          CREATE ROLE evidencevault LOGIN PASSWORD 'ci-only' NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
-          GRANT CONNECT ON DATABASE evidencevault TO evidencevault, evidencevault_migrator;
-          GRANT CREATE ON DATABASE evidencevault TO evidencevault_migrator;
-          ALTER SCHEMA public OWNER TO evidencevault_migrator;
-          GRANT USAGE ON SCHEMA public TO evidencevault;
-          ALTER DEFAULT PRIVILEGES FOR ROLE evidencevault_migrator IN SCHEMA public
-            GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO evidencevault;
-          ALTER DEFAULT PRIVILEGES FOR ROLE evidencevault_migrator IN SCHEMA public
-            GRANT USAGE, SELECT ON SEQUENCES TO evidencevault;
+          PGPASSWORD=ci-only psql -h localhost -U postgres -d cdfir <<'SQL'
+          CREATE ROLE cdfir_migrator LOGIN PASSWORD 'ci-only' NOSUPERUSER NOCREATEDB NOCREATEROLE;
+          CREATE ROLE cdfir LOGIN PASSWORD 'ci-only' NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+          GRANT CONNECT ON DATABASE cdfir TO cdfir, cdfir_migrator;
+          GRANT CREATE ON DATABASE cdfir TO cdfir_migrator;
+          ALTER SCHEMA public OWNER TO cdfir_migrator;
+          GRANT USAGE ON SCHEMA public TO cdfir;
+          ALTER DEFAULT PRIVILEGES FOR ROLE cdfir_migrator IN SCHEMA public
+            GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO cdfir;
+          ALTER DEFAULT PRIVILEGES FOR ROLE cdfir_migrator IN SCHEMA public
+            GRANT USAGE, SELECT ON SEQUENCES TO cdfir;
           SQL
       - name: Apply migrations
-        run: pnpm --filter @evidencevault/database exec prisma migrate deploy
+        run: pnpm --filter @aeg-clouddfir/database exec prisma migrate deploy
         env:
-          EV_DATABASE_MIGRATION_URL: postgresql://evidencevault_migrator:ci-only@localhost:5432/evidencevault
+          CDFIR_DATABASE_MIGRATION_URL: postgresql://cdfir_migrator:ci-only@localhost:5432/cdfir
       - name: RLS smoke check (runtime role sees zero rows without tenant context)
         run: |
-          PGPASSWORD=ci-only psql -h localhost -U evidencevault -d evidencevault -tAc \
+          PGPASSWORD=ci-only psql -h localhost -U cdfir -d cdfir -tAc \
             "SELECT count(*) FROM tenants" | grep -qx 0
 
   integration:
@@ -85,7 +85,7 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_DB: evidencevault
+          POSTGRES_DB: cdfir
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: ci-only
         ports: ['5432:5432']
@@ -103,23 +103,23 @@ jobs:
       - run: pnpm build
       - name: Bootstrap roles and apply migrations
         run: |
-          PGPASSWORD=ci-only psql -h localhost -U postgres -d evidencevault <<'SQL'
-          CREATE ROLE evidencevault_migrator LOGIN PASSWORD 'ci-only' NOSUPERUSER NOCREATEDB NOCREATEROLE;
-          CREATE ROLE evidencevault LOGIN PASSWORD 'ci-only' NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
-          GRANT CONNECT ON DATABASE evidencevault TO evidencevault, evidencevault_migrator;
-          GRANT CREATE ON DATABASE evidencevault TO evidencevault_migrator;
-          ALTER SCHEMA public OWNER TO evidencevault_migrator;
-          GRANT USAGE ON SCHEMA public TO evidencevault;
-          ALTER DEFAULT PRIVILEGES FOR ROLE evidencevault_migrator IN SCHEMA public
-            GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO evidencevault;
-          ALTER DEFAULT PRIVILEGES FOR ROLE evidencevault_migrator IN SCHEMA public
-            GRANT USAGE, SELECT ON SEQUENCES TO evidencevault;
+          PGPASSWORD=ci-only psql -h localhost -U postgres -d cdfir <<'SQL'
+          CREATE ROLE cdfir_migrator LOGIN PASSWORD 'ci-only' NOSUPERUSER NOCREATEDB NOCREATEROLE;
+          CREATE ROLE cdfir LOGIN PASSWORD 'ci-only' NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+          GRANT CONNECT ON DATABASE cdfir TO cdfir, cdfir_migrator;
+          GRANT CREATE ON DATABASE cdfir TO cdfir_migrator;
+          ALTER SCHEMA public OWNER TO cdfir_migrator;
+          GRANT USAGE ON SCHEMA public TO cdfir;
+          ALTER DEFAULT PRIVILEGES FOR ROLE cdfir_migrator IN SCHEMA public
+            GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO cdfir;
+          ALTER DEFAULT PRIVILEGES FOR ROLE cdfir_migrator IN SCHEMA public
+            GRANT USAGE, SELECT ON SEQUENCES TO cdfir;
           SQL
-          EV_DATABASE_MIGRATION_URL=postgresql://evidencevault_migrator:ci-only@localhost:5432/evidencevault \
-            pnpm --filter @evidencevault/database exec prisma migrate deploy
+          CDFIR_DATABASE_MIGRATION_URL=postgresql://cdfir_migrator:ci-only@localhost:5432/cdfir \
+            pnpm --filter @aeg-clouddfir/database exec prisma migrate deploy
       - run: pnpm test:integration
         env:
-          EV_IT_DATABASE_URL: postgresql://evidencevault:ci-only@localhost:5432/evidencevault
+          CDFIR_IT_DATABASE_URL: postgresql://cdfir:ci-only@localhost:5432/cdfir
 
   sbom:
     name: SBOM and license report

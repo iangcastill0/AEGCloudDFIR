@@ -8,9 +8,9 @@
  * The index is disposable; this streams evidence metadata (plus stored text
  * derivatives) into a fresh versioned index and atomically swaps the alias.
  */
-import { loadConfig } from '@evidencevault/config';
-import { createPrismaClient, withTenantContext } from '@evidencevault/database';
-import { OpenSearchAdapter, type EvidenceSearchDoc } from '@evidencevault/search';
+import { loadConfig } from '@aeg-clouddfir/config';
+import { createPrismaClient, withTenantContext } from '@aeg-clouddfir/database';
+import { OpenSearchAdapter, type EvidenceSearchDoc } from '@aeg-clouddfir/search';
 
 const BATCH = 200;
 
@@ -133,12 +133,12 @@ async function* loadDocs(
 
 async function main(): Promise<void> {
   const config = loadConfig();
-  const prisma = createPrismaClient(config.EV_DATABASE_URL);
+  const prisma = createPrismaClient(config.CDFIR_DATABASE_URL);
   const adapter = new OpenSearchAdapter({
-    node: config.EV_OPENSEARCH_URL,
-    username: config.EV_OPENSEARCH_USERNAME,
-    password: config.EV_OPENSEARCH_PASSWORD,
-    indexPrefix: config.EV_OPENSEARCH_INDEX_PREFIX,
+    node: config.CDFIR_OPENSEARCH_URL,
+    username: config.CDFIR_OPENSEARCH_USERNAME,
+    password: config.CDFIR_OPENSEARCH_PASSWORD,
+    indexPrefix: config.CDFIR_OPENSEARCH_INDEX_PREFIX,
   });
 
   const tenantArgIdx = process.argv.indexOf('--tenant');

@@ -8,7 +8,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { z } from 'zod';
-import type { AppConfig } from '@evidencevault/config';
+import type { AppConfig } from '@aeg-clouddfir/config';
 import {
   ConnectorStatus,
   Provider,
@@ -19,7 +19,7 @@ import {
   type KeyEncryptionProvider,
   type PrismaClient,
   type TenantScopedTx,
-} from '@evidencevault/database';
+} from '@aeg-clouddfir/database';
 import {
   buildGoogleAuthorizationUrl,
   buildMicrosoftAdminConsentUrl,
@@ -38,8 +38,8 @@ import {
   type CustodianDirectory,
   type ExchangedTokens,
   type FetchLike,
-} from '@evidencevault/connectors';
-import { TRUTHFULNESS_NOTICES, connectionMode, provider } from '@evidencevault/contracts';
+} from '@aeg-clouddfir/connectors';
+import { TRUTHFULNESS_NOTICES, connectionMode, provider } from '@aeg-clouddfir/contracts';
 import type { FastifyRequest } from 'fastify';
 import '../common/http.js';
 import type { AuthContext } from '../common/http.js';
@@ -190,7 +190,7 @@ export class ConnectorsService {
     private readonly audit: AuditService,
     @Optional() @Inject(CONNECTOR_FETCH) private readonly fetchImpl?: FetchLike,
   ) {
-    this.sealingKey = deriveSealingKey(config.EV_SESSION_SECRET);
+    this.sealingKey = deriveSealingKey(config.CDFIR_SESSION_SECRET);
   }
 
   // -------------------------------------------------------------------------
@@ -223,16 +223,16 @@ export class ConnectorsService {
 
   private clientIdFor(providerName: Provider): string {
     return providerName === Provider.microsoft
-      ? this.config.EV_MS_CLIENT_ID
-      : this.config.EV_GOOGLE_CLIENT_ID;
+      ? this.config.CDFIR_MS_CLIENT_ID
+      : this.config.CDFIR_GOOGLE_CLIENT_ID;
   }
 
   private redirectUriFor(providerName: Provider): string {
     const path =
       providerName === Provider.microsoft
-        ? this.config.EV_MS_REDIRECT_PATH
-        : this.config.EV_GOOGLE_REDIRECT_PATH;
-    return `${this.config.EV_API_PUBLIC_URL}${path}`;
+        ? this.config.CDFIR_MS_REDIRECT_PATH
+        : this.config.CDFIR_GOOGLE_REDIRECT_PATH;
+    return `${this.config.CDFIR_API_PUBLIC_URL}${path}`;
   }
 
   async create(
@@ -249,7 +249,7 @@ export class ConnectorsService {
     if (input.mode === 'delegated' && this.clientIdFor(input.provider).length === 0) {
       throw new ConflictException(
         `provider OAuth is not configured: set ${
-          input.provider === 'microsoft' ? 'EV_MS_CLIENT_ID' : 'EV_GOOGLE_CLIENT_ID'
+          input.provider === 'microsoft' ? 'CDFIR_MS_CLIENT_ID' : 'CDFIR_GOOGLE_CLIENT_ID'
         } (and its client secret) to enable ${input.provider} connections`,
       );
     }
@@ -310,8 +310,8 @@ export class ConnectorsService {
     if (input.provider === 'microsoft') {
       const codeChallenge = createHash('sha256').update(verifier, 'utf8').digest('base64url');
       authorizationUrl = buildMicrosoftAuthorizationUrl({
-        msLoginBaseUrl: this.config.EV_MS_LOGIN_BASE_URL,
-        clientId: this.config.EV_MS_CLIENT_ID,
+        msLoginBaseUrl: this.config.CDFIR_MS_LOGIN_BASE_URL,
+        clientId: this.config.CDFIR_MS_CLIENT_ID,
         redirectUri: this.redirectUriFor(Provider.microsoft),
         scopes: MICROSOFT_DELEGATED_SCOPES,
         state,
@@ -319,7 +319,7 @@ export class ConnectorsService {
       });
     } else {
       authorizationUrl = buildGoogleAuthorizationUrl({
-        clientId: this.config.EV_GOOGLE_CLIENT_ID,
+        clientId: this.config.CDFIR_GOOGLE_CLIENT_ID,
         redirectUri: this.redirectUriFor(Provider.google),
         scopes: GOOGLE_DELEGATED_SCOPES,
         state,
@@ -338,7 +338,7 @@ export class ConnectorsService {
   // -------------------------------------------------------------------------
 
   private webRedirect(query: string): string {
-    return `${this.config.EV_WEB_PUBLIC_URL}/connectors?${query}`;
+    return `${this.config.CDFIR_WEB_PUBLIC_URL}/connectors?${query}`;
   }
 
   private async fetchProfile(
@@ -349,8 +349,8 @@ export class ConnectorsService {
     try {
       const url =
         providerName === Provider.microsoft
-          ? `${this.config.EV_MS_GRAPH_BASE_URL}/me`
-          : `${this.config.EV_GOOGLE_API_BASE_URL}/oauth2/v2/userinfo`;
+          ? `${this.config.CDFIR_MS_GRAPH_BASE_URL}/me`
+          : `${this.config.CDFIR_GOOGLE_API_BASE_URL}/oauth2/v2/userinfo`;
       const response = await fetchFn(url, {
         method: 'GET',
         headers: { authorization: `Bearer ${accessToken}` },
@@ -428,7 +428,7 @@ export class ConnectorsService {
       throw new BadRequestException('connect flow missing or expired; restart the connection');
     }
     // Cookie binding: the callback must arrive in the browser that started it.
-    if (cookies['ev_connectorflow'] !== state) {
+    if (cookies['cdfir_connectorflow'] !== state) {
       throw new BadRequestException('connect flow does not belong to this browser session');
     }
     if (code.length === 0) {
@@ -441,9 +441,9 @@ export class ConnectorsService {
       tokens =
         providerName === Provider.microsoft
           ? await exchangeMicrosoftAuthorizationCode({
-              msLoginBaseUrl: this.config.EV_MS_LOGIN_BASE_URL,
-              clientId: this.config.EV_MS_CLIENT_ID,
-              clientSecret: this.config.EV_MS_CLIENT_SECRET,
+              msLoginBaseUrl: this.config.CDFIR_MS_LOGIN_BASE_URL,
+              clientId: this.config.CDFIR_MS_CLIENT_ID,
+              clientSecret: this.config.CDFIR_MS_CLIENT_SECRET,
               code,
               redirectUri: this.redirectUriFor(Provider.microsoft),
               codeVerifier: flow.verifier,
@@ -451,9 +451,9 @@ export class ConnectorsService {
               fetchImpl: this.fetchImpl,
             })
           : await exchangeGoogleAuthorizationCode({
-              googleOauthTokenUrl: this.config.EV_GOOGLE_OAUTH_TOKEN_URL,
-              clientId: this.config.EV_GOOGLE_CLIENT_ID,
-              clientSecret: this.config.EV_GOOGLE_CLIENT_SECRET,
+              googleOauthTokenUrl: this.config.CDFIR_GOOGLE_OAUTH_TOKEN_URL,
+              clientId: this.config.CDFIR_GOOGLE_CLIENT_ID,
+              clientSecret: this.config.CDFIR_GOOGLE_CLIENT_SECRET,
               code,
               redirectUri: this.redirectUriFor(Provider.google),
               fetchImpl: this.fetchImpl,
@@ -565,9 +565,9 @@ export class ConnectorsService {
       }
 
       if (account.provider === Provider.microsoft) {
-        if (this.config.EV_MS_CLIENT_ID.length === 0) {
+        if (this.config.CDFIR_MS_CLIENT_ID.length === 0) {
           throw new ConflictException(
-            'provider OAuth is not configured: set EV_MS_CLIENT_ID (and its client secret) to enable microsoft connections',
+            'provider OAuth is not configured: set CDFIR_MS_CLIENT_ID (and its client secret) to enable microsoft connections',
           );
         }
         const input = zodValidate(orgMicrosoftSchema, body);
@@ -589,9 +589,9 @@ export class ConnectorsService {
           skipDuplicates: true,
         });
         const adminConsentUrl = buildMicrosoftAdminConsentUrl({
-          msLoginBaseUrl: this.config.EV_MS_LOGIN_BASE_URL,
+          msLoginBaseUrl: this.config.CDFIR_MS_LOGIN_BASE_URL,
           tenantId: input.externalTenantId,
-          clientId: this.config.EV_MS_CLIENT_ID,
+          clientId: this.config.CDFIR_MS_CLIENT_ID,
           redirectUri: this.redirectUriFor(Provider.microsoft),
         });
         await this.audit.appendTx(tx, {
@@ -760,12 +760,12 @@ export class ConnectorsService {
     return account.provider === Provider.microsoft
       ? new GraphCustodianDirectory({
           tokenProvider,
-          graphBaseUrl: this.config.EV_MS_GRAPH_BASE_URL,
+          graphBaseUrl: this.config.CDFIR_MS_GRAPH_BASE_URL,
           fetchImpl: this.fetchImpl,
         })
       : new GoogleCustodianDirectory({
           tokenProvider,
-          googleApiBaseUrl: this.config.EV_GOOGLE_API_BASE_URL,
+          googleApiBaseUrl: this.config.CDFIR_GOOGLE_API_BASE_URL,
           fetchImpl: this.fetchImpl,
         });
   }
@@ -789,13 +789,13 @@ export class ConnectorsService {
           account.provider === Provider.microsoft
             ? new GraphEmailConnector({
                 tokenProvider,
-                graphBaseUrl: this.config.EV_MS_GRAPH_BASE_URL,
+                graphBaseUrl: this.config.CDFIR_MS_GRAPH_BASE_URL,
                 mode: 'delegated',
                 fetchImpl: this.fetchImpl,
               })
             : new GmailConnector({
                 tokenProvider,
-                googleApiBaseUrl: this.config.EV_GOOGLE_API_BASE_URL,
+                googleApiBaseUrl: this.config.CDFIR_GOOGLE_API_BASE_URL,
                 fetchImpl: this.fetchImpl,
               });
         const discovery = await mail.listMailFolders('me');

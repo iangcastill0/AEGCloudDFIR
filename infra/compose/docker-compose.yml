@@ -3,15 +3,15 @@
 # Credentials below are LOCAL-ONLY defaults; production deployments must
 # override every one of them (see .env.example and docs/guides/).
 
-name: evidencevault
+name: cdfir
 
 services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB: evidencevault
+      POSTGRES_DB: cdfir
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${EV_LOCAL_PG_SUPER_PASSWORD:-changeme-local-only}
+      POSTGRES_PASSWORD: ${CDFIR_LOCAL_PG_SUPER_PASSWORD:-changeme-local-only}
     command: ['postgres', '-c', 'shared_preload_libraries=pg_stat_statements']
     volumes:
       - postgres-data:/var/lib/postgresql/data
@@ -19,7 +19,7 @@ services:
     ports:
       - '127.0.0.1:5432:5432'
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U postgres -d evidencevault']
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d cdfir']
       interval: 5s
       timeout: 3s
       retries: 20
@@ -43,7 +43,7 @@ services:
       discovery.type: single-node
       plugins.security.disabled: 'true' # local dev only; enable + TLS in prod
       OPENSEARCH_JAVA_OPTS: '-Xms512m -Xmx512m'
-      OPENSEARCH_INITIAL_ADMIN_PASSWORD: ${EV_LOCAL_OS_ADMIN_PASSWORD:-LocalDev!ChangeMe1}
+      OPENSEARCH_INITIAL_ADMIN_PASSWORD: ${CDFIR_LOCAL_OS_ADMIN_PASSWORD:-LocalDev!ChangeMe1}
     volumes:
       - opensearch-data:/usr/share/opensearch/data
     ports:
@@ -59,7 +59,7 @@ services:
     command: ['server', '/data', '--console-address', ':9001']
     environment:
       MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: ${EV_LOCAL_MINIO_PASSWORD:-minioadmin-local-only}
+      MINIO_ROOT_PASSWORD: ${CDFIR_LOCAL_MINIO_PASSWORD:-minioadmin-local-only}
     volumes:
       - minio-data:/data
     ports:
@@ -79,11 +79,11 @@ services:
     entrypoint: >
       /bin/sh -c "
       mc alias set local http://minio:9000 minioadmin $${MINIO_ROOT_PASSWORD:-minioadmin-local-only} &&
-      mc mb --ignore-existing local/ev-evidence &&
-      mc mb --ignore-existing local/ev-quarantine &&
-      mc version enable local/ev-evidence || true"
+      mc mb --ignore-existing local/cdfir-evidence &&
+      mc mb --ignore-existing local/cdfir-quarantine &&
+      mc version enable local/cdfir-evidence || true"
     environment:
-      MINIO_ROOT_PASSWORD: ${EV_LOCAL_MINIO_PASSWORD:-minioadmin-local-only}
+      MINIO_ROOT_PASSWORD: ${CDFIR_LOCAL_MINIO_PASSWORD:-minioadmin-local-only}
 
   clamav:
     # clamav-debian is the multi-arch (amd64+arm64) distribution of the same release
@@ -114,7 +114,7 @@ services:
     environment:
       POSTGRES_DB: authentik
       POSTGRES_USER: authentik
-      POSTGRES_PASSWORD: ${EV_LOCAL_AUTHENTIK_PG_PASSWORD:-changeme-local-only}
+      POSTGRES_PASSWORD: ${CDFIR_LOCAL_AUTHENTIK_PG_PASSWORD:-changeme-local-only}
     volumes:
       - authentik-pg-data:/var/lib/postgresql/data
     healthcheck:
@@ -135,13 +135,13 @@ services:
     image: ghcr.io/goauthentik/server:2025.4
     command: server
     environment:
-      AUTHENTIK_SECRET_KEY: ${EV_LOCAL_AUTHENTIK_SECRET:-local-dev-secret-generate-your-own-0000}
+      AUTHENTIK_SECRET_KEY: ${CDFIR_LOCAL_AUTHENTIK_SECRET:-local-dev-secret-generate-your-own-0000}
       AUTHENTIK_POSTGRESQL__HOST: authentik-postgres
       AUTHENTIK_POSTGRESQL__USER: authentik
       AUTHENTIK_POSTGRESQL__NAME: authentik
-      AUTHENTIK_POSTGRESQL__PASSWORD: ${EV_LOCAL_AUTHENTIK_PG_PASSWORD:-changeme-local-only}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${CDFIR_LOCAL_AUTHENTIK_PG_PASSWORD:-changeme-local-only}
       AUTHENTIK_REDIS__HOST: authentik-redis
-      AUTHENTIK_BOOTSTRAP_PASSWORD: ${EV_LOCAL_AUTHENTIK_ADMIN_PASSWORD:-admin-local-only}
+      AUTHENTIK_BOOTSTRAP_PASSWORD: ${CDFIR_LOCAL_AUTHENTIK_ADMIN_PASSWORD:-admin-local-only}
       AUTHENTIK_BOOTSTRAP_EMAIL: akadmin@localhost
     volumes:
       - ../authentik/blueprints:/blueprints/custom:ro
@@ -157,11 +157,11 @@ services:
     image: ghcr.io/goauthentik/server:2025.4
     command: worker
     environment:
-      AUTHENTIK_SECRET_KEY: ${EV_LOCAL_AUTHENTIK_SECRET:-local-dev-secret-generate-your-own-0000}
+      AUTHENTIK_SECRET_KEY: ${CDFIR_LOCAL_AUTHENTIK_SECRET:-local-dev-secret-generate-your-own-0000}
       AUTHENTIK_POSTGRESQL__HOST: authentik-postgres
       AUTHENTIK_POSTGRESQL__USER: authentik
       AUTHENTIK_POSTGRESQL__NAME: authentik
-      AUTHENTIK_POSTGRESQL__PASSWORD: ${EV_LOCAL_AUTHENTIK_PG_PASSWORD:-changeme-local-only}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${CDFIR_LOCAL_AUTHENTIK_PG_PASSWORD:-changeme-local-only}
       AUTHENTIK_REDIS__HOST: authentik-redis
     volumes:
       - ../authentik/blueprints:/blueprints/custom:ro
@@ -177,13 +177,13 @@ services:
       dockerfile: infra/docker/api.Dockerfile
     env_file: ../../.env
     environment:
-      EV_DATABASE_URL: postgresql://evidencevault:changeme-local-only@postgres:5432/evidencevault
-      EV_DATABASE_MIGRATION_URL: postgresql://evidencevault_migrator:changeme-local-only@postgres:5432/evidencevault
-      EV_REDIS_URL: redis://redis:6379
-      EV_OPENSEARCH_URL: http://opensearch:9200
-      EV_S3_ENDPOINT: http://minio:9000
-      EV_CLAMAV_HOST: clamav
-      EV_TIKA_URL: http://tika:9998
+      CDFIR_DATABASE_URL: postgresql://cdfir:changeme-local-only@postgres:5432/cdfir
+      CDFIR_DATABASE_MIGRATION_URL: postgresql://cdfir_migrator:changeme-local-only@postgres:5432/cdfir
+      CDFIR_REDIS_URL: redis://redis:6379
+      CDFIR_OPENSEARCH_URL: http://opensearch:9200
+      CDFIR_S3_ENDPOINT: http://minio:9000
+      CDFIR_CLAMAV_HOST: clamav
+      CDFIR_TIKA_URL: http://tika:9998
     ports:
       - '127.0.0.1:4000:4000'
     depends_on:
@@ -204,12 +204,12 @@ services:
       dockerfile: infra/docker/worker.Dockerfile
     env_file: ../../.env
     environment:
-      EV_DATABASE_URL: postgresql://evidencevault:changeme-local-only@postgres:5432/evidencevault
-      EV_REDIS_URL: redis://redis:6379
-      EV_OPENSEARCH_URL: http://opensearch:9200
-      EV_S3_ENDPOINT: http://minio:9000
-      EV_CLAMAV_HOST: clamav
-      EV_TIKA_URL: http://tika:9998
+      CDFIR_DATABASE_URL: postgresql://cdfir:changeme-local-only@postgres:5432/cdfir
+      CDFIR_REDIS_URL: redis://redis:6379
+      CDFIR_OPENSEARCH_URL: http://opensearch:9200
+      CDFIR_S3_ENDPOINT: http://minio:9000
+      CDFIR_CLAMAV_HOST: clamav
+      CDFIR_TIKA_URL: http://tika:9998
     depends_on:
       postgres:
         condition: service_healthy

@@ -5,9 +5,9 @@ WORKDIR /app
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json .npmrc turbo.json tsconfig.base.json ./
 COPY apps/api ./apps/api
 COPY packages ./packages
-RUN pnpm install --frozen-lockfile --filter @evidencevault/api... \
- && pnpm --filter @evidencevault/api... build \
- && pnpm --filter @evidencevault/api deploy --prod /out
+RUN pnpm install --frozen-lockfile --filter @aeg-clouddfir/api... \
+ && pnpm --filter @aeg-clouddfir/api... build \
+ && pnpm --filter @aeg-clouddfir/api deploy --prod /out
 
 FROM node:22-alpine
 RUN apk add --no-cache wget tini && addgroup -S ev && adduser -S ev -G ev

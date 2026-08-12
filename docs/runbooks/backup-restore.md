@@ -4,7 +4,7 @@
 
 | Store        | Method                                                                    | Frequency                     |
 | ------------ | ------------------------------------------------------------------------- | ----------------------------- |
-| PostgreSQL   | `pg_dump -Fc evidencevault` (or WAL archiving/PITR)                       | continuous WAL + nightly base |
+| PostgreSQL   | `pg_dump -Fc cdfir` (or WAL archiving/PITR)                               | continuous WAL + nightly base |
 | Object store | Wasabi bucket versioning + (optionally) cross-region replication          | continuous                    |
 | OpenSearch   | none required — rebuildable index                                         | —                             |
 | Redis        | none required — transient job state (outbox re-dispatches)                | —                             |

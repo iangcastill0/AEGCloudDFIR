@@ -19,8 +19,8 @@ import { EvidenceObjectStore } from './store.js';
 const TENANT = '11111111-1111-4111-8111-111111111111';
 const OTHER_TENANT = '22222222-2222-4222-8222-222222222222';
 const STAGING_UUID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
-const EVIDENCE_BUCKET = 'ev-evidence';
-const QUARANTINE_BUCKET = 'ev-quarantine';
+const EVIDENCE_BUCKET = 'cdfir-evidence';
+const QUARANTINE_BUCKET = 'cdfir-quarantine';
 
 // sha256('hello world')
 const HELLO_SHA = 'b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9';

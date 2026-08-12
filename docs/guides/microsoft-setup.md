@@ -14,7 +14,7 @@ UI states this on the custodian step.
    - Supported account types: _Accounts in any organizational directory and
      personal Microsoft accounts_ (or narrower if you don't need personal).
    - Redirect URI (Web): `https://api.<your-domain>/auth/../api/v1/connectors/callback/microsoft`
-     — exactly the value of `EV_API_PUBLIC_URL + EV_MS_REDIRECT_PATH`
+     — exactly the value of `CDFIR_API_PUBLIC_URL + CDFIR_MS_REDIRECT_PATH`
      (default path `/api/v1/connectors/callback/microsoft`).
 2. Certificates & secrets → New client secret. Record it once.
 3. API permissions → Microsoft Graph → **Delegated**:
@@ -26,8 +26,8 @@ UI states this on the custodian step.
      tenants; individual tenants may require admin approval by policy.
 4. Configure AEG-CloudDFIR:
    ```
-   EV_MS_CLIENT_ID=<application (client) id>
-   EV_MS_CLIENT_SECRET=<secret>
+   CDFIR_MS_CLIENT_ID=<application (client) id>
+   CDFIR_MS_CLIENT_SECRET=<secret>
    ```
 
 Token behavior: Microsoft rotates refresh tokens; AEG-CloudDFIR persists the
@@ -64,7 +64,7 @@ controls to narrow it:
 "Application Mail.Read" -CustomResourceScope "EV-Custodians"`.
 - **Application access policies** (older mechanism):
   `New-ApplicationAccessPolicy -AppId <id> -PolicyScopeGroupId
-ev-collection-scope@contoso.com -AccessRight RestrictAccess`.
+cdfir-collection-scope@contoso.com -AccessRight RestrictAccess`.
 - SharePoint/OneDrive: `Sites.Selected`-style narrowing does not apply to
   `Files.Read.All`; where site-level scoping is required, grant
   `Sites.Selected` instead and accept that only granted sites are readable.

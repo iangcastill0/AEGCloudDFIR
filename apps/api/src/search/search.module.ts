@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
-import type { AppConfig } from '@evidencevault/config';
-import { OpenSearchAdapter, type SearchAdapter } from '@evidencevault/search';
+import type { AppConfig } from '@aeg-clouddfir/config';
+import { OpenSearchAdapter, type SearchAdapter } from '@aeg-clouddfir/search';
 import { APP_CONFIG, SEARCH_ADAPTER } from '../common/tokens.js';
 import { AuditModule } from '../audit/audit.module.js';
 import { SearchService } from './search.service.js';
@@ -16,10 +16,10 @@ import { SavedSearchesController, SearchController } from './search.controller.j
       provide: SEARCH_ADAPTER,
       useFactory: (config: AppConfig): SearchAdapter =>
         new OpenSearchAdapter({
-          node: config.EV_OPENSEARCH_URL,
-          username: config.EV_OPENSEARCH_USERNAME,
-          password: config.EV_OPENSEARCH_PASSWORD,
-          indexPrefix: config.EV_OPENSEARCH_INDEX_PREFIX,
+          node: config.CDFIR_OPENSEARCH_URL,
+          username: config.CDFIR_OPENSEARCH_USERNAME,
+          password: config.CDFIR_OPENSEARCH_PASSWORD,
+          indexPrefix: config.CDFIR_OPENSEARCH_INDEX_PREFIX,
         }),
       inject: [APP_CONFIG],
     },

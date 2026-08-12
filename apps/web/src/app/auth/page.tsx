@@ -1,5 +1,5 @@
 'use client';
-import { Notice, Table } from '@evidencevault/ui';
+import { Notice, Table } from '@aeg-clouddfir/ui';
 import { AUTHENTIK_URL } from '@/lib/api';
 import { useMe } from '@/lib/hooks';
 
@@ -25,7 +25,7 @@ const ADMIN_LINKS: Array<{ label: string; path: string; description: string }> =
     label: 'Groups',
     path: '/if/admin/#/identity/groups',
     description:
-      'Manage groups used for optional group→role mapping (ev-org-admins, ev-case-managers, ev-reviewers).',
+      'Manage groups used for optional group→role mapping (cdfir-org-admins, cdfir-case-managers, cdfir-reviewers).',
   },
   {
     label: 'Applications',
@@ -65,7 +65,7 @@ export default function AuthAdminPage() {
 
       <p style={{ margin: '1rem 0' }}>
         <a
-          className="ev-button ev-button--primary"
+          className="cdfir-button cdfir-button--primary"
           href={`${AUTHENTIK_URL}/if/admin/`}
           target="_blank"
           rel="noopener noreferrer"
@@ -73,7 +73,7 @@ export default function AuthAdminPage() {
           Open Authentik admin console ↗
         </a>{' '}
         <a
-          className="ev-button ev-button--secondary"
+          className="cdfir-button cdfir-button--secondary"
           href={`${AUTHENTIK_URL}/if/user/`}
           target="_blank"
           rel="noopener noreferrer"
@@ -110,7 +110,7 @@ export default function AuthAdminPage() {
         <Notice variant="warning">
           <strong>Local development only.</strong> The compose stack bootstraps an Authentik admin{' '}
           <code>akadmin@localhost</code> with the password from{' '}
-          <code>EV_LOCAL_AUTHENTIK_ADMIN_PASSWORD</code> (default <code>admin-local-only</code>).
+          <code>CDFIR_LOCAL_AUTHENTIK_ADMIN_PASSWORD</code> (default <code>admin-local-only</code>).
           Change it before exposing this instance. These credentials do not exist in production
           deployments.
         </Notice>
@@ -118,11 +118,11 @@ export default function AuthAdminPage() {
 
       <h2>Group → role mapping</h2>
       <p>
-        When <code>EV_OIDC_GROUP_CLAIM</code> is configured, Authentik group membership is mapped to
-        AEG-CloudDFIR roles on every login (for example <code>ev-org-admins → org_admin</code>).
-        Manage the groups in Authentik above; manage the mapping via{' '}
-        <code>EV_OIDC_GROUP_ROLE_MAP</code>. See <code>docs/guides/authentik-setup.md</code> for the
-        full configuration.
+        When <code>CDFIR_OIDC_GROUP_CLAIM</code> is configured, Authentik group membership is mapped
+        to AEG-CloudDFIR roles on every login (for example <code>cdfir-org-admins → org_admin</code>
+        ). Manage the groups in Authentik above; manage the mapping via{' '}
+        <code>CDFIR_OIDC_GROUP_ROLE_MAP</code>. See <code>docs/guides/authentik-setup.md</code> for
+        the full configuration.
       </p>
     </>
   );

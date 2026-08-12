@@ -51,7 +51,7 @@ export class TextExtractionTooLargeError extends Error {
 
 /**
  * Decompression output exceeded the configured expansion limits
- * (EV_MAX_ARCHIVE_EXPANSION_RATIO / EV_MAX_ARCHIVE_TOTAL_BYTES).
+ * (CDFIR_MAX_ARCHIVE_EXPANSION_RATIO / CDFIR_MAX_ARCHIVE_TOTAL_BYTES).
  */
 export class ArchiveBombError extends Error {
   override readonly name = 'ArchiveBombError';
@@ -64,7 +64,7 @@ export class ArchiveBombError extends Error {
   }
 }
 
-/** Nested archive depth exceeded the configured limit (EV_MAX_ARCHIVE_DEPTH). */
+/** Nested archive depth exceeded the configured limit (CDFIR_MAX_ARCHIVE_DEPTH). */
 export class ArchiveDepthExceededError extends Error {
   override readonly name = 'ArchiveDepthExceededError';
 

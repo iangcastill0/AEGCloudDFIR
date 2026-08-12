@@ -1,6 +1,6 @@
 import { vi, type Mock } from 'vitest';
-import type { AppConfig } from '@evidencevault/config';
-import { TenantRole, type PrismaClient } from '@evidencevault/database';
+import type { AppConfig } from '@aeg-clouddfir/config';
+import { TenantRole, type PrismaClient } from '@aeg-clouddfir/database';
 import type { FastifyRequest } from 'fastify';
 import type { AuthContext } from '../common/http.js';
 import type { AuditService } from '../audit/audit.service.js';
@@ -60,7 +60,7 @@ export function fakeRequest(overrides: Record<string, unknown> = {}): FastifyReq
     headers: {},
     cookies: {},
     ip: '127.0.0.1',
-    evRequestId: 'req-1',
+    cdfirRequestId: 'req-1',
     ...overrides,
   } as unknown as FastifyRequest;
 }
@@ -70,22 +70,22 @@ export const TEST_KEK_BASE64 = Buffer.alloc(32, 7).toString('base64');
 export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   return {
     NODE_ENV: 'test',
-    EV_SESSION_SECRET: 'test-session-secret-with-32-chars-min!',
-    EV_API_PUBLIC_URL: 'https://api.ev.test',
-    EV_WEB_PUBLIC_URL: 'https://app.ev.test',
-    EV_MS_CLIENT_ID: 'ms-client-id',
-    EV_MS_CLIENT_SECRET: 'ms-client-secret',
-    EV_MS_REDIRECT_PATH: '/api/v1/connectors/callback/microsoft',
-    EV_GOOGLE_CLIENT_ID: 'google-client-id',
-    EV_GOOGLE_CLIENT_SECRET: 'google-client-secret',
-    EV_GOOGLE_REDIRECT_PATH: '/api/v1/connectors/callback/google',
-    EV_MS_GRAPH_BASE_URL: 'https://graph.test/v1.0',
-    EV_MS_LOGIN_BASE_URL: 'https://login.test',
-    EV_GOOGLE_API_BASE_URL: 'https://google.test',
-    EV_GOOGLE_OAUTH_TOKEN_URL: 'https://google.test/token',
-    EV_KEK_LOCAL_MASTER_KEY: TEST_KEK_BASE64,
-    EV_KEK_ACTIVE_KEY_ID: 'kek-test',
-    EV_S3_PRESIGN_TTL_SECONDS: 300,
+    CDFIR_SESSION_SECRET: 'test-session-secret-with-32-chars-min!',
+    CDFIR_API_PUBLIC_URL: 'https://api.ev.test',
+    CDFIR_WEB_PUBLIC_URL: 'https://app.ev.test',
+    CDFIR_MS_CLIENT_ID: 'ms-client-id',
+    CDFIR_MS_CLIENT_SECRET: 'ms-client-secret',
+    CDFIR_MS_REDIRECT_PATH: '/api/v1/connectors/callback/microsoft',
+    CDFIR_GOOGLE_CLIENT_ID: 'google-client-id',
+    CDFIR_GOOGLE_CLIENT_SECRET: 'google-client-secret',
+    CDFIR_GOOGLE_REDIRECT_PATH: '/api/v1/connectors/callback/google',
+    CDFIR_MS_GRAPH_BASE_URL: 'https://graph.test/v1.0',
+    CDFIR_MS_LOGIN_BASE_URL: 'https://login.test',
+    CDFIR_GOOGLE_API_BASE_URL: 'https://google.test',
+    CDFIR_GOOGLE_OAUTH_TOKEN_URL: 'https://google.test/token',
+    CDFIR_KEK_LOCAL_MASTER_KEY: TEST_KEK_BASE64,
+    CDFIR_KEK_ACTIVE_KEY_ID: 'kek-test',
+    CDFIR_S3_PRESIGN_TTL_SECONDS: 300,
     ...overrides,
   } as AppConfig;
 }

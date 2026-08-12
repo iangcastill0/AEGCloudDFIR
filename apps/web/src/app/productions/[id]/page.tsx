@@ -2,7 +2,7 @@
 import { use } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Button, EmptyState, Table } from '@evidencevault/ui';
+import { Button, EmptyState, Table } from '@aeg-clouddfir/ui';
 import { QueryBoundary, StatusPill, TruthNotice } from '@/components/shared';
 import { useProduction, useProductionExceptions } from '@/lib/hooks';
 import { apiDownloadUrl } from '@/lib/api';
@@ -36,7 +36,7 @@ export default function ProductionDetailPage({ params }: { params: Promise<{ id:
                 onClick={() => {
                   // Clone settings into a new wizard run via sessionStorage handoff.
                   window.sessionStorage.setItem(
-                    'ev-production-clone-v1',
+                    'cdfir-production-clone-v1',
                     JSON.stringify(data.parameters),
                   );
                   router.push('/productions/new');

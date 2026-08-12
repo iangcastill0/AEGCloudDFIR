@@ -13,7 +13,7 @@ import {
   Table,
   TextArea,
   TextInput,
-} from '@evidencevault/ui';
+} from '@aeg-clouddfir/ui';
 import { QueryBoundary, TruthNotice } from '@/components/shared';
 import {
   WIZARD_STEPS,
@@ -32,7 +32,7 @@ import {
 import { useConnectors, useCreateCollection, useCustodians } from '@/lib/hooks';
 import { errorMessage } from '@/lib/errors';
 
-const STORAGE_KEY = 'ev-collection-wizard-v1';
+const STORAGE_KEY = 'cdfir-collection-wizard-v1';
 
 const MS_CONTENT_TYPES = [
   { value: 'Audit.Exchange', label: 'Exchange' },
@@ -135,7 +135,7 @@ export default function NewCollectionPage() {
       />
 
       {showErrors && errors.length > 0 ? (
-        <div role="alert" className="ev-notice ev-notice--warning">
+        <div role="alert" className="cdfir-notice cdfir-notice--warning">
           <ul style={{ margin: 0, paddingInlineStart: '1.2em' }}>
             {errors.map((e) => (
               <li key={e}>{e}</li>
@@ -290,7 +290,7 @@ function SourcesStep({ state, dispatch }: StepProps) {
   const auditNeedsOrg = state.sources.audit && state.connectorMode !== 'organization';
   return (
     <section aria-label="Step 3: sources">
-      <fieldset className="ev-fieldset">
+      <fieldset className="cdfir-fieldset">
         <legend>Data sources</legend>
         <Checkbox
           label="Email"
@@ -400,7 +400,7 @@ function CustodiansStep({ state, dispatch }: StepProps) {
         onRetry={() => void custodians.refetch()}
       >
         {(data) => (
-          <fieldset className="ev-fieldset">
+          <fieldset className="cdfir-fieldset">
             <legend>Directory results</legend>
             {data.items.length === 0 ? <p>No matches.</p> : null}
             {data.items.map((c) => (
@@ -475,7 +475,7 @@ function ScopeStep({ state, dispatch }: StepProps) {
       ) : null}
 
       {state.sources.email ? (
-        <fieldset className="ev-fieldset">
+        <fieldset className="cdfir-fieldset">
           <legend>Email scope</legend>
           <Checkbox
             label="All discovered folders"
@@ -520,7 +520,7 @@ function ScopeStep({ state, dispatch }: StepProps) {
       ) : null}
 
       {state.sources.drive ? (
-        <fieldset className="ev-fieldset">
+        <fieldset className="cdfir-fieldset">
           <legend>Drive scope</legend>
           <Checkbox
             label="Default drive (all roots)"
@@ -566,7 +566,7 @@ function ScopeStep({ state, dispatch }: StepProps) {
 function AuditScopeFields({ state, dispatch }: StepProps) {
   const a = state.scope.audit;
   return (
-    <fieldset className="ev-fieldset">
+    <fieldset className="cdfir-fieldset">
       <legend>Audit-log scope</legend>
       <TruthNotice kind="auditScope" />
 

@@ -57,8 +57,8 @@ export function Tabs({ label, tabs, activeId, onChange }: TabsProps) {
   const activeTab = tabs[activeIndex];
 
   return (
-    <div className="ev-tabs">
-      <div role="tablist" aria-label={label} className="ev-tabs__list">
+    <div className="cdfir-tabs">
+      <div role="tablist" aria-label={label} className="cdfir-tabs__list">
         {tabs.map((tab, index) => (
           <button
             key={tab.id}
@@ -68,7 +68,7 @@ export function Tabs({ label, tabs, activeId, onChange }: TabsProps) {
             aria-selected={index === activeIndex}
             aria-controls={`${baseId}-panel-${tab.id}`}
             tabIndex={index === activeIndex ? 0 : -1}
-            className="ev-tabs__tab"
+            className="cdfir-tabs__tab"
             ref={(el) => {
               refs.current[index] = el;
             }}

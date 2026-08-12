@@ -1,6 +1,6 @@
 'use client';
 import Link from 'next/link';
-import { EmptyState, Table } from '@evidencevault/ui';
+import { EmptyState, Table } from '@aeg-clouddfir/ui';
 import { QueryBoundary, StatusPill } from '@/components/shared';
 import { useProductions } from '@/lib/hooks';
 import { formatDateTime } from '@/lib/format';
@@ -11,7 +11,7 @@ export default function ProductionsPage() {
     <>
       <div className="page-header">
         <h1>Productions</h1>
-        <Link className="ev-button ev-button--primary" href="/productions/new">
+        <Link className="cdfir-button cdfir-button--primary" href="/productions/new">
           New production
         </Link>
       </div>
@@ -27,7 +27,7 @@ export default function ProductionsPage() {
               title="No productions"
               description="Produce stamped, Bates-numbered document sets from tags or saved searches."
               action={
-                <Link className="ev-button ev-button--primary" href="/productions/new">
+                <Link className="cdfir-button cdfir-button--primary" href="/productions/new">
                   Create a production
                 </Link>
               }

@@ -9,7 +9,7 @@ import {
   Table,
   TextArea,
   TextInput,
-} from '@evidencevault/ui';
+} from '@aeg-clouddfir/ui';
 import { ConfirmDialog, QueryBoundary, StatusPill, TruthNotice } from '@/components/shared';
 import {
   useConnectors,
@@ -326,7 +326,7 @@ function OrgSetupDialog({
         </>
       )}
       {error ? (
-        <p role="alert" className="ev-field__error">
+        <p role="alert" className="cdfir-field__error">
           {error}
         </p>
       ) : null}

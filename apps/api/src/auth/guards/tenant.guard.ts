@@ -6,14 +6,14 @@ import {
   type CanActivate,
   type ExecutionContext,
 } from '@nestjs/common';
-import { withTenantContext, type PrismaClient } from '@evidencevault/database';
+import { withTenantContext, type PrismaClient } from '@aeg-clouddfir/database';
 import type { FastifyRequest } from 'fastify';
 import '../../common/http.js';
 import { PRISMA } from '../../common/tokens.js';
 
 /**
  * Requires an active tenant selection on the session, verifies the caller's
- * membership inside the tenant's RLS context, and attaches request.evAuth.
+ * membership inside the tenant's RLS context, and attaches request.cdfirAuth.
  */
 @Injectable()
 export class TenantGuard implements CanActivate {
@@ -21,7 +21,7 @@ export class TenantGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<FastifyRequest>();
-    const session = request.evSession;
+    const session = request.cdfirSession;
     if (!session) throw new UnauthorizedException('authentication required');
     const tenantId = session.tenantId;
     if (!tenantId) throw new ForbiddenException('no tenant selected');
@@ -44,7 +44,7 @@ export class TenantGuard implements CanActivate {
       throw new ForbiddenException('not an active member of this tenant');
     }
 
-    request.evAuth = {
+    request.cdfirAuth = {
       userId: session.userId,
       tenantId,
       membershipId: membership.id,

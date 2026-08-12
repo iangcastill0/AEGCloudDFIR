@@ -21,7 +21,7 @@
       "sameSite": "Lax"
     },
     {
-      "name": "ev_session",
+      "name": "cdfir_session",
       "value": "wek5eM1yxyDVdpFkeuVzGeG-lziiObQtOjQmHEYwXmGglK9lCOqEIbCuy_xwssPv7UihYpn2FHx_U_0V4inoNvD6iTHw0IUjwtXqFt9H-VltqoXhEgqR-v8z32-dFX3Eah-S-grKnQiCbjz_EBw6pmngki0r",
       "domain": "localhost",
       "path": "/",

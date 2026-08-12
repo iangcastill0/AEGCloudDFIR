@@ -1,7 +1,7 @@
 /**
  * Thin adapter over email parsing. A parallel workstream is adding a full
  * MIME parser (parseEmail / buildSafeEmailPreview / htmlToText) to
- * @evidencevault/evidence; this adapter probes for it at runtime and falls
+ * @aeg-clouddfir/evidence; this adapter probes for it at runtime and falls
  * back to a MINIMAL header-only RFC822 parser when absent, marking results
  * with parserName 'minimal-parser' so downstream stays honest about fidelity.
  */
@@ -304,14 +304,14 @@ function normalizeFullResult(raw: unknown): ParsedEmail {
 let cachedParser: Promise<EmailParser> | undefined;
 
 /**
- * Load the best available email parser. The @evidencevault/evidence
+ * Load the best available email parser. The @aeg-clouddfir/evidence
  * processing module is probed dynamically — this package must not hard-depend
  * on it yet.
  */
 export function loadEmailParser(): Promise<EmailParser> {
   cachedParser ??= (async () => {
     try {
-      const mod = (await import('@evidencevault/evidence')) as unknown as Record<string, unknown>;
+      const mod = (await import('@aeg-clouddfir/evidence')) as unknown as Record<string, unknown>;
       if (hasFullParser(mod)) {
         const full = mod;
         const parser: EmailParser = {

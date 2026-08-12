@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import type { AppConfig } from '@evidencevault/config';
+import type { AppConfig } from '@aeg-clouddfir/config';
 import {
   EvidenceKind,
   MalwareStatus,
@@ -13,9 +13,9 @@ import {
   withTenantContext,
   type PrismaClient,
   type TenantScopedTx,
-} from '@evidencevault/database';
-import type { EvidenceObjectStore } from '@evidencevault/evidence';
-import { TRUTHFULNESS_NOTICES } from '@evidencevault/contracts';
+} from '@aeg-clouddfir/database';
+import type { EvidenceObjectStore } from '@aeg-clouddfir/evidence';
+import { TRUTHFULNESS_NOTICES } from '@aeg-clouddfir/contracts';
 import type { FastifyRequest } from 'fastify';
 import '../common/http.js';
 import type { AuthContext } from '../common/http.js';
@@ -375,7 +375,7 @@ export class EvidenceService {
         mimeType: p.mimeType,
         pageCount: p.pageCount,
         url: await this.store.presignGet(auth.tenantId, p.objectKey, {
-          ttlSeconds: this.config.EV_S3_PRESIGN_TTL_SECONDS,
+          ttlSeconds: this.config.CDFIR_S3_PRESIGN_TTL_SECONDS,
         }),
       })),
     );
@@ -415,7 +415,7 @@ export class EvidenceService {
     }
 
     const url = await this.store.presignGet(auth.tenantId, item.blob.objectKey, {
-      ttlSeconds: this.config.EV_S3_PRESIGN_TTL_SECONDS,
+      ttlSeconds: this.config.CDFIR_S3_PRESIGN_TTL_SECONDS,
     });
 
     // Native access is ALWAYS audited — this is how exports of single items
@@ -451,7 +451,7 @@ export class EvidenceService {
       url,
       name: item.name,
       sha256: item.blob.sha256,
-      expiresInSeconds: this.config.EV_S3_PRESIGN_TTL_SECONDS,
+      expiresInSeconds: this.config.CDFIR_S3_PRESIGN_TTL_SECONDS,
     };
   }
 }

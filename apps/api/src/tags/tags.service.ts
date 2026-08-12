@@ -6,8 +6,8 @@ import {
   withTenantContext,
   type PrismaClient,
   type TenantScopedTx,
-} from '@evidencevault/database';
-import { bulkTagRequest, createTagRequest } from '@evidencevault/contracts';
+} from '@aeg-clouddfir/database';
+import { bulkTagRequest, createTagRequest } from '@aeg-clouddfir/contracts';
 import type { FastifyRequest } from 'fastify';
 import '../common/http.js';
 import type { AuthContext } from '../common/http.js';

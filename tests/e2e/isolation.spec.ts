@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 
-const API = process.env.EV_E2E_API_URL ?? 'http://localhost:4000';
+const API = process.env.CDFIR_E2E_API_URL ?? 'http://localhost:4000';
 
 /**
  * Acceptance scenario 6: cross-tenant access attempts by id, search, download

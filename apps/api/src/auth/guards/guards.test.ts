@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ForbiddenException, UnauthorizedException, type ExecutionContext } from '@nestjs/common';
 import type { Reflector } from '@nestjs/core';
-import { TenantRole, type PrismaClient } from '@evidencevault/database';
-import type { AppConfig } from '@evidencevault/config';
+import { TenantRole, type PrismaClient } from '@aeg-clouddfir/database';
+import type { AppConfig } from '@aeg-clouddfir/config';
 import { createSessionPayload, deriveSealingKey, sealSession } from '../session.js';
 import type { AuthContext } from '../../common/http.js';
 import type { SessionPayload } from '../session.js';
@@ -19,8 +19,8 @@ interface FakeRequest {
   method: string;
   cookies: Record<string, string | undefined>;
   headers: Record<string, string | undefined>;
-  evSession?: SessionPayload;
-  evAuth?: AuthContext;
+  cdfirSession?: SessionPayload;
+  cdfirAuth?: AuthContext;
 }
 
 function makeRequest(overrides: Partial<FakeRequest> = {}): FakeRequest {
@@ -42,7 +42,7 @@ function makeReflector(value: unknown): Reflector {
 
 const config = {
   NODE_ENV: 'test',
-  EV_SESSION_SECRET: SECRET,
+  CDFIR_SESSION_SECRET: SECRET,
 } as unknown as AppConfig;
 
 describe('SessionGuard', () => {
@@ -59,23 +59,23 @@ describe('SessionGuard', () => {
   it('throws 401 for an expired session cookie', () => {
     const guard = new SessionGuard(config, makeReflector(undefined));
     const expired = { ...createSessionPayload(USER_ID, undefined, 60), exp: 1, iat: 0 };
-    const request = makeRequest({ cookies: { ev_session: sealSession(KEY, expired) } });
+    const request = makeRequest({ cookies: { cdfir_session: sealSession(KEY, expired) } });
     expect(() => guard.canActivate(contextFor(request))).toThrow(UnauthorizedException);
   });
 
   it('throws 401 for a tampered cookie', () => {
     const guard = new SessionGuard(config, makeReflector(undefined));
     const sealed = sealSession(KEY, createSessionPayload(USER_ID, undefined, 3600));
-    const request = makeRequest({ cookies: { ev_session: `${sealed.slice(0, -4)}AAAA` } });
+    const request = makeRequest({ cookies: { cdfir_session: `${sealed.slice(0, -4)}AAAA` } });
     expect(() => guard.canActivate(contextFor(request))).toThrow(UnauthorizedException);
   });
 
-  it('attaches request.evSession for a valid cookie', () => {
+  it('attaches request.cdfirSession for a valid cookie', () => {
     const guard = new SessionGuard(config, makeReflector(undefined));
     const payload = createSessionPayload(USER_ID, TENANT_ID, 3600);
-    const request = makeRequest({ cookies: { ev_session: sealSession(KEY, payload) } });
+    const request = makeRequest({ cookies: { cdfir_session: sealSession(KEY, payload) } });
     expect(guard.canActivate(contextFor(request))).toBe(true);
-    expect(request.evSession).toEqual(payload);
+    expect(request.cdfirSession).toEqual(payload);
   });
 });
 
@@ -122,13 +122,13 @@ describe('TenantGuard', () => {
 
   it('throws 403 when no tenant is selected', async () => {
     const guard = new TenantGuard(makePrisma(activeUser, activeMembership));
-    const request = makeRequest({ evSession: createSessionPayload(USER_ID, undefined, 3600) });
+    const request = makeRequest({ cdfirSession: createSessionPayload(USER_ID, undefined, 3600) });
     await expect(guard.canActivate(contextFor(request))).rejects.toThrow(ForbiddenException);
   });
 
   it('throws 403 when there is no membership in the tenant', async () => {
     const guard = new TenantGuard(makePrisma(activeUser, null));
-    const request = makeRequest({ evSession: createSessionPayload(USER_ID, TENANT_ID, 3600) });
+    const request = makeRequest({ cdfirSession: createSessionPayload(USER_ID, TENANT_ID, 3600) });
     await expect(guard.canActivate(contextFor(request))).rejects.toThrow(ForbiddenException);
   });
 
@@ -136,15 +136,15 @@ describe('TenantGuard', () => {
     const guard = new TenantGuard(
       makePrisma(activeUser, { ...activeMembership, status: 'disabled' }),
     );
-    const request = makeRequest({ evSession: createSessionPayload(USER_ID, TENANT_ID, 3600) });
+    const request = makeRequest({ cdfirSession: createSessionPayload(USER_ID, TENANT_ID, 3600) });
     await expect(guard.canActivate(contextFor(request))).rejects.toThrow(ForbiddenException);
   });
 
-  it('attaches request.evAuth with roles from the tenant context', async () => {
+  it('attaches request.cdfirAuth with roles from the tenant context', async () => {
     const guard = new TenantGuard(makePrisma(activeUser, activeMembership));
-    const request = makeRequest({ evSession: createSessionPayload(USER_ID, TENANT_ID, 3600) });
+    const request = makeRequest({ cdfirSession: createSessionPayload(USER_ID, TENANT_ID, 3600) });
     await expect(guard.canActivate(contextFor(request))).resolves.toBe(true);
-    expect(request.evAuth).toEqual({
+    expect(request.cdfirAuth).toEqual({
       userId: USER_ID,
       tenantId: TENANT_ID,
       membershipId: activeMembership.id,
@@ -176,13 +176,13 @@ describe('RolesGuard', () => {
 
   it('passes when the caller holds one of the required roles', () => {
     const guard = new RolesGuard(makeReflector([TenantRole.org_admin, TenantRole.auditor]));
-    const request = makeRequest({ evAuth: authContext([TenantRole.auditor]) });
+    const request = makeRequest({ cdfirAuth: authContext([TenantRole.auditor]) });
     expect(guard.canActivate(contextFor(request))).toBe(true);
   });
 
   it('throws 403 when there is no intersection — org_admin implies nothing', () => {
     const guard = new RolesGuard(makeReflector([TenantRole.reviewer]));
-    const request = makeRequest({ evAuth: authContext([TenantRole.org_admin]) });
+    const request = makeRequest({ cdfirAuth: authContext([TenantRole.org_admin]) });
     expect(() => guard.canActivate(contextFor(request))).toThrow(ForbiddenException);
   });
 

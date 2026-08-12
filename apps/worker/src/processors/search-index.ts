@@ -1,4 +1,4 @@
-import { ProcessingStatus, withTenantContext } from '@evidencevault/database';
+import { ProcessingStatus, withTenantContext } from '@aeg-clouddfir/database';
 import {
   MAPPING_VERSION,
   type BatesRecord,
@@ -8,7 +8,7 @@ import {
   type EvidenceTag,
   type OcrPage as SearchOcrPage,
   type RawHeader,
-} from '@evidencevault/search';
+} from '@aeg-clouddfir/search';
 
 /**
  * Structural mirror of the search package's EvidenceAuditFields (not re-exported

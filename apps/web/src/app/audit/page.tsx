@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { Button, EmptyState, Notice, StatusLive, Table } from '@evidencevault/ui';
+import { Button, EmptyState, Notice, StatusLive, Table } from '@aeg-clouddfir/ui';
 import { QueryBoundary } from '@/components/shared';
 import { useAuditPage, useAuditVerify } from '@/lib/hooks';
 import type { auditListResponse } from '@/lib/schemas';

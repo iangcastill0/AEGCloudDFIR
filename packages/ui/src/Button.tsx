@@ -21,8 +21,8 @@ export function Button({
   disabled,
   ...rest
 }: ButtonProps) {
-  const classes = ['ev-button', `ev-button--${variant}`];
-  if (small) classes.push('ev-button--small');
+  const classes = ['cdfir-button', `cdfir-button--${variant}`];
+  if (small) classes.push('cdfir-button--small');
   if (className) classes.push(className);
   return (
     <button
@@ -51,7 +51,7 @@ export function IconButton({
   children,
   ...rest
 }: IconButtonProps) {
-  const classes = ['ev-icon-button'];
+  const classes = ['cdfir-icon-button'];
   if (className) classes.push(className);
   return (
     <button type={type} className={classes.join(' ')} aria-label={label} title={label} {...rest}>

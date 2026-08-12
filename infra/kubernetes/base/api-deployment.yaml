@@ -2,14 +2,14 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: api
-  labels: { app: evidencevault, component: api }
+  labels: { app: cdfir, component: api }
 spec:
   replicas: 2
   selector:
-    matchLabels: { app: evidencevault, component: api }
+    matchLabels: { app: cdfir, component: api }
   template:
     metadata:
-      labels: { app: evidencevault, component: api }
+      labels: { app: cdfir, component: api }
       annotations:
         prometheus.io/scrape: 'true'
         prometheus.io/port: '9464'
@@ -21,13 +21,13 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: api
-          image: ghcr.io/OWNER/evidencevault-api:0.1.0 # pin digests in production
+          image: ghcr.io/OWNER/cdfir-api:0.1.0 # pin digests in production
           ports:
             - { containerPort: 4000, name: http }
             - { containerPort: 9464, name: metrics }
           envFrom:
-            - configMapRef: { name: evidencevault-config }
-            - secretRef: { name: evidencevault-secrets }
+            - configMapRef: { name: cdfir-config }
+            - secretRef: { name: cdfir-secrets }
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

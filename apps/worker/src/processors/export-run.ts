@@ -1,16 +1,16 @@
 import { PassThrough, Readable, type Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { z } from 'zod';
-import { TRUTHFULNESS_NOTICES } from '@evidencevault/contracts';
-import { appendAuditEvent, withTenantContext, type Prisma } from '@evidencevault/database';
-import { Sha256Stream, canonicalJson, sanitizeFilename } from '@evidencevault/evidence';
-import { ProductionArchiveWriter, csvEscape } from '@evidencevault/production';
+import { TRUTHFULNESS_NOTICES } from '@aeg-clouddfir/contracts';
+import { appendAuditEvent, withTenantContext, type Prisma } from '@aeg-clouddfir/database';
+import { Sha256Stream, canonicalJson, sanitizeFilename } from '@aeg-clouddfir/evidence';
+import { ProductionArchiveWriter, csvEscape } from '@aeg-clouddfir/production';
 import {
   DEFAULT_FIELD_REGISTRY,
   buildSearchRequest,
   validateAst,
   type QueryNode,
-} from '@evidencevault/search';
+} from '@aeg-clouddfir/search';
 import { sanitizeError, type WorkerContext } from '../context.js';
 import type { ExportRunPayload } from './payloads.js';
 
@@ -537,7 +537,7 @@ async function runNativeExport(
 
   // Manifests and reports live in the FINAL archive part.
   const manifestJson = canonicalJson({
-    schema: 'evidencevault.export.manifest.v1',
+    schema: 'cdfir.export.manifest.v1',
     exportId,
     generatedAt: new Date().toISOString(),
     itemCount: items.length,

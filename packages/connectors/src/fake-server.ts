@@ -5,7 +5,7 @@
  * Speaks just enough Graph-shaped and Gmail/Drive-shaped JSON to run the
  * connectors end-to-end from sanitized fixture files. See
  * src/fixtures/README.md for the fixture directory layout. Exported from the
- * separate entrypoint '@evidencevault/connectors/fake'.
+ * separate entrypoint '@aeg-clouddfir/connectors/fake'.
  *
  * Conventions:
  * - '{{BASE}}' inside JSON fixtures is replaced with the server's base URL,

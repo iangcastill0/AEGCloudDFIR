@@ -1,5 +1,5 @@
 {
-  "name": "evidencevault",
+  "name": "cdfir",
   "version": "0.1.0",
   "private": true,
   "description": "AEG-CloudDFIR — self-hostable multi-provider email and drive forensic archive and eDiscovery production platform",
@@ -23,11 +23,11 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@evidencevault/config": "workspace:*",
-    "@evidencevault/connectors": "workspace:*",
-    "@evidencevault/database": "workspace:*",
-    "@evidencevault/evidence": "workspace:*",
-    "@evidencevault/search": "workspace:*",
+    "@aeg-clouddfir/config": "workspace:*",
+    "@aeg-clouddfir/connectors": "workspace:*",
+    "@aeg-clouddfir/database": "workspace:*",
+    "@aeg-clouddfir/evidence": "workspace:*",
+    "@aeg-clouddfir/search": "workspace:*",
     "@playwright/test": "1.62.1",
     "@types/node": "26.1.2",
     "eslint": "^10.8.0",

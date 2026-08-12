@@ -5,7 +5,7 @@ import {
   type ExecutionContext,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import type { TenantRole } from '@evidencevault/database';
+import type { TenantRole } from '@aeg-clouddfir/database';
 import type { FastifyRequest } from 'fastify';
 import '../../common/http.js';
 import { ROLES_KEY } from './require-roles.decorator.js';
@@ -27,7 +27,7 @@ export class RolesGuard implements CanActivate {
     if (!required || required.length === 0) return true;
 
     const request = context.switchToHttp().getRequest<FastifyRequest>();
-    const auth = request.evAuth;
+    const auth = request.cdfirAuth;
     if (!auth || !required.some((role) => auth.roles.includes(role))) {
       throw new ForbiddenException('insufficient role');
     }

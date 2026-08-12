@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { NotFoundException } from '@nestjs/common';
-import { CaseStatus, TenantRole } from '@evidencevault/database';
+import { CaseStatus, TenantRole } from '@aeg-clouddfir/database';
 import { CasesService } from './cases.service.js';
 import type { SelectionService } from '../search/selection.service.js';
 import {

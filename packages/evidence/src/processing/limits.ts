@@ -4,9 +4,9 @@
  * Callers construct one ExpansionGuard per evidence item from the deployment
  * configuration and thread it through every nested extraction:
  *
- * - maxDepth        ← EV_MAX_ARCHIVE_DEPTH
- * - maxRatio        ← EV_MAX_ARCHIVE_EXPANSION_RATIO
- * - maxTotalBytes   ← EV_MAX_ARCHIVE_TOTAL_BYTES
+ * - maxDepth        ← CDFIR_MAX_ARCHIVE_DEPTH
+ * - maxRatio        ← CDFIR_MAX_ARCHIVE_EXPANSION_RATIO
+ * - maxTotalBytes   ← CDFIR_MAX_ARCHIVE_TOTAL_BYTES
  *
  * The guard is cumulative across all entries of all nested archives of one
  * item, so a thousand small "innocent" entries cannot sum past the limits.
@@ -16,11 +16,11 @@ import { gunzipSync } from 'node:zlib';
 import { ArchiveBombError, ArchiveDepthExceededError } from './errors.js';
 
 export interface ExpansionGuardOptions {
-  /** Maximum nested-archive depth (EV_MAX_ARCHIVE_DEPTH). */
+  /** Maximum nested-archive depth (CDFIR_MAX_ARCHIVE_DEPTH). */
   maxDepth: number;
-  /** Maximum output/input expansion ratio (EV_MAX_ARCHIVE_EXPANSION_RATIO). */
+  /** Maximum output/input expansion ratio (CDFIR_MAX_ARCHIVE_EXPANSION_RATIO). */
   maxRatio: number;
-  /** Maximum cumulative decompressed bytes (EV_MAX_ARCHIVE_TOTAL_BYTES). */
+  /** Maximum cumulative decompressed bytes (CDFIR_MAX_ARCHIVE_TOTAL_BYTES). */
   maxTotalBytes: number;
   /** Compressed size of the original evidence object. */
   inputSize: number;

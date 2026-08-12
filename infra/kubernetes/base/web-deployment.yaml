@@ -2,14 +2,14 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: web
-  labels: { app: evidencevault, component: web }
+  labels: { app: cdfir, component: web }
 spec:
   replicas: 2
   selector:
-    matchLabels: { app: evidencevault, component: web }
+    matchLabels: { app: cdfir, component: web }
   template:
     metadata:
-      labels: { app: evidencevault, component: web }
+      labels: { app: cdfir, component: web }
     spec:
       automountServiceAccountToken: false
       securityContext:
@@ -18,12 +18,12 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: web
-          image: ghcr.io/OWNER/evidencevault-web:0.1.0
+          image: ghcr.io/OWNER/cdfir-web:0.1.0
           ports:
             - { containerPort: 3000, name: http }
           env:
             - name: NEXT_PUBLIC_API_URL
-              value: 'https://api.evidencevault.example.com'
+              value: 'https://api.cdfir.example.com'
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

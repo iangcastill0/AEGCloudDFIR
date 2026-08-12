@@ -3,7 +3,7 @@
  * Pure so step gating and the live Bates preview are unit testable.
  */
 import { z } from 'zod';
-import type { ProductionParameters } from '@evidencevault/contracts';
+import type { ProductionParameters } from '@aeg-clouddfir/contracts';
 
 export const PRODUCTION_STEPS = [
   'Name',

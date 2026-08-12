@@ -103,7 +103,8 @@ export function createWorkers(ctx: WorkerContext, connection: Redis): Worker[] {
         connection,
         concurrency: QUEUE_CONCURRENCY[queueName],
         settings: {
-          backoffStrategy: (attemptsMade: number) => BACKOFF_STRATEGIES['ev-jitter'](attemptsMade),
+          backoffStrategy: (attemptsMade: number) =>
+            BACKOFF_STRATEGIES['cdfir-jitter'](attemptsMade),
         },
       },
     );

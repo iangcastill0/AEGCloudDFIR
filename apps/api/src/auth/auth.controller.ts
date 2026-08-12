@@ -13,7 +13,7 @@ import {
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
-import type { AppConfig } from '@evidencevault/config';
+import type { AppConfig } from '@aeg-clouddfir/config';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { CookieSerializeOptions } from '@fastify/cookie';
 import { z } from 'zod';
@@ -63,7 +63,7 @@ export class AuthController {
     private readonly authService: AuthService,
     private readonly audit: AuditService,
   ) {
-    this.key = deriveSealingKey(config.EV_SESSION_SECRET);
+    this.key = deriveSealingKey(config.CDFIR_SESSION_SECRET);
     this.isProd = config.NODE_ENV === 'production';
   }
 
@@ -106,7 +106,7 @@ export class AuthController {
 
     const authorizationUrl = await this.oidc.buildAuthorizationUrl(
       buildAuthorizationParameters({
-        apiPublicUrl: this.config.EV_API_PUBLIC_URL,
+        apiPublicUrl: this.config.CDFIR_API_PUBLIC_URL,
         state,
         nonce,
         codeChallenge,
@@ -140,7 +140,7 @@ export class AuthController {
       throw new BadRequestException('login flow missing or expired; restart login');
     }
 
-    const currentUrl = new URL(request.url, this.config.EV_API_PUBLIC_URL);
+    const currentUrl = new URL(request.url, this.config.CDFIR_API_PUBLIC_URL);
     let tokens;
     try {
       tokens = await this.oidc.authorizationCodeGrant(currentUrl, {
@@ -164,25 +164,28 @@ export class AuthController {
 
     const user = await this.authService.upsertUserFromClaims(claims);
 
-    if (this.config.EV_OIDC_GROUP_CLAIM.length > 0) {
-      const map = parseGroupRoleMap(this.config.EV_OIDC_GROUP_ROLE_MAP, (message) =>
+    if (this.config.CDFIR_OIDC_GROUP_CLAIM.length > 0) {
+      const map = parseGroupRoleMap(this.config.CDFIR_OIDC_GROUP_ROLE_MAP, (message) =>
         this.logger.warn(message),
       );
       const rawClaims = tokens.claims();
       const groups = rawClaims
-        ? extractGroups(rawClaims as Record<string, unknown>, this.config.EV_OIDC_GROUP_CLAIM)
+        ? extractGroups(rawClaims as Record<string, unknown>, this.config.CDFIR_OIDC_GROUP_CLAIM)
         : [];
       await this.authService.syncOidcGroupRoles(user.id, rolesForGroups(groups, map));
     }
 
-    this.logger.info({ userId: user.id, requestId: request.evRequestId }, 'auth.login');
+    this.logger.info({ userId: user.id, requestId: request.cdfirRequestId }, 'auth.login');
 
     this.setSessionCookie(
       reply,
-      createSessionPayload(user.id, undefined, this.config.EV_SESSION_TTL_SECONDS),
+      createSessionPayload(user.id, undefined, this.config.CDFIR_SESSION_TTL_SECONDS),
     );
     reply.clearCookie(AUTH_FLOW_COOKIE, { path: '/' });
-    reply.redirect(302, `${this.config.EV_WEB_PUBLIC_URL}${validateRedirectTo(flow.redirectTo)}`);
+    reply.redirect(
+      302,
+      `${this.config.CDFIR_WEB_PUBLIC_URL}${validateRedirectTo(flow.redirectTo)}`,
+    );
   }
 
   /** CSRF-protected by the global CsrfGuard (mutating method). */
@@ -192,7 +195,7 @@ export class AuthController {
     @Req() request: FastifyRequest,
     @Res({ passthrough: true }) reply: FastifyReply,
   ): Promise<{ logoutUrl: string | null }> {
-    const session = request.evSession;
+    const session = request.cdfirSession;
     if (session?.tenantId) {
       await this.audit.append({
         tenantId: session.tenantId,
@@ -202,7 +205,7 @@ export class AuthController {
       });
     }
     reply.clearCookie(sessionCookieName(this.isProd), this.baseCookieOptions());
-    const logoutUrl = await this.oidc.endSessionUrl(this.config.EV_WEB_PUBLIC_URL);
+    const logoutUrl = await this.oidc.endSessionUrl(this.config.CDFIR_WEB_PUBLIC_URL);
     return { logoutUrl };
   }
 
@@ -216,7 +219,7 @@ export class AuthController {
       roles: string[];
     }>;
   }> {
-    const session = request.evSession;
+    const session = request.cdfirSession;
     if (!session) throw new UnauthorizedException();
     const memberships = await this.authService.listMemberships(session.userId);
     return {
@@ -238,7 +241,7 @@ export class AuthController {
     @Req() request: FastifyRequest,
     @Res({ passthrough: true }) reply: FastifyReply,
   ): Promise<{ ok: true }> {
-    const session = request.evSession;
+    const session = request.cdfirSession;
     if (!session) throw new UnauthorizedException();
     const parsed = selectTenantSchema.safeParse(body);
     if (!parsed.success) throw new BadRequestException('tenantId (uuid) is required');

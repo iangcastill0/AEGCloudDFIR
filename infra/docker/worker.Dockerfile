@@ -5,9 +5,9 @@ WORKDIR /app
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json .npmrc turbo.json tsconfig.base.json ./
 COPY apps/worker ./apps/worker
 COPY packages ./packages
-RUN pnpm install --frozen-lockfile --filter @evidencevault/worker... \
- && pnpm --filter @evidencevault/worker... build \
- && pnpm --filter @evidencevault/worker deploy --prod /out
+RUN pnpm install --frozen-lockfile --filter @aeg-clouddfir/worker... \
+ && pnpm --filter @aeg-clouddfir/worker... build \
+ && pnpm --filter @aeg-clouddfir/worker deploy --prod /out
 
 # Worker runtime: extraction/OCR/conversion tools live ONLY here, never in api.
 FROM node:22-bookworm-slim

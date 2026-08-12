@@ -6,34 +6,34 @@
 --   psql -v migrator_password="'...'" -v runtime_password="'...'" -f roles.sql
 --
 -- Two roles:
---   evidencevault_migrator  owns the schema; used only by `prisma migrate deploy`
---   evidencevault           runtime role; NOBYPASSRLS so row-level security
+--   cdfir_migrator  owns the schema; used only by `prisma migrate deploy`
+--   cdfir           runtime role; NOBYPASSRLS so row-level security
 --                           applies to every application query
 
 DO $$
 BEGIN
-  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'evidencevault_migrator') THEN
-    EXECUTE format('CREATE ROLE evidencevault_migrator LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE', current_setting('vars.migrator_password', true));
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'cdfir_migrator') THEN
+    EXECUTE format('CREATE ROLE cdfir_migrator LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE', current_setting('vars.migrator_password', true));
   END IF;
-  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'evidencevault') THEN
-    EXECUTE format('CREATE ROLE evidencevault LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS', current_setting('vars.runtime_password', true));
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'cdfir') THEN
+    EXECUTE format('CREATE ROLE cdfir LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS', current_setting('vars.runtime_password', true));
   END IF;
 END
 $$;
 
--- Schema ownership and grants (run inside the evidencevault database).
-GRANT CONNECT ON DATABASE evidencevault TO evidencevault, evidencevault_migrator;
-GRANT CREATE ON DATABASE evidencevault TO evidencevault_migrator;
-ALTER SCHEMA public OWNER TO evidencevault_migrator;
-GRANT USAGE ON SCHEMA public TO evidencevault;
+-- Schema ownership and grants (run inside the cdfir database).
+GRANT CONNECT ON DATABASE cdfir TO cdfir, cdfir_migrator;
+GRANT CREATE ON DATABASE cdfir TO cdfir_migrator;
+ALTER SCHEMA public OWNER TO cdfir_migrator;
+GRANT USAGE ON SCHEMA public TO cdfir;
 
 -- Runtime role: CRUD on tables, but audit history can never be rewritten.
-ALTER DEFAULT PRIVILEGES FOR ROLE evidencevault_migrator IN SCHEMA public
-  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO evidencevault;
-ALTER DEFAULT PRIVILEGES FOR ROLE evidencevault_migrator IN SCHEMA public
-  GRANT USAGE, SELECT ON SEQUENCES TO evidencevault;
+ALTER DEFAULT PRIVILEGES FOR ROLE cdfir_migrator IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO cdfir;
+ALTER DEFAULT PRIVILEGES FOR ROLE cdfir_migrator IN SCHEMA public
+  GRANT USAGE, SELECT ON SEQUENCES TO cdfir;
 
 -- Applied after migrations create the tables (rerun-safe):
---   REVOKE UPDATE, DELETE ON audit_events FROM evidencevault;
+--   REVOKE UPDATE, DELETE ON audit_events FROM cdfir;
 -- The append-only trigger in migration 20260807000002 enforces this even for
 -- roles that retain the grant.

@@ -23,9 +23,9 @@ import {
   type EmailConnector,
   type RateLimitObserver,
   type TokenProvider,
-} from '@evidencevault/connectors';
-import { decryptSecret, encryptSecret, withTenantContext } from '@evidencevault/database';
-import type { CollectionScope } from '@evidencevault/contracts';
+} from '@aeg-clouddfir/connectors';
+import { decryptSecret, encryptSecret, withTenantContext } from '@aeg-clouddfir/database';
+import type { CollectionScope } from '@aeg-clouddfir/contracts';
 import type { WorkerContext } from './context.js';
 import { incrementProgress } from './progress.js';
 import {
@@ -178,9 +178,9 @@ export async function buildConnectorsForAccount(
         await decryptSecretRow(ctx, tenantId, connectorAccountId, row)
       ).toString('utf8');
       tokenProvider = new MicrosoftDelegatedTokenSource({
-        msLoginBaseUrl: ctx.config.EV_MS_LOGIN_BASE_URL,
-        clientId: ctx.config.EV_MS_CLIENT_ID,
-        clientSecret: ctx.config.EV_MS_CLIENT_SECRET,
+        msLoginBaseUrl: ctx.config.CDFIR_MS_LOGIN_BASE_URL,
+        clientId: ctx.config.CDFIR_MS_CLIENT_ID,
+        clientSecret: ctx.config.CDFIR_MS_CLIENT_SECRET,
         refreshToken,
         scopes: MICROSOFT_DELEGATED_SCOPES,
         onTokensRotated: makeRotationPersister(ctx, tenantId, connectorAccountId, row.id),
@@ -190,10 +190,10 @@ export async function buildConnectorsForAccount(
         throw new Error('microsoft organization mode requires the connector externalTenantId');
       }
       tokenProvider = new MicrosoftAppTokenSource({
-        msLoginBaseUrl: ctx.config.EV_MS_LOGIN_BASE_URL,
+        msLoginBaseUrl: ctx.config.CDFIR_MS_LOGIN_BASE_URL,
         tenantId: account.externalTenantId,
-        clientId: ctx.config.EV_MS_CLIENT_ID,
-        clientSecret: ctx.config.EV_MS_CLIENT_SECRET,
+        clientId: ctx.config.CDFIR_MS_CLIENT_ID,
+        clientSecret: ctx.config.CDFIR_MS_CLIENT_SECRET,
       });
       if (args.custodian === undefined) {
         throw new Error('microsoft organization mode requires a custodian to address');
@@ -202,7 +202,7 @@ export async function buildConnectorsForAccount(
     }
     const options = {
       tokenProvider,
-      graphBaseUrl: ctx.config.EV_MS_GRAPH_BASE_URL,
+      graphBaseUrl: ctx.config.CDFIR_MS_GRAPH_BASE_URL,
       mode: account.mode,
       onRateLimit: args.onRateLimit,
     };
@@ -222,9 +222,9 @@ export async function buildConnectorsForAccount(
       'utf8',
     );
     tokenProvider = new GoogleDelegatedTokenSource({
-      googleOauthTokenUrl: ctx.config.EV_GOOGLE_OAUTH_TOKEN_URL,
-      clientId: ctx.config.EV_GOOGLE_CLIENT_ID,
-      clientSecret: ctx.config.EV_GOOGLE_CLIENT_SECRET,
+      googleOauthTokenUrl: ctx.config.CDFIR_GOOGLE_OAUTH_TOKEN_URL,
+      clientId: ctx.config.CDFIR_GOOGLE_CLIENT_ID,
+      clientSecret: ctx.config.CDFIR_GOOGLE_CLIENT_SECRET,
       refreshToken,
     });
   } else {
@@ -236,7 +236,7 @@ export async function buildConnectorsForAccount(
       (await decryptSecretRow(ctx, tenantId, connectorAccountId, row)).toString('utf8'),
     ) as unknown;
     tokenProvider = new GoogleServiceAccountTokenSource({
-      googleOauthTokenUrl: ctx.config.EV_GOOGLE_OAUTH_TOKEN_URL,
+      googleOauthTokenUrl: ctx.config.CDFIR_GOOGLE_OAUTH_TOKEN_URL,
       serviceAccountJson: serviceAccountShape(keyJson),
       scopes: GOOGLE_DWD_SCOPES,
       impersonateEmail: args.custodian.email,
@@ -245,7 +245,7 @@ export async function buildConnectorsForAccount(
   }
   const options = {
     tokenProvider,
-    googleApiBaseUrl: ctx.config.EV_GOOGLE_API_BASE_URL,
+    googleApiBaseUrl: ctx.config.CDFIR_GOOGLE_API_BASE_URL,
     onRateLimit: args.onRateLimit,
   };
   return {
@@ -311,10 +311,10 @@ export async function buildAuditConnectors(
     }
     const appToken = (scope: string): MicrosoftAppTokenSource =>
       new MicrosoftAppTokenSource({
-        msLoginBaseUrl: ctx.config.EV_MS_LOGIN_BASE_URL,
+        msLoginBaseUrl: ctx.config.CDFIR_MS_LOGIN_BASE_URL,
         tenantId: account.externalTenantId,
-        clientId: ctx.config.EV_MS_CLIENT_ID,
-        clientSecret: ctx.config.EV_MS_CLIENT_SECRET,
+        clientId: ctx.config.CDFIR_MS_CLIENT_ID,
+        clientSecret: ctx.config.CDFIR_MS_CLIENT_SECRET,
         scope,
       });
 
@@ -340,7 +340,7 @@ export async function buildAuditConnectors(
         kind: 'graph_audit',
         connector: new GraphAuditConnector({
           tokenProvider: appToken(MICROSOFT_GRAPH_AUDIT_APP_SCOPE),
-          graphBaseUrl: ctx.config.EV_MS_GRAPH_BASE_URL,
+          graphBaseUrl: ctx.config.CDFIR_MS_GRAPH_BASE_URL,
           scopes: graphScopes,
           onRateLimit: args.onRateLimit,
         }),
@@ -361,7 +361,7 @@ export async function buildAuditConnectors(
   const serviceAccountJson = serviceAccountShape(keyJson);
   const dwdToken = (scope: string): GoogleServiceAccountTokenSource =>
     new GoogleServiceAccountTokenSource({
-      googleOauthTokenUrl: ctx.config.EV_GOOGLE_OAUTH_TOKEN_URL,
+      googleOauthTokenUrl: ctx.config.CDFIR_GOOGLE_OAUTH_TOKEN_URL,
       serviceAccountJson,
       scopes: [scope],
       impersonateEmail: account.externalIdentity,

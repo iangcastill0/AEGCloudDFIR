@@ -16,14 +16,14 @@ const port = z.coerce.number().int().min(1).max(65535);
  */
 export const configSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
-  EV_APP_VERSION: z.string().default('0.1.0'),
+  CDFIR_APP_VERSION: z.string().default('0.1.0'),
 
   // --- HTTP ---
-  EV_API_PORT: port.default(4000),
-  EV_API_PUBLIC_URL: z.string().url(),
-  EV_WEB_PUBLIC_URL: z.string().url(),
-  EV_TRUST_PROXY: booleanString('false'),
-  EV_CORS_ALLOWED_ORIGINS: z
+  CDFIR_API_PORT: port.default(4000),
+  CDFIR_API_PUBLIC_URL: z.string().url(),
+  CDFIR_WEB_PUBLIC_URL: z.string().url(),
+  CDFIR_TRUST_PROXY: booleanString('false'),
+  CDFIR_CORS_ALLOWED_ORIGINS: z
     .string()
     .default('')
     .transform((v) =>
@@ -32,104 +32,104 @@ export const configSchema = z.object({
         .map((s) => s.trim())
         .filter(Boolean),
     ),
-  EV_REQUEST_BODY_LIMIT_BYTES: z.coerce.number().int().positive().default(10_485_760),
+  CDFIR_REQUEST_BODY_LIMIT_BYTES: z.coerce.number().int().positive().default(10_485_760),
 
   // --- PostgreSQL ---
-  EV_DATABASE_URL: z.string().min(1),
+  CDFIR_DATABASE_URL: z.string().min(1),
   /** Separate role used for migrations; the runtime role is NOT BYPASSRLS. */
-  EV_DATABASE_MIGRATION_URL: z.string().min(1).optional(),
+  CDFIR_DATABASE_MIGRATION_URL: z.string().min(1).optional(),
 
   // --- Redis / queues ---
-  EV_REDIS_URL: z.string().min(1),
+  CDFIR_REDIS_URL: z.string().min(1),
 
   // --- OpenSearch ---
-  EV_OPENSEARCH_URL: z.string().url(),
-  EV_OPENSEARCH_USERNAME: z.string().optional(),
-  EV_OPENSEARCH_PASSWORD: z.string().optional(),
-  EV_OPENSEARCH_INDEX_PREFIX: z
+  CDFIR_OPENSEARCH_URL: z.string().url(),
+  CDFIR_OPENSEARCH_USERNAME: z.string().optional(),
+  CDFIR_OPENSEARCH_PASSWORD: z.string().optional(),
+  CDFIR_OPENSEARCH_INDEX_PREFIX: z
     .string()
     .regex(/^[a-z][a-z0-9-]*$/)
-    .default('evidencevault'),
+    .default('cdfir'),
 
   // --- Object storage (Wasabi / S3-compatible) ---
-  EV_S3_ENDPOINT: z.string().url(),
-  EV_S3_REGION: z.string().min(1),
-  EV_S3_BUCKET_EVIDENCE: z.string().min(3),
-  EV_S3_BUCKET_QUARANTINE: z.string().min(3),
-  EV_S3_ACCESS_KEY_ID: z.string().min(1),
-  EV_S3_SECRET_ACCESS_KEY: z.string().min(1),
-  EV_S3_FORCE_PATH_STYLE: booleanString('true'),
-  EV_S3_PRESIGN_TTL_SECONDS: z.coerce.number().int().min(30).max(3600).default(300),
+  CDFIR_S3_ENDPOINT: z.string().url(),
+  CDFIR_S3_REGION: z.string().min(1),
+  CDFIR_S3_BUCKET_EVIDENCE: z.string().min(3),
+  CDFIR_S3_BUCKET_QUARANTINE: z.string().min(3),
+  CDFIR_S3_ACCESS_KEY_ID: z.string().min(1),
+  CDFIR_S3_SECRET_ACCESS_KEY: z.string().min(1),
+  CDFIR_S3_FORCE_PATH_STYLE: booleanString('true'),
+  CDFIR_S3_PRESIGN_TTL_SECONDS: z.coerce.number().int().min(30).max(3600).default(300),
 
   // --- Authentik OIDC (login) ---
-  EV_OIDC_ISSUER: z.string().url(),
-  EV_OIDC_CLIENT_ID: z.string().min(1),
-  EV_OIDC_CLIENT_SECRET: z.string().min(1),
-  EV_OIDC_GROUP_CLAIM: z.string().default(''),
-  EV_OIDC_GROUP_ROLE_MAP: z.string().default(''), // e.g. "ev-admins:org_admin,ev-reviewers:reviewer"
-  EV_SESSION_SECRET: z.string().min(32),
-  EV_SESSION_TTL_SECONDS: z.coerce.number().int().min(300).default(28_800),
+  CDFIR_OIDC_ISSUER: z.string().url(),
+  CDFIR_OIDC_CLIENT_ID: z.string().min(1),
+  CDFIR_OIDC_CLIENT_SECRET: z.string().min(1),
+  CDFIR_OIDC_GROUP_CLAIM: z.string().default(''),
+  CDFIR_OIDC_GROUP_ROLE_MAP: z.string().default(''), // e.g. "cdfir-admins:org_admin,cdfir-reviewers:reviewer"
+  CDFIR_SESSION_SECRET: z.string().min(32),
+  CDFIR_SESSION_TTL_SECONDS: z.coerce.number().int().min(300).default(28_800),
 
   // --- Envelope encryption ---
-  EV_KEK_PROVIDER: z.enum(['local-aes256gcm']).default('local-aes256gcm'),
+  CDFIR_KEK_PROVIDER: z.enum(['local-aes256gcm']).default('local-aes256gcm'),
   /** base64-encoded 32-byte master key for the local provider. */
-  EV_KEK_LOCAL_MASTER_KEY: z.string().min(1),
-  EV_KEK_ACTIVE_KEY_ID: z.string().default('kek-1'),
+  CDFIR_KEK_LOCAL_MASTER_KEY: z.string().min(1),
+  CDFIR_KEK_ACTIVE_KEY_ID: z.string().default('kek-1'),
 
   // --- Provider OAuth apps (AEG-CloudDFIR's own registrations) ---
-  EV_MS_CLIENT_ID: z.string().default(''),
-  EV_MS_CLIENT_SECRET: z.string().default(''),
-  EV_MS_REDIRECT_PATH: z.string().default('/api/v1/connectors/callback/microsoft'),
-  EV_GOOGLE_CLIENT_ID: z.string().default(''),
-  EV_GOOGLE_CLIENT_SECRET: z.string().default(''),
-  EV_GOOGLE_REDIRECT_PATH: z.string().default('/api/v1/connectors/callback/google'),
+  CDFIR_MS_CLIENT_ID: z.string().default(''),
+  CDFIR_MS_CLIENT_SECRET: z.string().default(''),
+  CDFIR_MS_REDIRECT_PATH: z.string().default('/api/v1/connectors/callback/microsoft'),
+  CDFIR_GOOGLE_CLIENT_ID: z.string().default(''),
+  CDFIR_GOOGLE_CLIENT_SECRET: z.string().default(''),
+  CDFIR_GOOGLE_REDIRECT_PATH: z.string().default('/api/v1/connectors/callback/google'),
 
   // --- Provider endpoint overrides (contract tests / fake server / demo) ---
-  EV_MS_GRAPH_BASE_URL: z.string().url().default('https://graph.microsoft.com/v1.0'),
-  EV_MS_LOGIN_BASE_URL: z.string().url().default('https://login.microsoftonline.com'),
-  EV_GOOGLE_API_BASE_URL: z.string().url().default('https://www.googleapis.com'),
-  EV_GOOGLE_OAUTH_TOKEN_URL: z.string().url().default('https://oauth2.googleapis.com/token'),
+  CDFIR_MS_GRAPH_BASE_URL: z.string().url().default('https://graph.microsoft.com/v1.0'),
+  CDFIR_MS_LOGIN_BASE_URL: z.string().url().default('https://login.microsoftonline.com'),
+  CDFIR_GOOGLE_API_BASE_URL: z.string().url().default('https://www.googleapis.com'),
+  CDFIR_GOOGLE_OAUTH_TOKEN_URL: z.string().url().default('https://oauth2.googleapis.com/token'),
 
   // --- ClamAV ---
-  EV_CLAMAV_HOST: z.string().default('clamav'),
-  EV_CLAMAV_PORT: port.default(3310),
-  EV_CLAMAV_ENABLED: booleanString('true'),
+  CDFIR_CLAMAV_HOST: z.string().default('clamav'),
+  CDFIR_CLAMAV_PORT: port.default(3310),
+  CDFIR_CLAMAV_ENABLED: booleanString('true'),
 
   // --- Extraction / Tika ---
-  EV_TIKA_URL: z.string().url().default('http://tika:9998'),
-  EV_OCR_LANGS: z.string().default('eng'),
-  EV_MAX_ARCHIVE_DEPTH: z.coerce.number().int().min(1).max(10).default(3),
-  EV_MAX_ARCHIVE_EXPANSION_RATIO: z.coerce.number().int().min(2).max(1000).default(100),
-  EV_MAX_ARCHIVE_TOTAL_BYTES: z.coerce.number().int().positive().default(2_147_483_648),
-  EV_MAX_OCR_PAGES: z.coerce.number().int().min(1).default(2000),
-  EV_PREVIEW_TIMEOUT_MS: z.coerce.number().int().min(1000).default(120_000),
+  CDFIR_TIKA_URL: z.string().url().default('http://tika:9998'),
+  CDFIR_OCR_LANGS: z.string().default('eng'),
+  CDFIR_MAX_ARCHIVE_DEPTH: z.coerce.number().int().min(1).max(10).default(3),
+  CDFIR_MAX_ARCHIVE_EXPANSION_RATIO: z.coerce.number().int().min(2).max(1000).default(100),
+  CDFIR_MAX_ARCHIVE_TOTAL_BYTES: z.coerce.number().int().positive().default(2_147_483_648),
+  CDFIR_MAX_OCR_PAGES: z.coerce.number().int().min(1).default(2000),
+  CDFIR_PREVIEW_TIMEOUT_MS: z.coerce.number().int().min(1000).default(120_000),
 
   // --- Demo mode (never enable in production) ---
-  EV_DEMO_MODE: booleanString('false'),
-  EV_DEMO_FAKE_PROVIDER_URL: z.string().url().optional(),
+  CDFIR_DEMO_MODE: booleanString('false'),
+  CDFIR_DEMO_FAKE_PROVIDER_URL: z.string().url().optional(),
 
   // --- Observability ---
-  EV_LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error']).default('info'),
-  EV_OTEL_EXPORTER_OTLP_ENDPOINT: z.string().default(''),
-  EV_METRICS_PORT: port.default(9464),
-  EV_WORKER_HEALTH_PORT: port.default(5100),
+  CDFIR_LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error']).default('info'),
+  CDFIR_OTEL_EXPORTER_OTLP_ENDPOINT: z.string().default(''),
+  CDFIR_METRICS_PORT: port.default(9464),
+  CDFIR_WORKER_HEALTH_PORT: port.default(5100),
 });
 
 export type AppConfig = z.infer<typeof configSchema>;
 export type ConfigInput = z.input<typeof configSchema>;
 
 const SECRET_KEYS: ReadonlySet<string> = new Set([
-  'EV_DATABASE_URL',
-  'EV_DATABASE_MIGRATION_URL',
-  'EV_REDIS_URL',
-  'EV_OPENSEARCH_PASSWORD',
-  'EV_S3_SECRET_ACCESS_KEY',
-  'EV_S3_ACCESS_KEY_ID',
-  'EV_OIDC_CLIENT_SECRET',
-  'EV_SESSION_SECRET',
-  'EV_KEK_LOCAL_MASTER_KEY',
-  'EV_MS_CLIENT_SECRET',
-  'EV_GOOGLE_CLIENT_SECRET',
+  'CDFIR_DATABASE_URL',
+  'CDFIR_DATABASE_MIGRATION_URL',
+  'CDFIR_REDIS_URL',
+  'CDFIR_OPENSEARCH_PASSWORD',
+  'CDFIR_S3_SECRET_ACCESS_KEY',
+  'CDFIR_S3_ACCESS_KEY_ID',
+  'CDFIR_OIDC_CLIENT_SECRET',
+  'CDFIR_SESSION_SECRET',
+  'CDFIR_KEK_LOCAL_MASTER_KEY',
+  'CDFIR_MS_CLIENT_SECRET',
+  'CDFIR_GOOGLE_CLIENT_SECRET',
 ]);
 
 export class ConfigValidationError extends Error {
@@ -152,8 +152,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     });
     throw new ConfigValidationError(issues);
   }
-  if (result.data.NODE_ENV === 'production' && result.data.EV_DEMO_MODE) {
-    throw new ConfigValidationError(['EV_DEMO_MODE must not be enabled when NODE_ENV=production']);
+  if (result.data.NODE_ENV === 'production' && result.data.CDFIR_DEMO_MODE) {
+    throw new ConfigValidationError([
+      'CDFIR_DEMO_MODE must not be enabled when NODE_ENV=production',
+    ]);
   }
   return result.data;
 }

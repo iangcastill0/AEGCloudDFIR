@@ -59,21 +59,21 @@ export function Dialog({ open, onClose, title, children, actions }: DialogProps)
   }
 
   return (
-    <div className="ev-dialog-overlay" onMouseDown={onOverlayMouseDown}>
+    <div className="cdfir-dialog-overlay" onMouseDown={onOverlayMouseDown}>
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="ev-dialog"
+        className="cdfir-dialog"
         ref={dialogRef}
         tabIndex={-1}
         onKeyDown={onKeyDown}
       >
-        <h2 className="ev-dialog__title" id={titleId}>
+        <h2 className="cdfir-dialog__title" id={titleId}>
           {title}
         </h2>
         {children}
-        {actions ? <div className="ev-dialog__actions">{actions}</div> : null}
+        {actions ? <div className="cdfir-dialog__actions">{actions}</div> : null}
       </div>
     </div>
   );

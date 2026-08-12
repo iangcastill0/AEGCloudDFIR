@@ -30,7 +30,7 @@ export function csrfTokensMatch(cookieValue: unknown, headerValue: unknown): boo
 
 /**
  * Double-submit CSRF guard. Registered globally: every mutating request must
- * send the ev_csrf cookie value back in the x-csrf-token header.
+ * send the cdfir_csrf cookie value back in the x-csrf-token header.
  */
 @Injectable()
 export class CsrfGuard implements CanActivate {

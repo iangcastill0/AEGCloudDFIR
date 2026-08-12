@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ConflictException, GoneException } from '@nestjs/common';
-import { ExportStatus, TenantRole } from '@evidencevault/database';
-import type { EvidenceObjectStore } from '@evidencevault/evidence';
+import { ExportStatus, TenantRole } from '@aeg-clouddfir/database';
+import type { EvidenceObjectStore } from '@aeg-clouddfir/evidence';
 import { Readable } from 'node:stream';
 import { ExportsService } from './exports.service.js';
 import type { SelectionService } from '../search/selection.service.js';

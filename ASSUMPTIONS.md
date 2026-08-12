@@ -86,7 +86,7 @@ before relying on the affected behavior.
 18. Demo seed mode uses a local fake provider server speaking
     Graph-shaped and Gmail/Drive-shaped JSON with sanitized RFC 822 fixtures.
     It is compiled only into dev/demo entry points, gated by
-    `EV_DEMO_MODE=true`, and clearly labeled in the UI. Production code paths
+    `CDFIR_DEMO_MODE=true`, and clearly labeled in the UI. Production code paths
     use the real connector adapters exclusively.
 19. Live-credential verification against real Microsoft/Google tenants is a
     documented manual step (see `VERIFICATION.md`); all connector logic is

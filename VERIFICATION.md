@@ -40,33 +40,33 @@ Authentik ×2, Authentik Postgres/Redis — 10 containers) was started with
 
 | Package                     | Tests | Notable coverage                                                                                                                                                                                                              |
 | --------------------------- | ----: | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@evidencevault/config`     |     6 | env validation, fail-fast, secret redaction, demo-in-prod refusal                                                                                                                                                             |
-| `@evidencevault/database`   |    14 | canonical JSON, audit hash chain determinism/tamper, envelope encryption (AAD tenant binding, rotation)                                                                                                                       |
-| `@evidencevault/contracts`  |     8 | completeness vocabulary rejects "complete"/"all data"; production/export DTOs; truthfulness notices present                                                                                                                   |
-| `@evidencevault/evidence`   |   162 | streaming SHA-256, content-addressed store (stage→verify→promote, dedup, presign refusal, Object Lock honesty), Merkle manifests, MIME parse edge cases, safe-preview sanitizer, OCR/Tika/ClamAV clients, archive-bomb guards |
-| `@evidencevault/connectors` |    69 | Graph mail/drive + Gmail/Drive (delegated + org), Retry-After/backoff, delta/history resume + expiry, DWD domain allowlist, no-auth content redirect                                                                          |
-| `@evidencevault/search`     |   173 | query AST parse/validate/compile, **unconditional tenant-filter injection (adversarial matrix)**, cost limits, facets, reindex alias swap                                                                                     |
-| `@evidencevault/production` |   103 | Bates overflow, family-adjacent sort, 18-flag validation incl. non-overridable redaction leak, stamping, redaction burn-in + no-text-layer gate, TIFF G4, OPT/DAT/CSV escaping                                                |
-| `@evidencevault/ui`         |    16 | dialog focus trap, roving tabindex (DOM-free logic)                                                                                                                                                                           |
-| `@evidencevault/web`        |    39 | wizard reducer gating + resume + stable idempotency key, mark-token-only highlight parsing, CSRF header logic                                                                                                                 |
-| `@evidencevault/api`        |   127 | OIDC helpers, sealed sessions, CSRF, guards, audit pagination + chain verify, connectors, collections lifecycle, search authz, evidence authz, tags/families, cases, exports, production validation/submit                    |
-| `@evidencevault/worker`     |    68 | outbox dispatch (SKIP LOCKED, dedup, failure accounting), DST-safe date scoping, checkpoint version guard, fetch-item idempotency, finalize completeness matrix, scan/quarantine, production run                              |
+| `@aeg-clouddfir/config`     |     6 | env validation, fail-fast, secret redaction, demo-in-prod refusal                                                                                                                                                             |
+| `@aeg-clouddfir/database`   |    14 | canonical JSON, audit hash chain determinism/tamper, envelope encryption (AAD tenant binding, rotation)                                                                                                                       |
+| `@aeg-clouddfir/contracts`  |     8 | completeness vocabulary rejects "complete"/"all data"; production/export DTOs; truthfulness notices present                                                                                                                   |
+| `@aeg-clouddfir/evidence`   |   162 | streaming SHA-256, content-addressed store (stage→verify→promote, dedup, presign refusal, Object Lock honesty), Merkle manifests, MIME parse edge cases, safe-preview sanitizer, OCR/Tika/ClamAV clients, archive-bomb guards |
+| `@aeg-clouddfir/connectors` |    69 | Graph mail/drive + Gmail/Drive (delegated + org), Retry-After/backoff, delta/history resume + expiry, DWD domain allowlist, no-auth content redirect                                                                          |
+| `@aeg-clouddfir/search`     |   173 | query AST parse/validate/compile, **unconditional tenant-filter injection (adversarial matrix)**, cost limits, facets, reindex alias swap                                                                                     |
+| `@aeg-clouddfir/production` |   103 | Bates overflow, family-adjacent sort, 18-flag validation incl. non-overridable redaction leak, stamping, redaction burn-in + no-text-layer gate, TIFF G4, OPT/DAT/CSV escaping                                                |
+| `@aeg-clouddfir/ui`         |    16 | dialog focus trap, roving tabindex (DOM-free logic)                                                                                                                                                                           |
+| `@aeg-clouddfir/web`        |    39 | wizard reducer gating + resume + stable idempotency key, mark-token-only highlight parsing, CSRF header logic                                                                                                                 |
+| `@aeg-clouddfir/api`        |   127 | OIDC helpers, sealed sessions, CSRF, guards, audit pagination + chain verify, connectors, collections lifecycle, search authz, evidence authz, tags/families, cases, exports, production validation/submit                    |
+| `@aeg-clouddfir/worker`     |    68 | outbox dispatch (SKIP LOCKED, dedup, failure accounting), DST-safe date scoping, checkpoint version guard, fetch-item idempotency, finalize completeness matrix, scan/quarantine, production run                              |
 
 ## Migrations — applied to an empty database
 
-`prisma migrate deploy` under the `evidencevault_migrator` role applied both
+`prisma migrate deploy` under the `cdfir_migrator` role applied both
 migrations (`20260807000001_init`, `20260807000002_rls_and_audit_guards`) to a
 freshly created database. Verified fail-closed RLS immediately after:
 
 ```
-psql -U evidencevault -c "SELECT count(*) FROM tenants"  → 0
+psql -U cdfir -c "SELECT count(*) FROM tenants"  → 0
 ```
 
 (The runtime role sees zero rows without a tenant context set.)
 
 ## Integration tests (live PostgreSQL, NOBYPASSRLS runtime role)
 
-`EV_IT_DATABASE_URL=... pnpm --filter @evidencevault/database test:integration`
+`CDFIR_IT_DATABASE_URL=... pnpm --filter @aeg-clouddfir/database test:integration`
 — **8 passed**:
 
 - session without tenant context sees zero tenant rows (fail closed)
@@ -130,13 +130,13 @@ primary pages.
 files; redacted-native leakage blocked)** are verified at the unit and
 integration level, not via a live E2E run:
 
-- `@evidencevault/production` (103 tests) covers Bates continuity across
+- `@aeg-clouddfir/production` (103 tests) covers Bates continuity across
   families, stamping, **redaction burn-in validated by pixel readback and a
   no-text-layer gate**, TIFF G4, and DAT/OPT/CSV escaping.
-- `@evidencevault/api` production tests assert the validation flag matrix,
+- `@aeg-clouddfir/api` production tests assert the validation flag matrix,
   that a **security-critical redaction/native leak is not overridable without
   a second confirmation (403)**, stale-draft 409, and atomic Bates reservation.
-- `@evidencevault/worker` `production-run` test asserts a redacted item
+- `@aeg-clouddfir/worker` `production-run` test asserts a redacted item
   requesting native output becomes a **placeholder with a security exception**
   rather than shipping the native, and that a `validateNoTextLayer` failure
   forces a placeholder.
@@ -174,7 +174,7 @@ flagged.
    against recorded fixtures and the fake server. The one manual step
    requiring administrator credentials: register the Entra app / Google OAuth
    client (and, for org mode, admin consent / domain-wide delegation), set
-   `EV_MS_*` / `EV_GOOGLE_*`, and run one real collection. See the setup
+   `CDFIR_MS_*` / `CDFIR_GOOGLE_*`, and run one real collection. See the setup
    guides in `docs/guides/`.
 3. **ClamAV signature warm-up.** `clamav/clamav-debian:1.4` downloads
    signatures on first start (several minutes); scans return `scan_failed`
@@ -197,14 +197,14 @@ flagged.
 ```bash
 docker compose -f infra/compose/docker-compose.yml up -d
 pnpm install && pnpm build
-pnpm --filter @evidencevault/database exec prisma migrate deploy   # migrator URL
+pnpm --filter @aeg-clouddfir/database exec prisma migrate deploy   # migrator URL
 pnpm test                                                          # 785 unit
-EV_IT_DATABASE_URL=... pnpm --filter @evidencevault/database test:integration
+CDFIR_IT_DATABASE_URL=... pnpm --filter @aeg-clouddfir/database test:integration
 # demo + E2E:
 pnpm tsx scripts/demo-provider.ts &                                # :4010
 node --env-file=.env apps/api/dist/main.js &                       # :4000
 node --env-file=.env apps/worker/dist/main.js &
-pnpm --filter @evidencevault/web start &                           # :3000
+pnpm --filter @aeg-clouddfir/web start &                           # :3000
 # log in once via the web app, then:
 node --env-file=.env node_modules/.bin/tsx scripts/demo-seed.ts
 pnpm exec playwright test

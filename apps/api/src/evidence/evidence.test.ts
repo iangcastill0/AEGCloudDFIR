@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ConflictException, HttpException, NotFoundException } from '@nestjs/common';
-import { MalwareStatus, TenantRole } from '@evidencevault/database';
-import type { EvidenceObjectStore } from '@evidencevault/evidence';
+import { MalwareStatus, TenantRole } from '@aeg-clouddfir/database';
+import type { EvidenceObjectStore } from '@aeg-clouddfir/evidence';
 import { EvidenceService } from './evidence.service.js';
 import {
   ITEM_A,

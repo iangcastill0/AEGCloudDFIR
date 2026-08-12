@@ -7,7 +7,7 @@ import {
 } from './search-index.js';
 
 const base: SearchDocInput = {
-  evidenceItemId: 'ev-1',
+  evidenceItemId: 'cdfir-1',
   tenantId: 't-1',
   kind: 'email',
   name: 'Hello',

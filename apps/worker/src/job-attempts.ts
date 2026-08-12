@@ -1,6 +1,6 @@
 import { hostname } from 'node:os';
 import { z } from 'zod';
-import { withTenantContext } from '@evidencevault/database';
+import { withTenantContext } from '@aeg-clouddfir/database';
 import { sanitizeError, type WorkerContext } from './context.js';
 
 export const HEARTBEAT_INTERVAL_MS = 15_000;

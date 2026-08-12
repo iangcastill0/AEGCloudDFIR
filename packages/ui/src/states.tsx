@@ -10,7 +10,7 @@ export interface EmptyStateProps {
 
 export function EmptyState({ title, description, action }: EmptyStateProps) {
   return (
-    <div className="ev-empty">
+    <div className="cdfir-empty">
       <h2>{title}</h2>
       {description ? <p>{description}</p> : null}
       {action}
@@ -32,11 +32,11 @@ export function ErrorState({
   retryLabel = 'Try again',
 }: ErrorStateProps) {
   return (
-    <div className="ev-error-state" role="alert">
+    <div className="cdfir-error-state" role="alert">
       <h2>{title}</h2>
       <p>{message}</p>
       {onRetry ? (
-        <button type="button" className="ev-button ev-button--secondary" onClick={onRetry}>
+        <button type="button" className="cdfir-button cdfir-button--secondary" onClick={onRetry}>
           {retryLabel}
         </button>
       ) : null}
@@ -59,7 +59,7 @@ export function Skeleton({ label = 'Loading', lines = 3, style }: SkeletonProps)
         {Array.from({ length: lines }, (_, i) => (
           <div
             key={i}
-            className="ev-skeleton"
+            className="cdfir-skeleton"
             style={{ marginBlock: 'var(--space-2)', width: i % 2 === 0 ? '100%' : '75%', ...style }}
           />
         ))}

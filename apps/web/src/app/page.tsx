@@ -1,6 +1,6 @@
 'use client';
 import Link from 'next/link';
-import { EmptyState, Notice, Table } from '@evidencevault/ui';
+import { EmptyState, Notice, Table } from '@aeg-clouddfir/ui';
 import { QueryBoundary, StatusPill } from '@/components/shared';
 import { useCollections, useExports, useMe, useProductions, isCollectionActive } from '@/lib/hooks';
 import { formatDateTime } from '@/lib/format';
@@ -16,10 +16,10 @@ export default function DashboardPage() {
       <div className="page-header">
         <h1>Dashboard</h1>
         <div className="button-row">
-          <Link className="ev-button ev-button--primary" href="/collections/new">
+          <Link className="cdfir-button cdfir-button--primary" href="/collections/new">
             New collection
           </Link>
-          <Link className="ev-button ev-button--secondary" href="/review">
+          <Link className="cdfir-button cdfir-button--secondary" href="/review">
             Open review
           </Link>
         </div>

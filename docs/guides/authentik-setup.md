@@ -6,20 +6,20 @@ AEG-CloudDFIR delegates all login to Authentik via standards-compliant OIDC
 ## Local development (compose)
 
 The compose stack starts Authentik at `http://localhost:9443` with the
-bootstrap admin `akadmin@localhost` / `EV_LOCAL_AUTHENTIK_ADMIN_PASSWORD`
+bootstrap admin `akadmin@localhost` / `CDFIR_LOCAL_AUTHENTIK_ADMIN_PASSWORD`
 (default `admin-local-only`). The blueprint at
-`infra/authentik/blueprints/evidencevault.yaml` is auto-applied and creates:
+`infra/authentik/blueprints/cdfir.yaml` is auto-applied and creates:
 
-- OAuth2 provider `evidencevault` (confidential, code flow, PKCE-capable)
+- OAuth2 provider `cdfir` (confidential, code flow, PKCE-capable)
 - Application “AEG-CloudDFIR”
-- Optional groups `ev-org-admins`, `ev-case-managers`, `ev-reviewers`
+- Optional groups `cdfir-org-admins`, `cdfir-case-managers`, `cdfir-reviewers`
 
 Then set in `.env`:
 
 ```
-EV_OIDC_ISSUER=http://localhost:9443/application/o/evidencevault/
-EV_OIDC_CLIENT_ID=evidencevault
-EV_OIDC_CLIENT_SECRET=changeme-local-only   # or the secret you set in the UI
+CDFIR_OIDC_ISSUER=http://localhost:9443/application/o/cdfir/
+CDFIR_OIDC_CLIENT_ID=cdfir
+CDFIR_OIDC_CLIENT_SECRET=changeme-local-only   # or the secret you set in the UI
 ```
 
 ## Production checklist
@@ -34,22 +34,22 @@ EV_OIDC_CLIENT_SECRET=changeme-local-only   # or the secret you set in the UI
    factor of its own; IdP policy is authoritative.
 4. Token lifetimes: short access-token validity is fine — AEG-CloudDFIR only
    uses the id_token at login and keeps its own sealed session cookie
-   (`EV_SESSION_TTL_SECONDS`, default 8 h).
+   (`CDFIR_SESSION_TTL_SECONDS`, default 8 h).
 5. Group→role mapping (optional): add the `groups` scope/claim to the
    provider, then set:
    ```
-   EV_OIDC_GROUP_CLAIM=groups
-   EV_OIDC_GROUP_ROLE_MAP=ev-org-admins:org_admin,ev-case-managers:case_manager,ev-reviewers:reviewer
+   CDFIR_OIDC_GROUP_CLAIM=groups
+   CDFIR_OIDC_GROUP_ROLE_MAP=cdfir-org-admins:org_admin,cdfir-case-managers:case_manager,cdfir-reviewers:reviewer
    ```
    Mapped roles are re-synced at every login (source `oidc_group`) and
-   coexist with locally assigned roles. Leave `EV_OIDC_GROUP_CLAIM` empty to
+   coexist with locally assigned roles. Leave `CDFIR_OIDC_GROUP_CLAIM` empty to
    manage roles entirely inside AEG-CloudDFIR.
 6. Logout: AEG-CloudDFIR calls the discovered `end_session_endpoint` for
    RP-initiated logout when advertised.
 
 ## Verifying
 
-- `curl $EV_OIDC_ISSUER.well-known/openid-configuration` returns metadata whose
-  `issuer` exactly equals `EV_OIDC_ISSUER` (trailing slash matters).
+- `curl $CDFIR_OIDC_ISSUER.well-known/openid-configuration` returns metadata whose
+  `issuer` exactly equals `CDFIR_OIDC_ISSUER` (trailing slash matters).
 - Log in via the web app; `GET /api/v1/me` shows your identity; an
   `auth.tenant_selected` audit event appears after choosing a tenant.

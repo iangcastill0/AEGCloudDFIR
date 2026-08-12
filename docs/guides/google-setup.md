@@ -12,12 +12,12 @@ Two independent modes, both read-only.
    scopes for external users require Google's verification process for
    production use (test mode works for evaluation with listed test users).
 4. Credentials → OAuth client ID → Web application:
-   - Authorized redirect URI: `EV_API_PUBLIC_URL + EV_GOOGLE_REDIRECT_PATH`
+   - Authorized redirect URI: `CDFIR_API_PUBLIC_URL + CDFIR_GOOGLE_REDIRECT_PATH`
      (default `https://api.<your-domain>/api/v1/connectors/callback/google`).
 5. Configure AEG-CloudDFIR:
    ```
-   EV_GOOGLE_CLIENT_ID=<client id>
-   EV_GOOGLE_CLIENT_SECRET=<client secret>
+   CDFIR_GOOGLE_CLIENT_ID=<client id>
+   CDFIR_GOOGLE_CLIENT_SECRET=<client secret>
    ```
 
 Exact scopes requested (least privilege, read-only):
@@ -36,7 +36,7 @@ Personal OAuth collects only the consenting user's own data. Users revoke at
 A Workspace **super administrator** performs steps 2–3.
 
 1. In the Cloud project: IAM & Admin → Service accounts → create
-   `evidencevault-collector`. Create a JSON key. **Handle it like a domain
+   `cdfir-collector`. Create a JSON key. **Handle it like a domain
    master key.** You will paste it into AEG-CloudDFIR once; it is envelope-
    encrypted immediately and never displayed again.
 2. Google Admin console → Security → Access and data control → API controls →
@@ -85,7 +85,7 @@ AEG-CloudDFIR collects Google audit events from two upstream systems:
 
 Extend the existing domain-wide delegation grant (Admin console → Security →
 Access and data control → API controls → **Domain-wide delegation** → edit the
-`evidencevault-collector` client) with these two scopes alongside the
+`cdfir-collector` client) with these two scopes alongside the
 collection scopes already listed in section B:
 
 ```

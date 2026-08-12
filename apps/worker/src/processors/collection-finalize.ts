@@ -7,9 +7,9 @@ import {
   type Completeness,
   type ManifestException,
   type ManifestItem,
-} from '@evidencevault/evidence';
-import { TRUTHFULNESS_NOTICES } from '@evidencevault/contracts';
-import { appendAuditEvent, withTenantContext } from '@evidencevault/database';
+} from '@aeg-clouddfir/evidence';
+import { TRUTHFULNESS_NOTICES } from '@aeg-clouddfir/contracts';
+import { appendAuditEvent, withTenantContext } from '@aeg-clouddfir/database';
 import type { WorkerContext } from '../context.js';
 import { parseCollectionScope } from '../scope.js';
 import type { FinalizePayload } from './payloads.js';
@@ -219,7 +219,7 @@ export async function processCollectionFinalize(
   const manifestInput: BuildManifestInput = {
     application: {
       name: 'AEG-CloudDFIR',
-      version: ctx.config.EV_APP_VERSION,
+      version: ctx.config.CDFIR_APP_VERSION,
       parserVersions: {},
     },
     collection: {

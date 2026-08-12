@@ -22,7 +22,7 @@ describe('ProductionArchiveWriter', () => {
   let dir: string;
 
   beforeAll(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'evidencevault-archive-'));
+    dir = await mkdtemp(join(tmpdir(), 'cdfir-archive-'));
   });
 
   afterAll(async () => {

@@ -3,7 +3,7 @@
 Kustomize base for the three AEG-CloudDFIR services. Stateful dependencies
 (PostgreSQL 16, Redis 7, OpenSearch 2.x, Authentik, ClamAV, Tika) are expected
 to be provisioned separately — managed services or your own operators — and
-wired in through the `evidencevault-config` / `evidencevault-secrets`
+wired in through the `cdfir-config` / `cdfir-secrets`
 resources. Object storage is Wasabi (or any S3 API).
 
     kubectl apply -k infra/kubernetes/base

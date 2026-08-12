@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ProviderApiError } from '@evidencevault/connectors';
+import { ProviderApiError } from '@aeg-clouddfir/connectors';
 import { QUEUES } from '../queues.js';
 import {
   COLLECTION,
@@ -101,7 +101,7 @@ describe('processAuditFetchPage', () => {
     armConnector(vi.fn().mockResolvedValue({ batches: [sampleBatch()], nextCursor: undefined }));
     f.tx.collectionItem.createMany.mockResolvedValue({ count: 1 });
     f.tx.evidenceBlob.findUniqueOrThrow.mockResolvedValue({ id: 'blob-1' });
-    f.tx.evidenceItem.create.mockResolvedValue({ id: 'ev-audit-1' });
+    f.tx.evidenceItem.create.mockResolvedValue({ id: 'cdfir-audit-1' });
 
     await processAuditFetchPage(f.ctx, payload);
 
@@ -149,7 +149,7 @@ describe('processAuditFetchPage', () => {
     armConnector(vi.fn().mockResolvedValue({ batches: [sampleBatch()], nextCursor: 'opaque-2' }));
     f.tx.collectionItem.createMany.mockResolvedValue({ count: 1 });
     f.tx.evidenceBlob.findUniqueOrThrow.mockResolvedValue({ id: 'blob-1' });
-    f.tx.evidenceItem.create.mockResolvedValue({ id: 'ev-audit-1' });
+    f.tx.evidenceItem.create.mockResolvedValue({ id: 'cdfir-audit-1' });
 
     await processAuditFetchPage(f.ctx, payload);
 

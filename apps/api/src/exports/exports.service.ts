@@ -10,11 +10,11 @@ import {
   Prisma,
   withTenantContext,
   type PrismaClient,
-} from '@evidencevault/database';
+} from '@aeg-clouddfir/database';
 import type { z } from 'zod';
-import { createExportRequest } from '@evidencevault/contracts';
-import { derivativeKey, type EvidenceObjectStore } from '@evidencevault/evidence';
-import type { AppConfig } from '@evidencevault/config';
+import { createExportRequest } from '@aeg-clouddfir/contracts';
+import { derivativeKey, type EvidenceObjectStore } from '@aeg-clouddfir/evidence';
+import type { AppConfig } from '@aeg-clouddfir/config';
 import type { FastifyRequest } from 'fastify';
 import '../common/http.js';
 import type { AuthContext } from '../common/http.js';
@@ -318,7 +318,7 @@ export class ExportsService {
       ),
     );
 
-    const ttlSeconds = this.config.EV_S3_PRESIGN_TTL_SECONDS;
+    const ttlSeconds = this.config.CDFIR_S3_PRESIGN_TTL_SECONDS;
     const manifestUrl = await this.store.presignGet(auth.tenantId, manifestKey, { ttlSeconds });
     const archiveUrls = await Promise.all(
       archiveKeys.map((key) => this.store.presignGet(auth.tenantId, key, { ttlSeconds })),

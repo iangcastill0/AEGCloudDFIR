@@ -4,18 +4,18 @@ import { z } from 'zod';
 /**
  * Sealed (encrypted + authenticated) cookie payloads using AES-256-GCM.
  * Wire format: base64url( iv[12] | authTag[16] | ciphertext ).
- * The key is SHA-256(EV_SESSION_SECRET); GCM's auth tag rejects any tampering.
+ * The key is SHA-256(CDFIR_SESSION_SECRET); GCM's auth tag rejects any tampering.
  */
 
 const IV_LENGTH = 12;
 const TAG_LENGTH = 16;
 
 /** Cookie names. __Host- prefix requires Secure, so non-prod uses a plain name. */
-export const SESSION_COOKIE_PROD = '__Host-ev_session';
-export const SESSION_COOKIE_DEV = 'ev_session';
-export const AUTH_FLOW_COOKIE = 'ev_authflow';
-export const CSRF_COOKIE = 'ev_csrf';
-export const CONNECTOR_FLOW_COOKIE = 'ev_connectorflow';
+export const SESSION_COOKIE_PROD = '__Host-cdfir_session';
+export const SESSION_COOKIE_DEV = 'cdfir_session';
+export const AUTH_FLOW_COOKIE = 'cdfir_authflow';
+export const CSRF_COOKIE = 'cdfir_csrf';
+export const CONNECTOR_FLOW_COOKIE = 'cdfir_connectorflow';
 
 export function sessionCookieName(isProduction: boolean): string {
   return isProduction ? SESSION_COOKIE_PROD : SESSION_COOKIE_DEV;

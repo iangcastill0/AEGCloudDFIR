@@ -1,5 +1,5 @@
 import { Controller, Get, NotFoundException, Param, Query, Req, UseGuards } from '@nestjs/common';
-import { TenantRole } from '@evidencevault/database';
+import { TenantRole } from '@aeg-clouddfir/database';
 import type { FastifyRequest } from 'fastify';
 import '../common/http.js';
 import type { AuthContext } from '../common/http.js';
@@ -11,7 +11,7 @@ import { parseCursorQuery } from '../common/pagination.js';
 import { EvidenceService, type EvidenceDetailDto } from './evidence.service.js';
 
 function requireAuth(request: FastifyRequest): AuthContext {
-  const auth = request.evAuth;
+  const auth = request.cdfirAuth;
   if (!auth) throw new NotFoundException();
   return auth;
 }

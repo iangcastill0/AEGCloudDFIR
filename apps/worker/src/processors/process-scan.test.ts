@@ -41,7 +41,7 @@ describe('processScan', () => {
   });
 
   it('records scan_failed without throwing when clamav is disabled', async () => {
-    const f = fakeCtx({ config: { EV_CLAMAV_ENABLED: false } });
+    const f = fakeCtx({ config: { CDFIR_CLAMAV_ENABLED: false } });
     arm(f);
     await expect(processScan(f.ctx, payload)).resolves.toBeUndefined();
     expect(f.tx.malwareScan.create).toHaveBeenCalledWith(

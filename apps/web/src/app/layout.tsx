@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
-import '@evidencevault/ui/styles.css';
+import '@aeg-clouddfir/ui/styles.css';
 import './globals.css';
 import { Providers } from '@/components/Providers';
 import { AppNav } from '@/components/AppNav';

@@ -10,9 +10,9 @@ export interface TableProps extends TableHTMLAttributes<HTMLTableElement> {
 
 export function Table({ caption, captionHidden = false, children, ...rest }: TableProps) {
   return (
-    <div className="ev-table-wrap">
-      <table className="ev-table" {...rest}>
-        <caption className={captionHidden ? 'ev-visually-hidden' : undefined}>{caption}</caption>
+    <div className="cdfir-table-wrap">
+      <table className="cdfir-table" {...rest}>
+        <caption className={captionHidden ? 'cdfir-visually-hidden' : undefined}>{caption}</caption>
         {children}
       </table>
     </div>

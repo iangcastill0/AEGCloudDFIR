@@ -124,7 +124,7 @@ describe('sealAuthFlow / openAuthFlow', () => {
 
 describe('sessionCookieName', () => {
   it('uses the __Host- prefix only in production (requires Secure)', () => {
-    expect(sessionCookieName(true)).toBe('__Host-ev_session');
-    expect(sessionCookieName(false)).toBe('ev_session');
+    expect(sessionCookieName(true)).toBe('__Host-cdfir_session');
+    expect(sessionCookieName(false)).toBe('cdfir_session');
   });
 });

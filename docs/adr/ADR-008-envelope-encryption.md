@@ -11,7 +11,7 @@ must be portable across hosting providers.
 
 Each secret gets a random 256-bit DEK (AES-256-GCM). The DEK is wrapped by a
 KeyEncryptionProvider; the default local provider wraps with a master key from
-EV_KEK_LOCAL_MASTER_KEY (base64, 32 bytes) using AES-256-GCM with key id +
+CDFIR_KEK_LOCAL_MASTER_KEY (base64, 32 bytes) using AES-256-GCM with key id +
 AAD (tenant, secret id). Rows store {keyId, wrappedDek, iv, tag, ciphertext}.
 KMS adapters (AWS/GCP/Vault) implement the same wrap/unwrap interface.
 

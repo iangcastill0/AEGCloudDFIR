@@ -1,4 +1,4 @@
-import { appendAuditEvent, withTenantContext } from '@evidencevault/database';
+import { appendAuditEvent, withTenantContext } from '@aeg-clouddfir/database';
 import { sanitizeError, type WorkerContext } from '../context.js';
 import { recordException } from '../progress.js';
 import { QUEUES, dedupKeys } from '../queues.js';
@@ -68,7 +68,7 @@ export async function processExtract(
     throw err;
   }
 
-  const response = await fetchImpl(`${ctx.config.EV_TIKA_URL.replace(/\/$/, '')}/tika`, {
+  const response = await fetchImpl(`${ctx.config.CDFIR_TIKA_URL.replace(/\/$/, '')}/tika`, {
     method: 'PUT',
     headers: {
       Accept: 'text/plain',

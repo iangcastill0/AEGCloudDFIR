@@ -41,14 +41,14 @@ export function backoffWithJitter(
 
 export const DEFAULT_JOB_OPTIONS: JobsOptions = {
   attempts: 8,
-  backoff: { type: 'ev-jitter' },
+  backoff: { type: 'cdfir-jitter' },
   removeOnComplete: { age: 24 * 3600, count: 10_000 },
   removeOnFail: false,
 };
 
 /** Registered on each Worker instance. */
 export const BACKOFF_STRATEGIES = {
-  'ev-jitter': (attemptsMade: number): number => backoffWithJitter(attemptsMade),
+  'cdfir-jitter': (attemptsMade: number): number => backoffWithJitter(attemptsMade),
 };
 
 /**

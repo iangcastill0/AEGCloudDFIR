@@ -1,5 +1,5 @@
 import { pino, type Logger } from 'pino';
-import type { AppConfig } from '@evidencevault/config';
+import type { AppConfig } from '@aeg-clouddfir/config';
 
 export type AppLogger = Logger;
 
@@ -9,7 +9,7 @@ export type AppLogger = Logger;
  */
 export function createLogger(config: AppConfig): AppLogger {
   return pino({
-    level: config.EV_LOG_LEVEL,
+    level: config.CDFIR_LOG_LEVEL,
     redact: {
       paths: [
         'req.headers.authorization',
@@ -19,6 +19,6 @@ export function createLogger(config: AppConfig): AppLogger {
       ],
       censor: '[redacted]',
     },
-    base: { service: 'api', version: config.EV_APP_VERSION },
+    base: { service: 'api', version: config.CDFIR_APP_VERSION },
   });
 }

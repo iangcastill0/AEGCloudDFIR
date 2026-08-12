@@ -3,8 +3,8 @@
  * directory is excluded from the production tsc build like *.test.ts files).
  */
 import { vi, type Mock } from 'vitest';
-import type { PrismaClient } from '@evidencevault/database';
-import type { AppConfig } from '@evidencevault/config';
+import type { PrismaClient } from '@aeg-clouddfir/database';
+import type { AppConfig } from '@aeg-clouddfir/config';
 import type { WorkerContext } from '../context.js';
 
 export const TENANT = '11111111-1111-4111-8111-111111111111';
@@ -114,23 +114,23 @@ export const silentLog = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
 export function fakeConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   return {
-    EV_APP_VERSION: '0.1.0-test',
-    EV_TIKA_URL: 'http://tika.test:9998',
-    EV_CLAMAV_HOST: 'clam.test',
-    EV_CLAMAV_PORT: 3310,
-    EV_CLAMAV_ENABLED: true,
-    EV_OCR_LANGS: 'eng',
-    EV_MAX_OCR_PAGES: 2000,
-    EV_S3_BUCKET_EVIDENCE: 'evidence-test',
-    EV_S3_BUCKET_QUARANTINE: 'quarantine-test',
-    EV_MS_GRAPH_BASE_URL: 'http://graph.test',
-    EV_MS_LOGIN_BASE_URL: 'http://login.test',
-    EV_MS_CLIENT_ID: 'ms-client',
-    EV_MS_CLIENT_SECRET: 'ms-secret',
-    EV_GOOGLE_API_BASE_URL: 'http://google.test',
-    EV_GOOGLE_OAUTH_TOKEN_URL: 'http://google.test/token',
-    EV_GOOGLE_CLIENT_ID: 'g-client',
-    EV_GOOGLE_CLIENT_SECRET: 'g-secret',
+    CDFIR_APP_VERSION: '0.1.0-test',
+    CDFIR_TIKA_URL: 'http://tika.test:9998',
+    CDFIR_CLAMAV_HOST: 'clam.test',
+    CDFIR_CLAMAV_PORT: 3310,
+    CDFIR_CLAMAV_ENABLED: true,
+    CDFIR_OCR_LANGS: 'eng',
+    CDFIR_MAX_OCR_PAGES: 2000,
+    CDFIR_S3_BUCKET_EVIDENCE: 'evidence-test',
+    CDFIR_S3_BUCKET_QUARANTINE: 'quarantine-test',
+    CDFIR_MS_GRAPH_BASE_URL: 'http://graph.test',
+    CDFIR_MS_LOGIN_BASE_URL: 'http://login.test',
+    CDFIR_MS_CLIENT_ID: 'ms-client',
+    CDFIR_MS_CLIENT_SECRET: 'ms-secret',
+    CDFIR_GOOGLE_API_BASE_URL: 'http://google.test',
+    CDFIR_GOOGLE_OAUTH_TOKEN_URL: 'http://google.test/token',
+    CDFIR_GOOGLE_CLIENT_ID: 'g-client',
+    CDFIR_GOOGLE_CLIENT_SECRET: 'g-secret',
     ...overrides,
   } as AppConfig;
 }

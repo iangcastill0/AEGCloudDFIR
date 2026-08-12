@@ -17,13 +17,13 @@ import {
   withTenantContext,
   type PrismaClient,
   type TenantScopedTx,
-} from '@evidencevault/database';
+} from '@aeg-clouddfir/database';
 import {
   createProductionRequest,
   productionParameters,
   submitProductionRequest,
   type ProductionParameters,
-} from '@evidencevault/contracts';
+} from '@aeg-clouddfir/contracts';
 import type { FastifyRequest } from 'fastify';
 import '../common/http.js';
 import type { AuthContext } from '../common/http.js';

@@ -1,5 +1,5 @@
 import { DeleteObjectCommand } from '@aws-sdk/client-s3';
-import { appendAuditEvent, withTenantContext } from '@evidencevault/database';
+import { appendAuditEvent, withTenantContext } from '@aeg-clouddfir/database';
 import { ClamdClient, type ClamAvClient } from '../clamav.js';
 import { sanitizeError, type WorkerContext } from '../context.js';
 import { recordException } from '../progress.js';
@@ -72,7 +72,7 @@ export async function processScan(
     });
   };
 
-  if (!ctx.config.EV_CLAMAV_ENABLED) {
+  if (!ctx.config.CDFIR_CLAMAV_ENABLED) {
     await finishWithResult('scan_failed', { engineVersion: 'disabled', signatureVersion: '' }, '');
     return;
   }
@@ -85,7 +85,7 @@ export async function processScan(
   const clam =
     deps.clamFactory !== undefined
       ? deps.clamFactory(ctx)
-      : new ClamdClient(ctx.config.EV_CLAMAV_HOST, ctx.config.EV_CLAMAV_PORT);
+      : new ClamdClient(ctx.config.CDFIR_CLAMAV_HOST, ctx.config.CDFIR_CLAMAV_PORT);
 
   let engine = { engineVersion: '', signatureVersion: '' };
   let scan: { infected: boolean; signature: string };
@@ -134,7 +134,7 @@ export async function processScan(
     try {
       await ctx.s3.send(
         new DeleteObjectCommand({
-          Bucket: ctx.config.EV_S3_BUCKET_EVIDENCE,
+          Bucket: ctx.config.CDFIR_S3_BUCKET_EVIDENCE,
           Key: blob.objectKey,
         }),
       );

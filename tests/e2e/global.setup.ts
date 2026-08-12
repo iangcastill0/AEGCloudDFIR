@@ -1,9 +1,9 @@
 import { expect, test as setup } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 
-const API = process.env.EV_E2E_API_URL ?? 'http://localhost:4000';
-const AUTHENTIK_USER = process.env.EV_E2E_IDP_USER ?? 'akadmin';
-const AUTHENTIK_PASSWORD = process.env.EV_E2E_IDP_PASSWORD ?? 'admin-local-only';
+const API = process.env.CDFIR_E2E_API_URL ?? 'http://localhost:4000';
+const AUTHENTIK_USER = process.env.CDFIR_E2E_IDP_USER ?? 'akadmin';
+const AUTHENTIK_PASSWORD = process.env.CDFIR_E2E_IDP_PASSWORD ?? 'admin-local-only';
 
 /**
  * Logs in once through the real Authentik flow (code + PKCE) and persists

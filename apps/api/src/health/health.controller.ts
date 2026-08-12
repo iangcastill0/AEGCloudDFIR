@@ -1,6 +1,6 @@
 import { Controller, Get, Inject, ServiceUnavailableException } from '@nestjs/common';
-import type { AppConfig } from '@evidencevault/config';
-import type { PrismaClient } from '@evidencevault/database';
+import type { AppConfig } from '@aeg-clouddfir/config';
+import type { PrismaClient } from '@aeg-clouddfir/database';
 import { APP_CONFIG, PRISMA } from '../common/tokens.js';
 
 @Controller()
@@ -19,7 +19,7 @@ export class HealthController {
   /** Startup: the app finished bootstrapping (route table is live). */
   @Get('startupz')
   startupz(): { status: 'ok'; version: string } {
-    return { status: 'ok', version: this.config.EV_APP_VERSION };
+    return { status: 'ok', version: this.config.CDFIR_APP_VERSION };
   }
 
   /** Readiness: dependencies reachable; 503 with per-check detail otherwise. */

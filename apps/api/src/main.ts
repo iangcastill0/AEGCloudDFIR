@@ -5,7 +5,7 @@ import helmet from '@fastify/helmet';
 import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import type { FastifyInstance } from 'fastify';
-import { redactConfig, type AppConfig } from '@evidencevault/config';
+import { redactConfig, type AppConfig } from '@aeg-clouddfir/config';
 import './common/http.js';
 import { getAppConfig } from './common/config.js';
 import { createLogger } from './common/logger.js';
@@ -30,15 +30,15 @@ async function bootstrap(): Promise<void> {
   const logger = createLogger(config);
   logger.debug({ config: redactConfig(config) }, 'effective configuration (redacted)');
 
-  if (config.EV_DEMO_MODE) {
+  if (config.CDFIR_DEMO_MODE) {
     logger.warn(
       '*** DEMO MODE ACTIVE *** demo seed mode is enabled; never enable this in production',
     );
   }
 
   const adapter = new FastifyAdapter({
-    trustProxy: config.EV_TRUST_PROXY,
-    bodyLimit: config.EV_REQUEST_BODY_LIMIT_BYTES,
+    trustProxy: config.CDFIR_TRUST_PROXY,
+    bodyLimit: config.CDFIR_REQUEST_BODY_LIMIT_BYTES,
   });
 
   const app = await NestFactory.create<NestFastifyApplication>(AppModule, adapter, {
@@ -63,7 +63,8 @@ async function bootstrap(): Promise<void> {
   });
   await fastify.register(cookie);
   await fastify.register(cors, {
-    origin: config.EV_CORS_ALLOWED_ORIGINS.length > 0 ? config.EV_CORS_ALLOWED_ORIGINS : false,
+    origin:
+      config.CDFIR_CORS_ALLOWED_ORIGINS.length > 0 ? config.CDFIR_CORS_ALLOWED_ORIGINS : false,
     credentials: true,
     methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['content-type', 'x-csrf-token', 'x-request-id'],
@@ -71,8 +72,8 @@ async function bootstrap(): Promise<void> {
 
   // Correlation id: honor a sane inbound x-request-id, always echo it back.
   fastify.addHook('onRequest', (request, reply, done) => {
-    request.evRequestId = resolveRequestId(request.headers['x-request-id']);
-    void reply.header('x-request-id', request.evRequestId);
+    request.cdfirRequestId = resolveRequestId(request.headers['x-request-id']);
+    void reply.header('x-request-id', request.cdfirRequestId);
     done();
   });
 
@@ -80,7 +81,7 @@ async function bootstrap(): Promise<void> {
   fastify.addHook('onResponse', (request, reply, done) => {
     logger.info(
       {
-        req: { method: request.method, url: request.url, requestId: request.evRequestId },
+        req: { method: request.method, url: request.url, requestId: request.cdfirRequestId },
         res: { statusCode: reply.statusCode },
         durationMs: Math.round(reply.elapsedTime * 1000) / 1000,
       },
@@ -91,8 +92,8 @@ async function bootstrap(): Promise<void> {
 
   app.enableShutdownHooks();
 
-  await app.listen(config.EV_API_PORT, '0.0.0.0');
-  logger.info({ port: config.EV_API_PORT }, 'api listening');
+  await app.listen(config.CDFIR_API_PORT, '0.0.0.0');
+  logger.info({ port: config.CDFIR_API_PORT }, 'api listening');
 }
 
 bootstrap().catch((err: unknown) => {

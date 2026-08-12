@@ -4,8 +4,8 @@ import {
   HistoryExpiredError,
   type DriveListPage,
   type EmailListPage,
-} from '@evidencevault/connectors';
-import { appendAuditEvent, withTenantContext, type Prisma } from '@evidencevault/database';
+} from '@aeg-clouddfir/connectors';
+import { appendAuditEvent, withTenantContext, type Prisma } from '@aeg-clouddfir/database';
 import { sanitizeError, type WorkerContext } from '../context.js';
 import {
   buildConnectorsForAccount,

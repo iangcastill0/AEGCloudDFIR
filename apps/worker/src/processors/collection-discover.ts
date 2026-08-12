@@ -1,6 +1,6 @@
-import { appendAuditEvent, withTenantContext, type Prisma } from '@evidencevault/database';
-import { GMAIL_ACCOUNT_FOLDER } from '@evidencevault/connectors';
-import type { CollectionScope } from '@evidencevault/contracts';
+import { appendAuditEvent, withTenantContext, type Prisma } from '@aeg-clouddfir/database';
+import { GMAIL_ACCOUNT_FOLDER } from '@aeg-clouddfir/connectors';
+import type { CollectionScope } from '@aeg-clouddfir/contracts';
 import { sanitizeError, type WorkerContext } from '../context.js';
 import {
   buildAuditConnectors,

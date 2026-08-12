@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { S3Client } from '@aws-sdk/client-s3';
-import type { AppConfig } from '@evidencevault/config';
-import { EvidenceObjectStore } from '@evidencevault/evidence';
+import type { AppConfig } from '@aeg-clouddfir/config';
+import { EvidenceObjectStore } from '@aeg-clouddfir/evidence';
 import { APP_CONFIG, EVIDENCE_STORE } from '../common/tokens.js';
 
 /** EvidenceObjectStore over the configured S3-compatible endpoint. */
@@ -12,17 +12,17 @@ import { APP_CONFIG, EVIDENCE_STORE } from '../common/tokens.js';
       useFactory: (config: AppConfig): EvidenceObjectStore =>
         new EvidenceObjectStore({
           s3: new S3Client({
-            endpoint: config.EV_S3_ENDPOINT,
-            region: config.EV_S3_REGION,
-            forcePathStyle: config.EV_S3_FORCE_PATH_STYLE,
+            endpoint: config.CDFIR_S3_ENDPOINT,
+            region: config.CDFIR_S3_REGION,
+            forcePathStyle: config.CDFIR_S3_FORCE_PATH_STYLE,
             credentials: {
-              accessKeyId: config.EV_S3_ACCESS_KEY_ID,
-              secretAccessKey: config.EV_S3_SECRET_ACCESS_KEY,
+              accessKeyId: config.CDFIR_S3_ACCESS_KEY_ID,
+              secretAccessKey: config.CDFIR_S3_SECRET_ACCESS_KEY,
             },
           }),
-          evidenceBucket: config.EV_S3_BUCKET_EVIDENCE,
-          quarantineBucket: config.EV_S3_BUCKET_QUARANTINE,
-          presignTtlSeconds: config.EV_S3_PRESIGN_TTL_SECONDS,
+          evidenceBucket: config.CDFIR_S3_BUCKET_EVIDENCE,
+          quarantineBucket: config.CDFIR_S3_BUCKET_QUARANTINE,
+          presignTtlSeconds: config.CDFIR_S3_PRESIGN_TTL_SECONDS,
         }),
       inject: [APP_CONFIG],
     },

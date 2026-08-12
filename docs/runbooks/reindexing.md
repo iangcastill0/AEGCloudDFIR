@@ -5,7 +5,7 @@ Rebuilds OpenSearch from PostgreSQL + S3 truth (index is disposable).
 When: mapping version bump, index corruption/loss, tenant restore.
 
 1. `scripts/reindex --tenant <id>` (or all tenants). Internals: creates
-   `evidencevault-evidence-v{N+1}`, streams batches from PostgreSQL, swaps the
+   `cdfir-evidence-v{N+1}`, streams batches from PostgreSQL, swaps the
    alias atomically on success; on any batch error the alias is NOT swapped.
 2. Monitor: bulk error count in worker logs; dead-letter queue for per-doc
    failures.

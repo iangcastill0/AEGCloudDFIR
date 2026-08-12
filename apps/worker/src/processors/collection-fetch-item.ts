@@ -5,8 +5,8 @@ import {
   NonDownloadableError,
   type DriveEntry,
   type EmailApiMetadata,
-} from '@evidencevault/connectors';
-import { appendAuditEvent, withTenantContext, type Prisma } from '@evidencevault/database';
+} from '@aeg-clouddfir/connectors';
+import { appendAuditEvent, withTenantContext, type Prisma } from '@aeg-clouddfir/database';
 import { sanitizeError, type WorkerContext } from '../context.js';
 import { buildConnectorsForAccount, makeRateLimitObserver } from '../connector-factory.js';
 import { incrementProgress, recordException } from '../progress.js';

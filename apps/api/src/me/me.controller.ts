@@ -1,5 +1,5 @@
 import { Controller, Get, Inject, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
-import type { PrismaClient } from '@evidencevault/database';
+import type { PrismaClient } from '@aeg-clouddfir/database';
 import type { FastifyRequest } from 'fastify';
 import '../common/http.js';
 import { PRISMA } from '../common/tokens.js';
@@ -23,7 +23,7 @@ export class MeController {
 
   @Get()
   async me(@Req() request: FastifyRequest): Promise<MeResponse> {
-    const session = request.evSession;
+    const session = request.cdfirSession;
     if (!session) throw new UnauthorizedException();
 
     const user = await this.prisma.user.findUnique({

@@ -13,8 +13,8 @@ import {
   Res,
   UseGuards,
 } from '@nestjs/common';
-import type { AppConfig } from '@evidencevault/config';
-import { Provider, TenantRole } from '@evidencevault/database';
+import type { AppConfig } from '@aeg-clouddfir/config';
+import { Provider, TenantRole } from '@aeg-clouddfir/database';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import '../common/http.js';
 import type { AuthContext } from '../common/http.js';
@@ -29,7 +29,7 @@ import { CONNECTOR_FLOW_COOKIE } from '../auth/session.js';
 import { ConnectorsService, type ConnectorDto, type CustodianDto } from './connectors.service.js';
 
 function requireAuth(request: FastifyRequest): AuthContext {
-  const auth = request.evAuth;
+  const auth = request.cdfirAuth;
   if (!auth) throw new NotFoundException();
   return auth;
 }

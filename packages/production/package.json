@@ -1,5 +1,5 @@
 {
-  "name": "@evidencevault/production",
+  "name": "@aeg-clouddfir/production",
   "version": "0.1.0",
   "private": true,
   "type": "module",

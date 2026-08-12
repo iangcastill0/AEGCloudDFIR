@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { TenantRole } from '@evidencevault/database';
-import type { SearchAdapter, SearchRequestBody } from '@evidencevault/search';
+import { TenantRole } from '@aeg-clouddfir/database';
+import type { SearchAdapter, SearchRequestBody } from '@aeg-clouddfir/search';
 import { SearchService } from './search.service.js';
 import {
   CASE_ID,

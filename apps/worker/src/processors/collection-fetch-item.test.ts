@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { NonDownloadableError } from '@evidencevault/connectors';
+import { NonDownloadableError } from '@aeg-clouddfir/connectors';
 import { QUEUES } from '../queues.js';
 import {
   ACCOUNT,

@@ -1,4 +1,4 @@
-import { apiError } from '@evidencevault/contracts';
+import { apiError } from '@aeg-clouddfir/contracts';
 import type { z } from 'zod';
 
 export type ErrorEnvelope = z.infer<typeof apiError>;

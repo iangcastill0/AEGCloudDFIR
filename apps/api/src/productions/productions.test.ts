@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
-import { ProductionStatus, TenantRole } from '@evidencevault/database';
+import { ProductionStatus, TenantRole } from '@aeg-clouddfir/database';
 import { ProductionsService } from './productions.service.js';
 import { validateProductionSet, type ProductionValidationItem } from './production.validator.js';
 import type { SelectionService } from '../search/selection.service.js';

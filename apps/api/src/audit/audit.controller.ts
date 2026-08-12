@@ -5,7 +5,7 @@ import {
   withTenantContext,
   type AuditEvent,
   type PrismaClient,
-} from '@evidencevault/database';
+} from '@aeg-clouddfir/database';
 import type { FastifyRequest } from 'fastify';
 import '../common/http.js';
 import { PRISMA } from '../common/tokens.js';
@@ -68,7 +68,7 @@ export class AuditController {
     @Query() query: Record<string, unknown>,
     @Req() request: FastifyRequest,
   ): Promise<{ items: AuditEventDto[]; nextCursor: string | null }> {
-    const auth = request.evAuth;
+    const auth = request.cdfirAuth;
     const { limit, cursor } = parseCursorQuery(query);
     if (!auth) return { items: [], nextCursor: null };
 
@@ -96,7 +96,7 @@ export class AuditController {
     firstInvalidSequence: string | null;
     reason: string;
   }> {
-    const auth = request.evAuth;
+    const auth = request.cdfirAuth;
     if (!auth) return { valid: false, checkedCount: 0, firstInvalidSequence: null, reason: '' };
 
     const report = await withTenantContext(this.prisma, auth.tenantId, (tx) =>

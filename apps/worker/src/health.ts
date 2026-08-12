@@ -6,7 +6,7 @@ export interface HealthChecks {
 
 /**
  * Minimal HTTP surface for the worker: liveness, readiness, startup probes.
- * (Prometheus metrics are served separately on EV_METRICS_PORT.)
+ * (Prometheus metrics are served separately on CDFIR_METRICS_PORT.)
  */
 export function startHealthServer(port: number, checks: HealthChecks): Server {
   const startedAt = Date.now();

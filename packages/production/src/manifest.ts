@@ -43,7 +43,7 @@ export function buildProductionManifest(input: ProductionManifestInput): Product
   const generatedAt =
     input.generatedAt instanceof Date ? input.generatedAt.toISOString() : input.generatedAt;
   const json = canonicalJson({
-    schema: 'evidencevault.production.manifest.v1',
+    schema: 'cdfir.production.manifest.v1',
     runId: input.runId,
     productionId: input.productionId,
     parameters: input.parameters,

@@ -14,8 +14,8 @@ export interface NoticeProps {
  */
 export function Notice({ variant = 'info', title, children }: NoticeProps) {
   return (
-    <div role="note" className={`ev-notice ev-notice--${variant}`}>
-      <span className="ev-notice__icon" aria-hidden="true">
+    <div role="note" className={`cdfir-notice cdfir-notice--${variant}`}>
+      <span className="cdfir-notice__icon" aria-hidden="true">
         {variant === 'warning' ? '⚠' : 'ⓘ'}
       </span>
       <div>

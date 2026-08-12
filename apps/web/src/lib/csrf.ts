@@ -2,7 +2,7 @@
  * CSRF double-submit plumbing. Pure functions so header-injection logic is
  * unit testable without a browser.
  */
-export const CSRF_COOKIE_NAME = 'ev_csrf';
+export const CSRF_COOKIE_NAME = 'cdfir_csrf';
 export const CSRF_HEADER_NAME = 'X-CSRF-Token';
 
 /** Read a cookie value from a document.cookie-style string. */

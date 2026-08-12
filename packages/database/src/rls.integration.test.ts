@@ -3,8 +3,8 @@
  * build contract requires, run against a real PostgreSQL with migrations
  * applied (compose stack) under the NON-BYPASSRLS runtime role.
  *
- * Skipped unless EV_IT_DATABASE_URL is set (CI/compose provide it):
- *   EV_IT_DATABASE_URL=postgresql://evidencevault:changeme-local-only@localhost:5432/evidencevault
+ * Skipped unless CDFIR_IT_DATABASE_URL is set (CI/compose provide it):
+ *   CDFIR_IT_DATABASE_URL=postgresql://cdfir:changeme-local-only@localhost:5432/cdfir
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
@@ -12,7 +12,7 @@ import { PrismaClient } from '@prisma/client';
 import { createPrismaClient, withTenantContext } from './client.js';
 import { appendAuditEvent, verifyAuditChain } from './audit.js';
 
-const url = process.env.EV_IT_DATABASE_URL;
+const url = process.env.CDFIR_IT_DATABASE_URL;
 const suite = url ? describe : describe.skip;
 
 suite('PostgreSQL RLS tenant isolation (integration)', () => {

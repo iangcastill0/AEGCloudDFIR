@@ -3,53 +3,53 @@ import { loadConfig, redactConfig } from './schema.js';
 
 const validEnv: NodeJS.ProcessEnv = {
   NODE_ENV: 'test',
-  EV_API_PUBLIC_URL: 'http://localhost:4000',
-  EV_WEB_PUBLIC_URL: 'http://localhost:3000',
-  EV_DATABASE_URL: 'postgresql://ev:pw@localhost:5432/ev',
-  EV_REDIS_URL: 'redis://localhost:6379',
-  EV_OPENSEARCH_URL: 'http://localhost:9200',
-  EV_S3_ENDPOINT: 'http://localhost:9000',
-  EV_S3_REGION: 'us-east-1',
-  EV_S3_BUCKET_EVIDENCE: 'ev-evidence',
-  EV_S3_BUCKET_QUARANTINE: 'ev-quarantine',
-  EV_S3_ACCESS_KEY_ID: 'minioadmin',
-  EV_S3_SECRET_ACCESS_KEY: 'a-secret-value',
-  EV_OIDC_ISSUER: 'http://localhost:9443/application/o/evidencevault/',
-  EV_OIDC_CLIENT_ID: 'evidencevault',
-  EV_OIDC_CLIENT_SECRET: 'an-oidc-secret',
-  EV_SESSION_SECRET: 'x'.repeat(48),
-  EV_KEK_LOCAL_MASTER_KEY: Buffer.alloc(32, 7).toString('base64'),
+  CDFIR_API_PUBLIC_URL: 'http://localhost:4000',
+  CDFIR_WEB_PUBLIC_URL: 'http://localhost:3000',
+  CDFIR_DATABASE_URL: 'postgresql://ev:pw@localhost:5432/ev',
+  CDFIR_REDIS_URL: 'redis://localhost:6379',
+  CDFIR_OPENSEARCH_URL: 'http://localhost:9200',
+  CDFIR_S3_ENDPOINT: 'http://localhost:9000',
+  CDFIR_S3_REGION: 'us-east-1',
+  CDFIR_S3_BUCKET_EVIDENCE: 'cdfir-evidence',
+  CDFIR_S3_BUCKET_QUARANTINE: 'cdfir-quarantine',
+  CDFIR_S3_ACCESS_KEY_ID: 'minioadmin',
+  CDFIR_S3_SECRET_ACCESS_KEY: 'a-secret-value',
+  CDFIR_OIDC_ISSUER: 'http://localhost:9443/application/o/cdfir/',
+  CDFIR_OIDC_CLIENT_ID: 'cdfir',
+  CDFIR_OIDC_CLIENT_SECRET: 'an-oidc-secret',
+  CDFIR_SESSION_SECRET: 'x'.repeat(48),
+  CDFIR_KEK_LOCAL_MASTER_KEY: Buffer.alloc(32, 7).toString('base64'),
 };
 
 describe('loadConfig', () => {
   it('accepts a complete valid environment and applies defaults', () => {
     const config = loadConfig(validEnv);
-    expect(config.EV_API_PORT).toBe(4000);
-    expect(config.EV_S3_PRESIGN_TTL_SECONDS).toBe(300);
-    expect(config.EV_DEMO_MODE).toBe(false);
-    expect(config.EV_MAX_ARCHIVE_DEPTH).toBe(3);
-    expect(config.EV_CORS_ALLOWED_ORIGINS).toEqual([]);
+    expect(config.CDFIR_API_PORT).toBe(4000);
+    expect(config.CDFIR_S3_PRESIGN_TTL_SECONDS).toBe(300);
+    expect(config.CDFIR_DEMO_MODE).toBe(false);
+    expect(config.CDFIR_MAX_ARCHIVE_DEPTH).toBe(3);
+    expect(config.CDFIR_CORS_ALLOWED_ORIGINS).toEqual([]);
   });
 
   it('parses comma-separated CORS origins', () => {
     const config = loadConfig({
       ...validEnv,
-      EV_CORS_ALLOWED_ORIGINS: 'http://a.example, http://b.example',
+      CDFIR_CORS_ALLOWED_ORIGINS: 'http://a.example, http://b.example',
     });
-    expect(config.EV_CORS_ALLOWED_ORIGINS).toEqual(['http://a.example', 'http://b.example']);
+    expect(config.CDFIR_CORS_ALLOWED_ORIGINS).toEqual(['http://a.example', 'http://b.example']);
   });
 
   it('fails fast with key-level messages and no secret values', () => {
     const env = { ...validEnv };
-    delete env.EV_DATABASE_URL;
-    env.EV_S3_ENDPOINT = 'not-a-url';
+    delete env.CDFIR_DATABASE_URL;
+    env.CDFIR_S3_ENDPOINT = 'not-a-url';
     try {
       loadConfig(env);
       expect.unreachable('should have thrown');
     } catch (err) {
       const message = (err as Error).message;
-      expect(message).toContain('EV_DATABASE_URL');
-      expect(message).toContain('EV_S3_ENDPOINT');
+      expect(message).toContain('CDFIR_DATABASE_URL');
+      expect(message).toContain('CDFIR_S3_ENDPOINT');
       // secret values from the env must never appear in the error text
       expect(message).not.toContain('a-secret-value');
       expect(message).not.toContain('an-oidc-secret');
@@ -57,24 +57,24 @@ describe('loadConfig', () => {
   });
 
   it('rejects demo mode in production', () => {
-    expect(() => loadConfig({ ...validEnv, NODE_ENV: 'production', EV_DEMO_MODE: 'true' })).toThrow(
-      /EV_DEMO_MODE/,
-    );
+    expect(() =>
+      loadConfig({ ...validEnv, NODE_ENV: 'production', CDFIR_DEMO_MODE: 'true' }),
+    ).toThrow(/CDFIR_DEMO_MODE/);
   });
 
   it('rejects out-of-range presign TTL', () => {
-    expect(() => loadConfig({ ...validEnv, EV_S3_PRESIGN_TTL_SECONDS: '86400' })).toThrow(
-      /EV_S3_PRESIGN_TTL_SECONDS/,
+    expect(() => loadConfig({ ...validEnv, CDFIR_S3_PRESIGN_TTL_SECONDS: '86400' })).toThrow(
+      /CDFIR_S3_PRESIGN_TTL_SECONDS/,
     );
   });
 
   it('redactConfig elides every secret key', () => {
     const redacted = redactConfig(loadConfig(validEnv));
-    expect(redacted.EV_DATABASE_URL).toBe('[redacted]');
-    expect(redacted.EV_S3_SECRET_ACCESS_KEY).toBe('[redacted]');
-    expect(redacted.EV_OIDC_CLIENT_SECRET).toBe('[redacted]');
-    expect(redacted.EV_SESSION_SECRET).toBe('[redacted]');
-    expect(redacted.EV_KEK_LOCAL_MASTER_KEY).toBe('[redacted]');
-    expect(redacted.EV_API_PORT).toBe(4000);
+    expect(redacted.CDFIR_DATABASE_URL).toBe('[redacted]');
+    expect(redacted.CDFIR_S3_SECRET_ACCESS_KEY).toBe('[redacted]');
+    expect(redacted.CDFIR_OIDC_CLIENT_SECRET).toBe('[redacted]');
+    expect(redacted.CDFIR_SESSION_SECRET).toBe('[redacted]');
+    expect(redacted.CDFIR_KEK_LOCAL_MASTER_KEY).toBe('[redacted]');
+    expect(redacted.CDFIR_API_PORT).toBe(4000);
   });
 });

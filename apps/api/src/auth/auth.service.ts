@@ -5,7 +5,7 @@ import {
   type PrismaClient,
   type TenantRole,
   type User,
-} from '@evidencevault/database';
+} from '@aeg-clouddfir/database';
 import { PRISMA, LOGGER } from '../common/tokens.js';
 import type { AppLogger } from '../common/logger.js';
 import type { MappedClaims } from './oidc-helpers.js';

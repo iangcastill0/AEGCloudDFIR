@@ -5,7 +5,7 @@ import { expect, test, type Page } from '@playwright/test';
  * tag, export natives + CSV, and verify export hashes against the collection
  * manifest. Runs against the live stack over the demo corpus.
  */
-const API = process.env.EV_E2E_API_URL ?? 'http://localhost:4000';
+const API = process.env.CDFIR_E2E_API_URL ?? 'http://localhost:4000';
 
 async function ctx(page: Page): Promise<{ token: string }> {
   const tenants = (await (await page.request.get(`${API}/auth/tenants`)).json()) as {

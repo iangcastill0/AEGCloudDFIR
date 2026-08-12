@@ -11,13 +11,13 @@ import {
   StatusLive,
   Stepper,
   TextInput,
-} from '@evidencevault/ui';
-import type { ProductionParameters } from '@evidencevault/contracts';
+} from '@aeg-clouddfir/ui';
+import type { ProductionParameters } from '@aeg-clouddfir/contracts';
 import {
   productionParameters,
   stampPosition,
   validateProductionResponse,
-} from '@evidencevault/contracts';
+} from '@aeg-clouddfir/contracts';
 import type { z } from 'zod';
 import { TruthNotice } from '@/components/shared';
 import {
@@ -56,9 +56,9 @@ export default function NewProductionPage() {
 
   // "Clone settings" handoff from a production detail page.
   useEffect(() => {
-    const raw = window.sessionStorage.getItem('ev-production-clone-v1');
+    const raw = window.sessionStorage.getItem('cdfir-production-clone-v1');
     if (!raw) return;
-    window.sessionStorage.removeItem('ev-production-clone-v1');
+    window.sessionStorage.removeItem('cdfir-production-clone-v1');
     try {
       const cloned = productionParameters.safeParse(JSON.parse(raw));
       if (cloned.success) {
@@ -88,7 +88,7 @@ export default function NewProductionPage() {
         onStepSelect={(step) => dispatch({ type: 'goto', step })}
       />
       {showErrors && errors.length > 0 ? (
-        <div role="alert" className="ev-notice ev-notice--warning">
+        <div role="alert" className="cdfir-notice cdfir-notice--warning">
           <ul style={{ margin: 0, paddingInlineStart: '1.2em' }}>
             {errors.map((e) => (
               <li key={e}>{e}</li>
@@ -249,7 +249,7 @@ function SelectionStep({
 
   return (
     <section aria-label="Step 2: selection">
-      <fieldset className="ev-fieldset">
+      <fieldset className="cdfir-fieldset">
         <legend>Tags to produce</legend>
         {(tags.data?.items ?? []).map((t) => (
           <Checkbox
@@ -267,7 +267,7 @@ function SelectionStep({
         ))}
         {tags.data && tags.data.items.length === 0 ? <p>No tags exist yet.</p> : null}
       </fieldset>
-      <fieldset className="ev-fieldset">
+      <fieldset className="cdfir-fieldset">
         <legend>Saved searches to produce</legend>
         {(savedSearches.data?.items ?? []).map((s) => (
           <Checkbox
@@ -414,7 +414,7 @@ function LoadFileOptions({
         checked={output.includeText}
         onChange={(e) => patch({ output: { ...output, includeText: e.target.checked } })}
       />
-      <fieldset className="ev-fieldset">
+      <fieldset className="cdfir-fieldset">
         <legend>Load-file formats</legend>
         {(['dat', 'opt', 'csv'] as const).map((fmt) => (
           <Checkbox
@@ -471,7 +471,7 @@ function NativesStep({
           });
         }}
       />
-      <fieldset className="ev-fieldset">
+      <fieldset className="cdfir-fieldset">
         <legend>Always produce natively — tags</legend>
         {(tags.data?.items ?? []).map((t) => (
           <Checkbox
@@ -510,7 +510,7 @@ function StampsStep({
         {positions.map((pos) => {
           const existing = p.stamps.find((s) => s.position === pos);
           return (
-            <fieldset key={pos} className="ev-fieldset">
+            <fieldset key={pos} className="cdfir-fieldset">
               <legend>{pos.replaceAll('_', ' ')}</legend>
               <Select
                 label="Stamp kind"

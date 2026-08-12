@@ -62,14 +62,14 @@ describe('CsrfGuard', () => {
   it('passes a mutating request when cookie and header match', () => {
     const ctx = contextFor({
       method: 'POST',
-      cookies: { ev_csrf: token },
+      cookies: { cdfir_csrf: token },
       headers: { 'x-csrf-token': token },
     });
     expect(guard.canActivate(ctx)).toBe(true);
   });
 
   it('rejects when the header is missing', () => {
-    const ctx = contextFor({ method: 'POST', cookies: { ev_csrf: token }, headers: {} });
+    const ctx = contextFor({ method: 'POST', cookies: { cdfir_csrf: token }, headers: {} });
     expect(() => guard.canActivate(ctx)).toThrow(ForbiddenException);
   });
 
@@ -82,7 +82,7 @@ describe('CsrfGuard', () => {
     for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
       const ctx = contextFor({
         method,
-        cookies: { ev_csrf: token },
+        cookies: { cdfir_csrf: token },
         headers: { 'x-csrf-token': generateCsrfToken() },
       });
       expect(() => guard.canActivate(ctx)).toThrow(ForbiddenException);

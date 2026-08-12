@@ -1,5 +1,5 @@
 'use client';
-import { EmptyState, Notice, Table } from '@evidencevault/ui';
+import { EmptyState, Notice, Table } from '@aeg-clouddfir/ui';
 import { QueryBoundary } from '@/components/shared';
 import { useMe, useMembers } from '@/lib/hooks';
 

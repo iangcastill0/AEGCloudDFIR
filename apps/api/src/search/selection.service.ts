@@ -4,8 +4,8 @@ import {
   MAX_PAGE_SIZE,
   type SearchAdapter,
   type ValidatedAst,
-} from '@evidencevault/search';
-import { withTenantContext, type PrismaClient } from '@evidencevault/database';
+} from '@aeg-clouddfir/search';
+import { withTenantContext, type PrismaClient } from '@aeg-clouddfir/database';
 import { PRISMA, SEARCH_ADAPTER } from '../common/tokens.js';
 import { SearchService } from './search.service.js';
 

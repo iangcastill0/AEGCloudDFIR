@@ -8,8 +8,8 @@ import {
   tagResponse,
   savedSearchResponse,
   caseResponse,
-} from '@evidencevault/contracts';
-import type { CreateCollectionRequest } from '@evidencevault/contracts';
+} from '@aeg-clouddfir/contracts';
+import type { CreateCollectionRequest } from '@aeg-clouddfir/contracts';
 import { apiFetch } from './api';
 import {
   auditListResponse,

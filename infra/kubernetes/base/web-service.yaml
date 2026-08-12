@@ -3,6 +3,6 @@ kind: Service
 metadata:
   name: web
 spec:
-  selector: { app: evidencevault, component: web }
+  selector: { app: cdfir, component: web }
   ports:
     - { name: http, port: 80, targetPort: http }

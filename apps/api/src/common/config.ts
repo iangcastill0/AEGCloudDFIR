@@ -1,4 +1,4 @@
-import { loadConfig, type AppConfig } from '@evidencevault/config';
+import { loadConfig, type AppConfig } from '@aeg-clouddfir/config';
 
 let cached: AppConfig | undefined;
 

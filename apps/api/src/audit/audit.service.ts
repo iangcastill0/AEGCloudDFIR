@@ -5,7 +5,7 @@ import {
   withTenantContext,
   type PrismaClient,
   type TenantScopedTx,
-} from '@evidencevault/database';
+} from '@aeg-clouddfir/database';
 import type { FastifyRequest } from 'fastify';
 import '../common/http.js';
 import { PRISMA } from '../common/tokens.js';
@@ -43,7 +43,7 @@ export class AuditService {
     const req = input.request;
     const headerRequestId = req?.headers['x-request-id'];
     const requestId =
-      req?.evRequestId ??
+      req?.cdfirRequestId ??
       (typeof headerRequestId === 'string' ? headerRequestId : undefined) ??
       randomUUID();
     const userAgentHeader = req?.headers['user-agent'];

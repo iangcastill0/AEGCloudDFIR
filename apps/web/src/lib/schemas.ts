@@ -1,6 +1,6 @@
 /**
  * Response schemas for API endpoints that do not (yet) have DTOs in
- * @evidencevault/contracts. Where contracts schemas exist they are imported
+ * @aeg-clouddfir/contracts. Where contracts schemas exist they are imported
  * and reused; everything here follows the same conventions (paginated
  * envelopes, string BigInts, ISO dates).
  */
@@ -15,7 +15,7 @@ import {
   savedSearchResponse,
   tagResponse,
   caseResponse,
-} from '@evidencevault/contracts';
+} from '@aeg-clouddfir/contracts';
 
 // --- Session / tenants ---
 

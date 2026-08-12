@@ -1,8 +1,8 @@
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { z } from 'zod';
-import { productionParameters, type ProductionParameters } from '@evidencevault/contracts';
-import { appendAuditEvent, withTenantContext, type Prisma } from '@evidencevault/database';
-import { hashBuffer, productionKey } from '@evidencevault/evidence';
+import { productionParameters, type ProductionParameters } from '@aeg-clouddfir/contracts';
+import { appendAuditEvent, withTenantContext, type Prisma } from '@aeg-clouddfir/database';
+import { hashBuffer, productionKey } from '@aeg-clouddfir/evidence';
 import {
   BatesCounter,
   DEFAULT_DAT_PROFILE,
@@ -24,7 +24,7 @@ import {
   type OptDocument,
   type ProducedItemRecord,
   type SortableProductionItem,
-} from '@evidencevault/production';
+} from '@aeg-clouddfir/production';
 import { sanitizeError, type WorkerContext } from '../context.js';
 import { readAllCapped } from '../streams.js';
 import type { ProductionRunPayload } from './payloads.js';
@@ -590,7 +590,7 @@ export async function processProductionRun(
       }
       await ctx.s3.send(
         new PutObjectCommand({
-          Bucket: ctx.config.EV_S3_BUCKET_EVIDENCE,
+          Bucket: ctx.config.CDFIR_S3_BUCKET_EVIDENCE,
           Key: key,
           Body: upload.body,
           ContentType: 'application/octet-stream',

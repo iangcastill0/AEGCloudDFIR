@@ -14,7 +14,7 @@ import {
   Tag,
   TextInput,
   VisuallyHidden,
-} from '@evidencevault/ui';
+} from '@aeg-clouddfir/ui';
 import { HighlightText, QueryBoundary, TruthNotice } from '@/components/shared';
 import {
   useAuditRecords,
@@ -182,7 +182,7 @@ function SearchRail(props: {
         <div className="help-popover">
           <button
             type="button"
-            className="ev-button ev-button--ghost ev-button--small"
+            className="cdfir-button cdfir-button--ghost cdfir-button--small"
             aria-expanded={helpOpen}
             onClick={() => setHelpOpen((o) => !o)}
           >
@@ -259,14 +259,14 @@ function SearchRail(props: {
         <h3>Saved searches</h3>
         {savedSearches.isPending ? <Skeleton lines={2} label="Loading saved searches" /> : null}
         {savedSearches.data && savedSearches.data.items.length === 0 ? (
-          <p className="ev-field__hint">None yet.</p>
+          <p className="cdfir-field__hint">None yet.</p>
         ) : null}
         <ul style={{ paddingInlineStart: '1.2em' }}>
           {(savedSearches.data?.items ?? []).map((s) => (
             <li key={s.id}>
               <button
                 type="button"
-                className="ev-button ev-button--ghost ev-button--small"
+                className="cdfir-button cdfir-button--ghost cdfir-button--small"
                 onClick={() => props.onLoadSaved(s.queryText, s.caseId ?? '')}
               >
                 {s.name}
@@ -307,7 +307,7 @@ function SearchRail(props: {
       >
         <TextInput label="Name" value={saveName} onChange={(e) => setSaveName(e.target.value)} />
         {saveSearch.isError ? (
-          <p role="alert" className="ev-field__error">
+          <p role="alert" className="cdfir-field__error">
             {errorMessage(saveSearch.error)}
           </p>
         ) : null}
@@ -523,7 +523,7 @@ function BulkTagBar({
       <strong>{selection.size} selected</strong>
       <label>
         <VisuallyHidden>Tag to apply or remove</VisuallyHidden>
-        <select className="ev-select" value={tagId} onChange={(e) => setTagId(e.target.value)}>
+        <select className="cdfir-select" value={tagId} onChange={(e) => setTagId(e.target.value)}>
           <option value="">Choose tag…</option>
           {(tags.data?.items ?? []).map((t) => (
             <option key={t.id} value={t.id}>
@@ -649,7 +649,7 @@ function CreateTagDialog({
         ]}
       />
       {createTag.isError ? (
-        <p role="alert" className="ev-field__error">
+        <p role="alert" className="cdfir-field__error">
           {errorMessage(createTag.error)}
         </p>
       ) : null}

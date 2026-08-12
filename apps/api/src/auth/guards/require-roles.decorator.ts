@@ -1,5 +1,5 @@
 import { SetMetadata, type CustomDecorator } from '@nestjs/common';
-import type { TenantRole } from '@evidencevault/database';
+import type { TenantRole } from '@aeg-clouddfir/database';
 
 export const ROLES_KEY = 'ev:requiredRoles';
 

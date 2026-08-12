@@ -1,11 +1,11 @@
-import type { AppConfig } from '@evidencevault/config';
+import type { AppConfig } from '@aeg-clouddfir/config';
 import {
   decryptSecret,
   encryptSecret,
   SecretKind,
   type EncryptedSecret,
   type KeyEncryptionProvider,
-} from '@evidencevault/database';
+} from '@aeg-clouddfir/database';
 import {
   GOOGLE_DWD_SCOPES,
   GoogleDelegatedTokenSource,
@@ -15,7 +15,7 @@ import {
   MicrosoftDelegatedTokenSource,
   type FetchLike,
   type TokenProvider,
-} from '@evidencevault/connectors';
+} from '@aeg-clouddfir/connectors';
 
 /**
  * TokenProvider construction from stored connector state. The worker mirrors
@@ -34,12 +34,12 @@ export function connectorSecretScope(connectorAccountId: string): string {
 
 export type ConnectorOauthConfig = Pick<
   AppConfig,
-  | 'EV_MS_LOGIN_BASE_URL'
-  | 'EV_MS_CLIENT_ID'
-  | 'EV_MS_CLIENT_SECRET'
-  | 'EV_GOOGLE_OAUTH_TOKEN_URL'
-  | 'EV_GOOGLE_CLIENT_ID'
-  | 'EV_GOOGLE_CLIENT_SECRET'
+  | 'CDFIR_MS_LOGIN_BASE_URL'
+  | 'CDFIR_MS_CLIENT_ID'
+  | 'CDFIR_MS_CLIENT_SECRET'
+  | 'CDFIR_GOOGLE_OAUTH_TOKEN_URL'
+  | 'CDFIR_GOOGLE_CLIENT_ID'
+  | 'CDFIR_GOOGLE_CLIENT_SECRET'
 >;
 
 export interface ConnectorSecretRecord extends EncryptedSecret {
@@ -116,9 +116,9 @@ export async function buildConnectorTokenProvider(
 
     if (account.provider === 'microsoft') {
       return new MicrosoftDelegatedTokenSource({
-        msLoginBaseUrl: config.EV_MS_LOGIN_BASE_URL,
-        clientId: config.EV_MS_CLIENT_ID,
-        clientSecret: config.EV_MS_CLIENT_SECRET,
+        msLoginBaseUrl: config.CDFIR_MS_LOGIN_BASE_URL,
+        clientId: config.CDFIR_MS_CLIENT_ID,
+        clientSecret: config.CDFIR_MS_CLIENT_SECRET,
         refreshToken,
         scopes: MICROSOFT_DELEGATED_SCOPES,
         onTokensRotated: async (newRefreshToken) => {
@@ -134,9 +134,9 @@ export async function buildConnectorTokenProvider(
       });
     }
     return new GoogleDelegatedTokenSource({
-      googleOauthTokenUrl: config.EV_GOOGLE_OAUTH_TOKEN_URL,
-      clientId: config.EV_GOOGLE_CLIENT_ID,
-      clientSecret: config.EV_GOOGLE_CLIENT_SECRET,
+      googleOauthTokenUrl: config.CDFIR_GOOGLE_OAUTH_TOKEN_URL,
+      clientId: config.CDFIR_GOOGLE_CLIENT_ID,
+      clientSecret: config.CDFIR_GOOGLE_CLIENT_SECRET,
       refreshToken,
       fetchImpl: input.fetchImpl,
     });
@@ -148,10 +148,10 @@ export async function buildConnectorTokenProvider(
       throw new ConnectorCredentialsError('organization connector has no external tenant id');
     }
     return new MicrosoftAppTokenSource({
-      msLoginBaseUrl: config.EV_MS_LOGIN_BASE_URL,
+      msLoginBaseUrl: config.CDFIR_MS_LOGIN_BASE_URL,
       tenantId: account.externalTenantId,
-      clientId: config.EV_MS_CLIENT_ID,
-      clientSecret: config.EV_MS_CLIENT_SECRET,
+      clientId: config.CDFIR_MS_CLIENT_ID,
+      clientSecret: config.CDFIR_MS_CLIENT_SECRET,
       fetchImpl: input.fetchImpl,
     });
   }
@@ -164,7 +164,7 @@ export async function buildConnectorTokenProvider(
   if (!key) throw new ConnectorCredentialsError('stored service-account key is malformed');
   const impersonateEmail = input.impersonateEmail ?? account.externalIdentity;
   return new GoogleServiceAccountTokenSource({
-    googleOauthTokenUrl: config.EV_GOOGLE_OAUTH_TOKEN_URL,
+    googleOauthTokenUrl: config.CDFIR_GOOGLE_OAUTH_TOKEN_URL,
     serviceAccountJson: key,
     scopes: GOOGLE_DWD_SCOPES,
     impersonateEmail,

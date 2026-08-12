@@ -1,13 +1,13 @@
 import { hkdfSync } from 'node:crypto';
 import { S3Client } from '@aws-sdk/client-s3';
-import type { AppConfig } from '@evidencevault/config';
+import type { AppConfig } from '@aeg-clouddfir/config';
 import {
   LocalAesKeyEncryptionProvider,
   type KeyEncryptionProvider,
   type PrismaClient,
-} from '@evidencevault/database';
-import { EvidenceObjectStore } from '@evidencevault/evidence';
-import { OpenSearchAdapter, type SearchAdapter } from '@evidencevault/search';
+} from '@aeg-clouddfir/database';
+import { EvidenceObjectStore } from '@aeg-clouddfir/evidence';
+import { OpenSearchAdapter, type SearchAdapter } from '@aeg-clouddfir/search';
 import type { Redis } from 'ioredis';
 import type { DispatcherLogger, JobEnqueuer } from './outbox/dispatcher.js';
 
@@ -49,7 +49,7 @@ export function deriveManifestSigningKey(masterKeyBase64: string): Buffer {
   const derived = hkdfSync(
     'sha256',
     ikm,
-    Buffer.from('evidencevault', 'utf8'),
+    Buffer.from('cdfir', 'utf8'),
     Buffer.from('manifest-signing-v1', 'utf8'),
     32,
   );
@@ -66,29 +66,29 @@ export interface WorkerContextDeps {
 /** Build the shared per-process context once in main(). */
 export function buildWorkerContext(config: AppConfig, deps: WorkerContextDeps): WorkerContext {
   const s3 = new S3Client({
-    endpoint: config.EV_S3_ENDPOINT,
-    region: config.EV_S3_REGION,
-    forcePathStyle: config.EV_S3_FORCE_PATH_STYLE,
+    endpoint: config.CDFIR_S3_ENDPOINT,
+    region: config.CDFIR_S3_REGION,
+    forcePathStyle: config.CDFIR_S3_FORCE_PATH_STYLE,
     credentials: {
-      accessKeyId: config.EV_S3_ACCESS_KEY_ID,
-      secretAccessKey: config.EV_S3_SECRET_ACCESS_KEY,
+      accessKeyId: config.CDFIR_S3_ACCESS_KEY_ID,
+      secretAccessKey: config.CDFIR_S3_SECRET_ACCESS_KEY,
     },
   });
   const store = new EvidenceObjectStore({
     s3,
-    evidenceBucket: config.EV_S3_BUCKET_EVIDENCE,
-    quarantineBucket: config.EV_S3_BUCKET_QUARANTINE,
-    presignTtlSeconds: config.EV_S3_PRESIGN_TTL_SECONDS,
+    evidenceBucket: config.CDFIR_S3_BUCKET_EVIDENCE,
+    quarantineBucket: config.CDFIR_S3_BUCKET_QUARANTINE,
+    presignTtlSeconds: config.CDFIR_S3_PRESIGN_TTL_SECONDS,
   });
   const search = new OpenSearchAdapter({
-    node: config.EV_OPENSEARCH_URL,
-    username: config.EV_OPENSEARCH_USERNAME,
-    password: config.EV_OPENSEARCH_PASSWORD,
-    indexPrefix: config.EV_OPENSEARCH_INDEX_PREFIX,
+    node: config.CDFIR_OPENSEARCH_URL,
+    username: config.CDFIR_OPENSEARCH_USERNAME,
+    password: config.CDFIR_OPENSEARCH_PASSWORD,
+    indexPrefix: config.CDFIR_OPENSEARCH_INDEX_PREFIX,
   });
   const kek = new LocalAesKeyEncryptionProvider(
-    { [config.EV_KEK_ACTIVE_KEY_ID]: config.EV_KEK_LOCAL_MASTER_KEY },
-    config.EV_KEK_ACTIVE_KEY_ID,
+    { [config.CDFIR_KEK_ACTIVE_KEY_ID]: config.CDFIR_KEK_LOCAL_MASTER_KEY },
+    config.CDFIR_KEK_ACTIVE_KEY_ID,
   );
   return {
     config,
@@ -100,7 +100,7 @@ export function buildWorkerContext(config: AppConfig, deps: WorkerContextDeps): 
     search,
     kek,
     enqueuer: deps.enqueuer,
-    manifestSigningKey: deriveManifestSigningKey(config.EV_KEK_LOCAL_MASTER_KEY),
+    manifestSigningKey: deriveManifestSigningKey(config.CDFIR_KEK_LOCAL_MASTER_KEY),
   };
 }
 

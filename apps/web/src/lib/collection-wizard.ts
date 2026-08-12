@@ -5,7 +5,7 @@
  * serializeWizard / hydrateWizard.
  */
 import { z } from 'zod';
-import { createCollectionRequest, type CreateCollectionRequest } from '@evidencevault/contracts';
+import { createCollectionRequest, type CreateCollectionRequest } from '@aeg-clouddfir/contracts';
 
 export const WIZARD_STEPS = [
   'Provider',

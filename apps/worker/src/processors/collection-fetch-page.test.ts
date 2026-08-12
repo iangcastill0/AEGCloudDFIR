@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { DeltaExpiredError } from '@evidencevault/connectors';
+import { DeltaExpiredError } from '@aeg-clouddfir/connectors';
 import { QUEUES } from '../queues.js';
 import {
   COLLECTION,

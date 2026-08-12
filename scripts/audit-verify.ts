@@ -9,12 +9,12 @@
  *   pnpm audit:verify                # verify all tenants
  *   pnpm audit:verify -- --tenant <uuid>
  */
-import { loadConfig } from '@evidencevault/config';
-import { createPrismaClient, verifyAuditChain, withTenantContext } from '@evidencevault/database';
+import { loadConfig } from '@aeg-clouddfir/config';
+import { createPrismaClient, verifyAuditChain, withTenantContext } from '@aeg-clouddfir/database';
 
 async function main(): Promise<void> {
   const config = loadConfig();
-  const prisma = createPrismaClient(config.EV_DATABASE_URL);
+  const prisma = createPrismaClient(config.CDFIR_DATABASE_URL);
   const tenantArgIdx = process.argv.indexOf('--tenant');
   const onlyTenant = tenantArgIdx >= 0 ? process.argv[tenantArgIdx + 1] : undefined;
 

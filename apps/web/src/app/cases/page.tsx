@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { useState } from 'react';
-import { Button, Dialog, EmptyState, Table, TextInput } from '@evidencevault/ui';
+import { Button, Dialog, EmptyState, Table, TextInput } from '@aeg-clouddfir/ui';
 import { QueryBoundary, StatusPill } from '@/components/shared';
 import { useCases, useCreateCase } from '@/lib/hooks';
 import { errorMessage } from '@/lib/errors';
@@ -105,7 +105,7 @@ export default function CasesPage() {
           onChange={(e) => setDescription(e.target.value)}
         />
         {createCase.isError ? (
-          <p role="alert" className="ev-field__error">
+          <p role="alert" className="cdfir-field__error">
             {errorMessage(createCase.error)}
           </p>
         ) : null}

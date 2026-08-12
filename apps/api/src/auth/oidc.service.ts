@@ -1,5 +1,5 @@
 import { Inject, Injectable, ServiceUnavailableException } from '@nestjs/common';
-import type { AppConfig } from '@evidencevault/config';
+import type { AppConfig } from '@aeg-clouddfir/config';
 import * as client from 'openid-client';
 import { APP_CONFIG, LOGGER } from '../common/tokens.js';
 import type { AppLogger } from '../common/logger.js';
@@ -29,14 +29,14 @@ export class OidcService {
 
   private async getConfiguration(): Promise<client.Configuration> {
     try {
-      const issuerUrl = new URL(this.appConfig.EV_OIDC_ISSUER);
+      const issuerUrl = new URL(this.appConfig.CDFIR_OIDC_ISSUER);
       // openid-client v6 refuses plain-HTTP issuers unless explicitly allowed.
       // Permit it only outside production (local Authentik in the compose stack).
       const allowHttp = issuerUrl.protocol === 'http:' && this.appConfig.NODE_ENV !== 'production';
       this.configPromise ??= client.discovery(
         issuerUrl,
-        this.appConfig.EV_OIDC_CLIENT_ID,
-        this.appConfig.EV_OIDC_CLIENT_SECRET,
+        this.appConfig.CDFIR_OIDC_CLIENT_ID,
+        this.appConfig.CDFIR_OIDC_CLIENT_SECRET,
         undefined,
         allowHttp ? { execute: [client.allowInsecureRequests] } : undefined,
       );
@@ -99,7 +99,7 @@ export class OidcService {
     return client
       .buildEndSessionUrl(config, {
         post_logout_redirect_uri: postLogoutRedirectUri,
-        client_id: this.appConfig.EV_OIDC_CLIENT_ID,
+        client_id: this.appConfig.CDFIR_OIDC_CLIENT_ID,
       })
       .toString();
   }

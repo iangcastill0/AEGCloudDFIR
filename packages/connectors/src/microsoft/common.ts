@@ -3,7 +3,7 @@ import type { ConnectionMode, RateLimitObserver, TokenProvider } from '../types.
 
 export interface GraphConnectorOptions {
   tokenProvider: TokenProvider;
-  /** e.g. https://graph.microsoft.com/v1.0 (EV_MS_GRAPH_BASE_URL). */
+  /** e.g. https://graph.microsoft.com/v1.0 (CDFIR_MS_GRAPH_BASE_URL). */
   graphBaseUrl: string;
   mode: ConnectionMode;
   onRateLimit?: RateLimitObserver;

@@ -12,13 +12,13 @@ import {
   Prisma,
   withTenantContext,
   type PrismaClient,
-} from '@evidencevault/database';
+} from '@aeg-clouddfir/database';
 import { z } from 'zod';
 import {
   collectionAction,
   createCollectionRequest,
   type CollectionStatusResponse,
-} from '@evidencevault/contracts';
+} from '@aeg-clouddfir/contracts';
 import type { FastifyRequest } from 'fastify';
 import '../common/http.js';
 import type { AuthContext } from '../common/http.js';

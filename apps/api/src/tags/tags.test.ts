@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ConflictException } from '@nestjs/common';
-import { TagFamilyBehavior, TenantRole } from '@evidencevault/database';
+import { TagFamilyBehavior, TenantRole } from '@aeg-clouddfir/database';
 import { TagsService } from './tags.service.js';
 import {
   ITEM_A,

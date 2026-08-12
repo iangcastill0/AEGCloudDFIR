@@ -1,6 +1,6 @@
 # Fake provider fixture layout
 
-`startFakeProviderServer(fixtureDir)` (entrypoint `@evidencevault/connectors/fake`)
+`startFakeProviderServer(fixtureDir)` (entrypoint `@aeg-clouddfir/connectors/fake`)
 serves Graph-shaped and Gmail/Drive-shaped JSON from a fixture directory.
 The canonical sanitized fixture set used by this package's tests lives at
 `packages/connectors/fixtures/`. All fixtures are small and sanitized

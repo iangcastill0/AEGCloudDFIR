@@ -1,22 +1,22 @@
 # Authentik blueprint: AEG-CloudDFIR OIDC application.
 # Mounted at /blueprints/custom in the compose stack; Authentik applies it on
 # startup. The client secret is read from the AUTHENTIK bootstrap env var
-# EV_OIDC_CLIENT_SECRET_BOOTSTRAP if set, else generate one in the UI and copy
-# it into AEG-CloudDFIR's EV_OIDC_CLIENT_SECRET.
+# CDFIR_OIDC_CLIENT_SECRET_BOOTSTRAP if set, else generate one in the UI and copy
+# it into AEG-CloudDFIR's CDFIR_OIDC_CLIENT_SECRET.
 version: 1
 metadata:
-  name: evidencevault
+  name: cdfir
   labels:
     blueprints.goauthentik.io/description: 'AEG-CloudDFIR OIDC provider + application'
 entries:
   - model: authentik_providers_oauth2.oauth2provider
     identifiers:
-      name: evidencevault
+      name: cdfir
     attrs:
-      name: evidencevault
+      name: cdfir
       client_type: confidential
-      client_id: evidencevault
-      client_secret: !Env [EV_OIDC_CLIENT_SECRET_BOOTSTRAP, 'changeme-local-only']
+      client_id: cdfir
+      client_secret: !Env [CDFIR_OIDC_CLIENT_SECRET_BOOTSTRAP, 'changeme-local-only']
       authorization_flow:
         !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
       invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
@@ -45,21 +45,21 @@ entries:
           ]
   - model: authentik_core.application
     identifiers:
-      slug: evidencevault
+      slug: cdfir
     attrs:
       name: AEG-CloudDFIR
-      slug: evidencevault
-      provider: !KeyOf evidencevault
+      slug: cdfir
+      provider: !KeyOf cdfir
       policy_engine_mode: any
       meta_description: 'eDiscovery evidence archive'
-  # Optional groups used for group→role mapping (EV_OIDC_GROUP_CLAIM=groups,
-  # EV_OIDC_GROUP_ROLE_MAP=ev-org-admins:org_admin,ev-reviewers:reviewer,...)
+  # Optional groups used for group→role mapping (CDFIR_OIDC_GROUP_CLAIM=groups,
+  # CDFIR_OIDC_GROUP_ROLE_MAP=cdfir-org-admins:org_admin,cdfir-reviewers:reviewer,...)
   - model: authentik_core.group
-    identifiers: { name: ev-org-admins }
-    attrs: { name: ev-org-admins }
+    identifiers: { name: cdfir-org-admins }
+    attrs: { name: cdfir-org-admins }
   - model: authentik_core.group
-    identifiers: { name: ev-reviewers }
-    attrs: { name: ev-reviewers }
+    identifiers: { name: cdfir-reviewers }
+    attrs: { name: cdfir-reviewers }
   - model: authentik_core.group
-    identifiers: { name: ev-case-managers }
-    attrs: { name: ev-case-managers }
+    identifiers: { name: cdfir-case-managers }
+    attrs: { name: cdfir-case-managers }

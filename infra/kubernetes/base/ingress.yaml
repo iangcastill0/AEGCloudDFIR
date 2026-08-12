@@ -1,7 +1,7 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: evidencevault
+  name: cdfir
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt # adjust to your issuer
     nginx.ingress.kubernetes.io/proxy-body-size: '16m'
@@ -9,16 +9,16 @@ metadata:
 spec:
   ingressClassName: nginx
   tls:
-    - hosts: [evidencevault.example.com, api.evidencevault.example.com]
-      secretName: evidencevault-tls
+    - hosts: [cdfir.example.com, api.cdfir.example.com]
+      secretName: cdfir-tls
   rules:
-    - host: evidencevault.example.com
+    - host: cdfir.example.com
       http:
         paths:
           - path: /
             pathType: Prefix
             backend: { service: { name: web, port: { name: http } } }
-    - host: api.evidencevault.example.com
+    - host: api.cdfir.example.com
       http:
         paths:
           - path: /

@@ -8,24 +8,24 @@ importers:
 
   .:
     devDependencies:
+      '@aeg-clouddfir/config':
+        specifier: workspace:*
+        version: link:packages/config
+      '@aeg-clouddfir/connectors':
+        specifier: workspace:*
+        version: link:packages/connectors
+      '@aeg-clouddfir/database':
+        specifier: workspace:*
+        version: link:packages/database
+      '@aeg-clouddfir/evidence':
+        specifier: workspace:*
+        version: link:packages/evidence
+      '@aeg-clouddfir/search':
+        specifier: workspace:*
+        version: link:packages/search
       '@eslint/js':
         specifier: ^10.0.1
         version: 10.0.1(eslint@10.8.0(jiti@2.7.0)(supports-color@7.2.0))
-      '@evidencevault/config':
-        specifier: workspace:*
-        version: link:packages/config
-      '@evidencevault/connectors':
-        specifier: workspace:*
-        version: link:packages/connectors
-      '@evidencevault/database':
-        specifier: workspace:*
-        version: link:packages/database
-      '@evidencevault/evidence':
-        specifier: workspace:*
-        version: link:packages/evidence
-      '@evidencevault/search':
-        specifier: workspace:*
-        version: link:packages/search
       '@playwright/test':
         specifier: 1.62.1
         version: 1.62.1
@@ -56,27 +56,27 @@ importers:
 
   apps/api:
     dependencies:
+      '@aeg-clouddfir/config':
+        specifier: workspace:*
+        version: link:../../packages/config
+      '@aeg-clouddfir/connectors':
+        specifier: workspace:*
+        version: link:../../packages/connectors
+      '@aeg-clouddfir/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      '@aeg-clouddfir/database':
+        specifier: workspace:*
+        version: link:../../packages/database
+      '@aeg-clouddfir/evidence':
+        specifier: workspace:*
+        version: link:../../packages/evidence
+      '@aeg-clouddfir/search':
+        specifier: workspace:*
+        version: link:../../packages/search
       '@aws-sdk/client-s3':
         specifier: 3.1105.0
         version: 3.1105.0
-      '@evidencevault/config':
-        specifier: workspace:*
-        version: link:../../packages/config
-      '@evidencevault/connectors':
-        specifier: workspace:*
-        version: link:../../packages/connectors
-      '@evidencevault/contracts':
-        specifier: workspace:*
-        version: link:../../packages/contracts
-      '@evidencevault/database':
-        specifier: workspace:*
-        version: link:../../packages/database
-      '@evidencevault/evidence':
-        specifier: workspace:*
-        version: link:../../packages/evidence
-      '@evidencevault/search':
-        specifier: workspace:*
-        version: link:../../packages/search
       '@fastify/cookie':
         specifier: ^9.4.0
         version: 9.4.0
@@ -138,10 +138,10 @@ importers:
 
   apps/web:
     dependencies:
-      '@evidencevault/contracts':
+      '@aeg-clouddfir/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
-      '@evidencevault/ui':
+      '@aeg-clouddfir/ui':
         specifier: workspace:*
         version: link:../../packages/ui
       '@tanstack/react-query':
@@ -184,30 +184,30 @@ importers:
 
   apps/worker:
     dependencies:
+      '@aeg-clouddfir/config':
+        specifier: workspace:*
+        version: link:../../packages/config
+      '@aeg-clouddfir/connectors':
+        specifier: workspace:*
+        version: link:../../packages/connectors
+      '@aeg-clouddfir/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      '@aeg-clouddfir/database':
+        specifier: workspace:*
+        version: link:../../packages/database
+      '@aeg-clouddfir/evidence':
+        specifier: workspace:*
+        version: link:../../packages/evidence
+      '@aeg-clouddfir/production':
+        specifier: workspace:*
+        version: link:../../packages/production
+      '@aeg-clouddfir/search':
+        specifier: workspace:*
+        version: link:../../packages/search
       '@aws-sdk/client-s3':
         specifier: 3.1105.0
         version: 3.1105.0
-      '@evidencevault/config':
-        specifier: workspace:*
-        version: link:../../packages/config
-      '@evidencevault/connectors':
-        specifier: workspace:*
-        version: link:../../packages/connectors
-      '@evidencevault/contracts':
-        specifier: workspace:*
-        version: link:../../packages/contracts
-      '@evidencevault/database':
-        specifier: workspace:*
-        version: link:../../packages/database
-      '@evidencevault/evidence':
-        specifier: workspace:*
-        version: link:../../packages/evidence
-      '@evidencevault/production':
-        specifier: workspace:*
-        version: link:../../packages/production
-      '@evidencevault/search':
-        specifier: workspace:*
-        version: link:../../packages/search
       '@nestjs/common':
         specifier: ^10.4.22
         version: 10.4.22(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0)
@@ -336,6 +336,9 @@ importers:
 
   packages/evidence:
     dependencies:
+      '@aeg-clouddfir/config':
+        specifier: workspace:*
+        version: link:../config
       '@aws-sdk/client-s3':
         specifier: 3.1105.0
         version: 3.1105.0
@@ -345,9 +348,6 @@ importers:
       '@aws-sdk/s3-request-presigner':
         specifier: 3.1105.0
         version: 3.1105.0
-      '@evidencevault/config':
-        specifier: workspace:*
-        version: link:../config
       mailparser:
         specifier: 3.9.15
         version: 3.9.15

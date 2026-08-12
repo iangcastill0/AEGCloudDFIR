@@ -36,7 +36,7 @@ export interface EncryptedSecret {
 
 /**
  * Portable local provider: wraps DEKs with a 32-byte master key from the
- * environment (EV_KEK_LOCAL_MASTER_KEY, base64) using AES-256-GCM.
+ * environment (CDFIR_KEK_LOCAL_MASTER_KEY, base64) using AES-256-GCM.
  * External KMS systems (AWS KMS, GCP KMS, Vault Transit) implement the same
  * interface; see docs/guides/key-management.md.
  */
@@ -82,7 +82,7 @@ export class LocalAesKeyEncryptionProvider implements KeyEncryptionProvider {
 
 /** AAD binds ciphertexts to their tenant + secret identity (anti-swap). */
 function buildAad(tenantId: string, secretScope: string): Buffer {
-  return Buffer.from(`evidencevault:v1:${tenantId}:${secretScope}`, 'utf8');
+  return Buffer.from(`cdfir:v1:${tenantId}:${secretScope}`, 'utf8');
 }
 
 export async function encryptSecret(

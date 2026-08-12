@@ -1,5 +1,5 @@
-import type { TenantScopedTx } from '@evidencevault/database';
-import { RelationshipKind } from '@evidencevault/database';
+import type { TenantScopedTx } from '@aeg-clouddfir/database';
+import { RelationshipKind } from '@aeg-clouddfir/database';
 
 const FAMILY_KINDS: RelationshipKind[] = [RelationshipKind.family, RelationshipKind.attachment];
 

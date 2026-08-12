@@ -1,8 +1,8 @@
 'use client';
 /** Small shared building blocks used across routes. */
 import { useState, type ReactNode } from 'react';
-import { Button, Dialog, ErrorState, Notice, Skeleton, TextInput } from '@evidencevault/ui';
-import { TRUTHFULNESS_NOTICES } from '@evidencevault/contracts';
+import { Button, Dialog, ErrorState, Notice, Skeleton, TextInput } from '@aeg-clouddfir/ui';
+import { TRUTHFULNESS_NOTICES } from '@aeg-clouddfir/contracts';
 import { errorMessage } from '@/lib/errors';
 import { humanizeToken } from '@/lib/format';
 import { parseHighlight } from '@/lib/highlight';

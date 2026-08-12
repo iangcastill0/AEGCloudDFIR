@@ -8,7 +8,7 @@
  *   elements serialized as null
  * - non-finite numbers, functions, and symbols throw
  *
- * NOTE: intentionally duplicated from @evidencevault/database — this package
+ * NOTE: intentionally duplicated from @aeg-clouddfir/database — this package
  * must not depend on the database package (or Prisma) by design.
  */
 export function canonicalJson(value: unknown): string {

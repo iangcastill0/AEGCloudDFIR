@@ -1,9 +1,9 @@
 import type { z } from 'zod';
-import type { validationFlag, validationFlagCode } from '@evidencevault/contracts';
+import type { validationFlag, validationFlagCode } from '@aeg-clouddfir/contracts';
 
 /**
  * Release-safety validation, re-implemented compactly for the API
- * (@evidencevault/production is deliberately NOT an api dependency).
+ * (@aeg-clouddfir/production is deliberately NOT an api dependency).
  * Codes and severities MUST stay aligned with contracts.validationFlagCode
  * and the worker's validation engine.
  */

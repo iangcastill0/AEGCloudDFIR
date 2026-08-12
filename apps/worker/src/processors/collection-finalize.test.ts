@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { verifyManifestSignature, type CollectionManifestV1 } from '@evidencevault/evidence';
+import { verifyManifestSignature, type CollectionManifestV1 } from '@aeg-clouddfir/evidence';
 import { COLLECTION, CUSTODIAN, TENANT, fakeCtx, type FakeCtx } from '../testing/fakes.js';
 import {
   buildCompletenessNarrative,
@@ -48,7 +48,7 @@ function arm(
   f.tx.collectionException.findMany.mockResolvedValue(opts.exceptions ?? []);
   f.tx.evidenceItem.findMany.mockResolvedValue([
     {
-      id: 'ev-1',
+      id: 'cdfir-1',
       providerItemId: 'm1',
       custodianId: CUSTODIAN,
       sha256: SHA,

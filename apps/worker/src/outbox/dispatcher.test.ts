@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { PrismaClient } from '@evidencevault/database';
+import type { PrismaClient } from '@aeg-clouddfir/database';
 import { OutboxDispatcher, type JobEnqueuer, type OutboxRow } from './dispatcher.js';
 
 const silentLog = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };

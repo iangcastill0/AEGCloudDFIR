@@ -13,8 +13,8 @@ export interface TagProps {
 /** Tag chip: color swatch plus a text label so color is never the only cue. */
 export function Tag({ name, color, privileged, confidential, onRemove }: TagProps) {
   return (
-    <span className="ev-tag">
-      <span className="ev-tag__swatch" style={{ backgroundColor: color }} aria-hidden="true" />
+    <span className="cdfir-tag">
+      <span className="cdfir-tag__swatch" style={{ backgroundColor: color }} aria-hidden="true" />
       <span>
         {name}
         {privileged ? ' · privileged' : ''}
@@ -23,7 +23,7 @@ export function Tag({ name, color, privileged, confidential, onRemove }: TagProp
       {onRemove ? (
         <button
           type="button"
-          className="ev-button ev-button--ghost ev-button--small"
+          className="cdfir-button cdfir-button--ghost cdfir-button--small"
           onClick={onRemove}
         >
           <span aria-hidden="true">×</span>

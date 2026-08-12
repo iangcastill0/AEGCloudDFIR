@@ -28,7 +28,7 @@ export type FetchPagePayload = z.infer<typeof fetchPagePayload>;
 /**
  * Serialized connector DriveEntry carried in the fetch-item payload so the
  * worker never has to re-list a page to download one file. Matches the
- * DriveEntry shape from @evidencevault/connectors.
+ * DriveEntry shape from @aeg-clouddfir/connectors.
  */
 export const driveEntryPayload = z.object({
   providerItemId: z.string(),

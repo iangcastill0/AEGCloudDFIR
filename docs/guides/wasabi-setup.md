@@ -8,17 +8,17 @@ same code path.
 
 Create two buckets in the same region:
 
-| Bucket          | Purpose                                                          |
-| --------------- | ---------------------------------------------------------------- |
-| `ev-evidence`   | originals, derivatives, manifests, exports, productions          |
-| `ev-quarantine` | malware-flagged originals (retained, never rendered unsandboxed) |
+| Bucket             | Purpose                                                          |
+| ------------------ | ---------------------------------------------------------------- |
+| `cdfir-evidence`   | originals, derivatives, manifests, exports, productions          |
+| `cdfir-quarantine` | malware-flagged originals (retained, never rendered unsandboxed) |
 
 Region choice matters for latency to your workers. Set:
 
 ```
-EV_S3_ENDPOINT=https://s3.<region>.wasabisys.com   # e.g. s3.us-east-1.wasabisys.com
-EV_S3_REGION=<region>
-EV_S3_FORCE_PATH_STYLE=false
+CDFIR_S3_ENDPOINT=https://s3.<region>.wasabisys.com   # e.g. s3.us-east-1.wasabisys.com
+CDFIR_S3_REGION=<region>
+CDFIR_S3_FORCE_PATH_STYLE=false
 ```
 
 ## 2. Versioning and Object Lock (WORM)
@@ -62,17 +62,17 @@ Create a dedicated sub-user + access key for AEG-CloudDFIR. Example policy:
         "s3:ListBucketMultipartUploads"
       ],
       "Resource": [
-        "arn:aws:s3:::ev-evidence",
-        "arn:aws:s3:::ev-evidence/*",
-        "arn:aws:s3:::ev-quarantine",
-        "arn:aws:s3:::ev-quarantine/*"
+        "arn:aws:s3:::cdfir-evidence",
+        "arn:aws:s3:::cdfir-evidence/*",
+        "arn:aws:s3:::cdfir-quarantine",
+        "arn:aws:s3:::cdfir-quarantine/*"
       ]
     },
     {
       "Sid": "ProtectOriginals",
       "Effect": "Deny",
       "Action": ["s3:DeleteObject", "s3:PutObjectRetention"],
-      "Resource": ["arn:aws:s3:::ev-evidence/tenants/*/originals/*"]
+      "Resource": ["arn:aws:s3:::cdfir-evidence/tenants/*/originals/*"]
     }
   ]
 }
@@ -84,13 +84,13 @@ workflow produces its deletion manifest.
 
 ## 4. CORS
 
-Browsers only touch presigned GET URLs. Restrict CORS on `ev-evidence` to your
+Browsers only touch presigned GET URLs. Restrict CORS on `cdfir-evidence` to your
 web origin:
 
 ```json
 [
   {
-    "AllowedOrigins": ["https://evidencevault.example.com"],
+    "AllowedOrigins": ["https://cdfir.example.com"],
     "AllowedMethods": ["GET", "HEAD"],
     "AllowedHeaders": ["range"],
     "MaxAgeSeconds": 300
@@ -109,8 +109,8 @@ web origin:
 
 ## 6. Verification checklist
 
-1. `aws s3api get-bucket-versioning --bucket ev-evidence --endpoint-url $EV_S3_ENDPOINT` → `Enabled`
-2. `aws s3api get-object-lock-configuration --bucket ev-evidence --endpoint-url $EV_S3_ENDPOINT` → your mode
+1. `aws s3api get-bucket-versioning --bucket cdfir-evidence --endpoint-url $CDFIR_S3_ENDPOINT` → `Enabled`
+2. `aws s3api get-object-lock-configuration --bucket cdfir-evidence --endpoint-url $CDFIR_S3_ENDPOINT` → your mode
 3. In AEG-CloudDFIR: Admin → Storage shows “versioning enabled / Object Lock enabled (mode)”.
 4. Upload+promote a demo item, then attempt `aws s3api delete-object` on its
    original key with the app credential → `AccessDenied`.

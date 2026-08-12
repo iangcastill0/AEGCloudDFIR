@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { BadRequestException, ConflictException } from '@nestjs/common';
-import { CollectionStatus, ConnectorStatus, TenantRole } from '@evidencevault/database';
+import { CollectionStatus, ConnectorStatus, TenantRole } from '@aeg-clouddfir/database';
 import { CollectionsService } from './collections.service.js';
 import {
   CONNECTOR_ID,

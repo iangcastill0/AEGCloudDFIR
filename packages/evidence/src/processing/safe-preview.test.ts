@@ -74,9 +74,9 @@ describe('buildSafeEmailPreview: images', () => {
   it('resolves allowed cid: images through the resolver', () => {
     const result = buildSafeEmailPreview('<img src="cid:diagram-1@example.com" alt="diagram">', {
       allowedCidResolver: (cid) =>
-        cid === 'diagram-1@example.com' ? '/derivatives/ev-1/inline/diagram.png' : null,
+        cid === 'diagram-1@example.com' ? '/derivatives/cdfir-1/inline/diagram.png' : null,
     });
-    expect(result.html).toContain('src="/derivatives/ev-1/inline/diagram.png"');
+    expect(result.html).toContain('src="/derivatives/cdfir-1/inline/diagram.png"');
     expect(result.html).toContain('alt="diagram"');
     expect(result.blockedRemoteResources).toBe(0);
   });

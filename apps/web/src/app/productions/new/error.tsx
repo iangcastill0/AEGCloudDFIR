@@ -1,5 +1,5 @@
 'use client';
-import { ErrorState } from '@evidencevault/ui';
+import { ErrorState } from '@aeg-clouddfir/ui';
 
 export default function RouteError({
   error,

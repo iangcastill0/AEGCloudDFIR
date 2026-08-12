@@ -12,7 +12,7 @@ export function ProgressBar({ label, value, max, detail }: ProgressBarProps) {
   const clamped = Math.min(Math.max(value, 0), safeMax > 0 ? safeMax : value);
   const percent = safeMax > 0 ? Math.round((clamped / safeMax) * 100) : 0;
   return (
-    <div className="ev-progress">
+    <div className="cdfir-progress">
       <div
         role="progressbar"
         aria-label={label}
@@ -20,11 +20,11 @@ export function ProgressBar({ label, value, max, detail }: ProgressBarProps) {
         aria-valuemax={safeMax}
         aria-valuenow={clamped}
         aria-valuetext={`${clamped} of ${safeMax}${detail ? ` (${detail})` : ''}`}
-        className="ev-progress__track"
+        className="cdfir-progress__track"
       >
-        <div className="ev-progress__fill" style={{ width: `${percent}%` }} />
+        <div className="cdfir-progress__fill" style={{ width: `${percent}%` }} />
       </div>
-      <span className="ev-progress__text">
+      <span className="cdfir-progress__text">
         {clamped} / {safeMax}
         {detail ? ` · ${detail}` : ''}
       </span>

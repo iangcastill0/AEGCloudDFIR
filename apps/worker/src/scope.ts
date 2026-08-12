@@ -1,5 +1,5 @@
-import { collectionScope, type CollectionScope } from '@evidencevault/contracts';
-import type { DiscoveredMailFolder } from '@evidencevault/connectors';
+import { collectionScope, type CollectionScope } from '@aeg-clouddfir/contracts';
+import type { DiscoveredMailFolder } from '@aeg-clouddfir/connectors';
 
 /** Parse the Collection.scope JSON column into the validated contract shape. */
 export function parseCollectionScope(raw: unknown): CollectionScope {

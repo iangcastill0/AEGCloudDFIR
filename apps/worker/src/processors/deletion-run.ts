@@ -1,5 +1,5 @@
 import { DeleteObjectCommand } from '@aws-sdk/client-s3';
-import { withTenantContext, appendAuditEvent } from '@evidencevault/database';
+import { withTenantContext, appendAuditEvent } from '@aeg-clouddfir/database';
 import { z } from 'zod';
 import type { WorkerContext } from '../context.js';
 import { sanitizeError } from '../context.js';
@@ -105,8 +105,8 @@ export async function deletionRun(ctx: WorkerContext, payload: DeletionRunPayloa
         if (blob) {
           const bucket =
             blob.storageClass === 'quarantine'
-              ? ctx.config.EV_S3_BUCKET_QUARANTINE
-              : ctx.config.EV_S3_BUCKET_EVIDENCE;
+              ? ctx.config.CDFIR_S3_BUCKET_QUARANTINE
+              : ctx.config.CDFIR_S3_BUCKET_EVIDENCE;
           try {
             await ctx.s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: blob.objectKey }));
             outcome = 'object_and_metadata_deleted';
