@@ -262,7 +262,11 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ['CMD-SHELL', 'wget -qO- http://localhost:5100/healthz >/dev/null']
+      # /readyz, not /healthz: liveness only reports uptime, so a worker whose
+      # database client is broken still answers 200. That masked a total outage
+      # — the Prisma engine was missing and every job failed — while docker ps
+      # showed "healthy". Readiness checks postgres, redis and the dispatcher.
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:5100/readyz >/dev/null']
       interval: 10s
       timeout: 5s
       retries: 10

@@ -6,6 +6,14 @@
 
 generator client {
   provider = "prisma-client-js"
+  // `native` alone is not enough. In the worker's Debian slim build image,
+  // Prisma failed to detect OpenSSL and generated a debian-openssl-1.1.x engine,
+  // while the runtime needs debian-openssl-3.0.x — so every query failed with
+  // "could not locate the Query Engine" and the worker could not reach the
+  // database at all. The API was unaffected only because Alpine resolved to
+  // linux-musl-openssl-3.0.x correctly. Both runtimes are now named explicitly
+  // so detection cannot silently pick the wrong one.
+  binaryTargets = ["native", "debian-openssl-3.0.x", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {

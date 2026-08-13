@@ -183,10 +183,14 @@ export async function runBackup(options: RunBackupOptions): Promise<BackupResult
       const described = await options.describeDatabase();
       pgVersion = described.pgVersion;
       migration = described.migration;
-    } catch {
-      // Provenance is useful, not load-bearing. A backup with unknown metadata
-      // still restores; refusing to record one because a metadata query failed
-      // would trade a real backup for a cosmetic detail.
+    } catch (err) {
+      // Provenance is useful, not load-bearing: a backup with unknown metadata
+      // still restores, so a failed metadata query must not cost a real backup.
+      // But it is reported rather than swallowed — silent 'unknown' here hid a
+      // completely broken Prisma client in the worker for hours.
+      process.stderr.write(
+        `warning: could not read database provenance (${err instanceof Error ? err.message.split('\n')[0] : String(err)}); recording 'unknown'\n`,
+      );
     }
   }
 
