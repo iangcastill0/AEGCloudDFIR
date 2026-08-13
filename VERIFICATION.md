@@ -275,8 +275,7 @@ fixture's text. A repo-wide grep for the old tokens returns zero matches
 | Playwright E2E (scenarios 1, 2, 3, 6, 7 + accessibility)                                                                     | **25 passing**   |
 | Repo-wide residual old-name tokens                                                                                           | **0**            |
 
-The former `evidencevault` database, roles, and OpenSearch indices were
-dropped.
+The pre-rename database, roles, and OpenSearch indices were dropped.
 
 ## Addendum — PST/OST uploads, and two defects found and fixed by live testing
 
