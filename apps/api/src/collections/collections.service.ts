@@ -314,6 +314,52 @@ export class CollectionsService {
     };
   }
 
+  /** Row-level exceptions ledger for the detail page (counts live in status). */
+  async exceptions(
+    auth: AuthContext,
+    id: string,
+    opts: { cursor?: string; limit: number; kind?: string },
+  ): Promise<{
+    items: {
+      id: string;
+      kind: string;
+      message: string;
+      itemRef: string | null;
+      occurredAt: string;
+    }[];
+    nextCursor: string | null;
+  }> {
+    return withTenantContext(this.prisma, auth.tenantId, async (tx) => {
+      const collection = await tx.collection.findFirst({
+        where: { id, tenantId: auth.tenantId },
+        select: { id: true },
+      });
+      if (!collection) throw new NotFoundException();
+
+      const rows = await tx.collectionException.findMany({
+        where: {
+          tenantId: auth.tenantId,
+          collectionId: id,
+          ...(opts.kind ? { kind: opts.kind as never } : {}),
+        },
+        orderBy: { occurredAt: 'desc' },
+        take: opts.limit + 1,
+        ...(opts.cursor ? { skip: 1, cursor: { id: opts.cursor } } : {}),
+      });
+      const page = rows.slice(0, opts.limit);
+      return {
+        items: page.map((row) => ({
+          id: row.id,
+          kind: row.kind,
+          message: row.message,
+          itemRef: row.providerItemId !== '' ? row.providerItemId : null,
+          occurredAt: row.occurredAt.toISOString(),
+        })),
+        nextCursor: rows.length > opts.limit ? (page[page.length - 1]?.id ?? null) : null,
+      };
+    });
+  }
+
   async status(auth: AuthContext, id: string): Promise<CollectionStatusResponse> {
     return withTenantContext(this.prisma, auth.tenantId, async (tx) => {
       const collection = await tx.collection.findFirst({

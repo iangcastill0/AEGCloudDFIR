@@ -52,6 +52,31 @@ export class CollectionsController {
     return this.collections.list(requireAuth(request), parseCursorQuery(query));
   }
 
+  @Get(':id')
+  @RequireRoles(TenantRole.org_admin, TenantRole.case_manager, TenantRole.reviewer)
+  async detail(
+    @Param('id') id: string,
+    @Req() request: FastifyRequest,
+  ): Promise<CollectionStatusResponse> {
+    return this.collections.status(requireAuth(request), id);
+  }
+
+  @Get(':id/exceptions')
+  @RequireRoles(TenantRole.org_admin, TenantRole.case_manager, TenantRole.reviewer)
+  async exceptions(
+    @Param('id') id: string,
+    @Query() query: Record<string, unknown>,
+    @Req() request: FastifyRequest,
+  ): Promise<{
+    items: { id: string; kind: string; message: string; itemRef: string | null }[];
+    nextCursor: string | null;
+  }> {
+    const { cursor, limit } = parseCursorQuery(query);
+    const kind =
+      typeof query['kind'] === 'string' && query['kind'] !== '' ? query['kind'] : undefined;
+    return this.collections.exceptions(requireAuth(request), id, { cursor, limit, kind });
+  }
+
   @Get(':id/status')
   @RequireRoles(TenantRole.org_admin, TenantRole.case_manager, TenantRole.reviewer)
   async status(

@@ -179,7 +179,7 @@ export function useCollectionAction(id: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (action: 'pause' | 'resume' | 'cancel' | 'retry') =>
-      apiFetch(`/api/v1/collections/${id}/actions`, { method: 'POST', body: { action } }),
+      apiFetch(`/api/v1/collections/${id}/${action}`, { method: 'POST' }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['collection', id] }),
   });
 }
