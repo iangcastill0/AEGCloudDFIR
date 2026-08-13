@@ -56,7 +56,8 @@ never in a production code path.
 
 ## Documentation
 
-- Setup guides: [Wasabi](docs/guides/wasabi-setup.md) ·
+- Setup guides: [Connect a domain (TLS, DNS, reverse proxy)](docs/guides/domain-setup.md) ·
+  [Wasabi](docs/guides/wasabi-setup.md) ·
   [Authentik](docs/guides/authentik-setup.md) ·
   [Microsoft Entra](docs/guides/microsoft-setup.md) ·
   [Google / Workspace DWD](docs/guides/google-setup.md) ·

@@ -226,6 +226,11 @@ services:
     build:
       context: ../..
       dockerfile: infra/docker/web.Dockerfile
+      # Baked into the browser bundle at build time (Next inlines NEXT_PUBLIC_*).
+      # Change these -> rebuild the image, not just restart it.
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:4000}
+        NEXT_PUBLIC_AUTHENTIK_URL: ${NEXT_PUBLIC_AUTHENTIK_URL:-http://localhost:9443}
     env_file: ../../.env
     ports:
       - '127.0.0.1:3000:3000'
