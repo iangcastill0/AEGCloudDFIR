@@ -87,7 +87,11 @@ export class SearchService {
       } else if (input.builder !== undefined && input.builder !== null) {
         ast = astFromBuilder(input.builder);
       } else {
-        throw new BadRequestException('either query or builder is required');
+        // Browse-all: an empty request matches the whole (tenant-scoped)
+        // corpus — useful when reviewing an entire collected mailbox. The
+        // compiler still injects the tenant/case/privilege filters
+        // unconditionally, so this can never widen visibility.
+        ast = parseQuery('');
       }
       return validateAst(ast, DEFAULT_FIELD_REGISTRY);
     } catch (err) {
@@ -179,7 +183,13 @@ export class SearchService {
     let requestBody;
     try {
       requestBody = buildSearchRequest(validated, searchAuth, {
-        sort: input.sort,
+        // Relevance score is meaningless for browse-all; default to newest
+        // first so a full-mailbox review reads chronologically.
+        sort:
+          input.sort ??
+          (typeof input.query === 'string' && input.query.trim().length > 0
+            ? undefined
+            : ['-primaryDate']),
         searchAfter: input.searchAfter,
         limit: input.limit,
         highlight: input.includeHighlights === true,

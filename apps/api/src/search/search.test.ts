@@ -136,12 +136,16 @@ describe('SearchService.execute', () => {
     expect(call.summary.items).toBeUndefined();
   });
 
-  it('requires query or builder', async () => {
+  it('treats an empty request as tenant-scoped browse-all, newest first', async () => {
     const adapter = makeAdapter();
     const { service } = makeService({}, adapter);
-    await expect(
-      service.execute(makeAuth([TenantRole.case_manager]), {}, fakeRequest()),
-    ).rejects.toThrow(BadRequestException);
+    const result = await service.execute(makeAuth([TenantRole.case_manager]), {}, fakeRequest());
+    expect(result.total).toBe(2);
+    // Tenant isolation is unconditional even for match-all browsing.
+    const filters = authFilters(adapter.lastBody);
+    expect(filters).toContainEqual({ term: { tenantId: TENANT_ID } });
+    // Browse-all defaults to newest first (score is meaningless here).
+    expect(JSON.stringify(adapter.lastBody)).toContain('dates.primary');
   });
 });
 

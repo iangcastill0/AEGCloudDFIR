@@ -99,6 +99,10 @@ export default function ReviewPage() {
           draft={draft}
           setDraft={setDraft}
           onSearch={() => runSearch(draft)}
+          onShowAll={() => {
+            setDraft(EMPTY_FILTERS);
+            runSearch(EMPTY_FILTERS);
+          }}
           facets={search.data?.facets ?? []}
           submitted={submitted}
           onFacetToggle={(field, value, checked) => {
@@ -150,6 +154,7 @@ export default function ReviewPage() {
 function SearchRail(props: {
   draft: Filters;
   setDraft: (f: Filters) => void;
+  onShowAll: () => void;
   onSearch: () => void;
   facets: Array<{ field: string; label: string; values: Array<{ value: string; count: number }> }>;
   submitted: Filters | null;
@@ -227,6 +232,9 @@ function SearchRail(props: {
         />
         <div className="button-row">
           <Button type="submit">Search</Button>
+          <Button variant="secondary" onClick={props.onShowAll}>
+            Show all
+          </Button>
           <Button
             variant="secondary"
             disabled={props.submitted === null || draft.queryText.trim().length === 0}
@@ -368,7 +376,7 @@ function ResultsPane(props: {
       <div className="review-results" style={{ padding: 'var(--space-4)' }}>
         <EmptyState
           title="Search to begin review"
-          description="Enter a query in the search rail. Results appear here with previews on the right."
+          description="Enter a query in the search rail, or choose “Show all” to browse the entire collected corpus (newest first)."
         />
       </div>
     );
