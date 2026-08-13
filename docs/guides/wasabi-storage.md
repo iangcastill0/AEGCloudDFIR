@@ -141,7 +141,7 @@ Replace both bucket names with yours.
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "ObjectOperations",
+      "Sid": "EvidenceObjects",
       "Effect": "Allow",
       "Action": [
         "s3:PutObject",
@@ -150,13 +150,10 @@ Replace both bucket names with yours.
         "s3:AbortMultipartUpload",
         "s3:ListMultipartUploadParts"
       ],
-      "Resource": [
-        "arn:aws:s3:::aeg-clouddfir-evidence/*",
-        "arn:aws:s3:::aeg-clouddfir-quarantine/*"
-      ]
+      "Resource": "arn:aws:s3:::aeg-clouddfir-evidence/*"
     },
     {
-      "Sid": "BucketOperations",
+      "Sid": "EvidenceBucket",
       "Effect": "Allow",
       "Action": [
         "s3:ListBucket",
@@ -164,16 +161,48 @@ Replace both bucket names with yours.
         "s3:GetBucketVersioning",
         "s3:GetBucketObjectLockConfiguration"
       ],
-      "Resource": [
-        "arn:aws:s3:::aeg-clouddfir-evidence",
-        "arn:aws:s3:::aeg-clouddfir-quarantine"
-      ]
+      "Resource": "arn:aws:s3:::aeg-clouddfir-evidence"
+    },
+    {
+      "Sid": "QuarantineObjects",
+      "Effect": "Allow",
+      "Action": ["s3:PutObject", "s3:GetObject", "s3:DeleteObject"],
+      "Resource": "arn:aws:s3:::aeg-clouddfir-quarantine/*"
+    },
+    {
+      "Sid": "QuarantineBucket",
+      "Effect": "Allow",
+      "Action": ["s3:ListBucket"],
+      "Resource": "arn:aws:s3:::aeg-clouddfir-quarantine"
     }
   ]
 }
 ```
 
-Why each of these is actually needed — none is padding:
+The two buckets get **different** grants, because they see different operations.
+
+Quarantine needs exactly four, each traceable to a call site:
+
+- `s3:PutObject` — the destination of the server-side copy in
+  `promoteToOriginal(..., { quarantine: true })`.
+- `s3:GetObject` — the post-copy size verification (HEAD), and `getStream` when a
+  quarantined blob is re-scanned.
+- `s3:DeleteObject` — `deletion-run` purges quarantined objects when a deletion
+  request covers them.
+- `s3:ListBucket` — same `NotFound`-vs-`AccessDenied` requirement as the evidence
+  bucket. `promoteToOriginal` HEADs the destination first to avoid overwriting,
+  and treats `NotFound` as "safe to copy"; anything else aborts the promotion.
+
+Quarantine deliberately does **not** get:
+
+- **Multipart actions.** Nothing is uploaded to quarantine from the client. Bytes
+  arrive by server-side `CopyObject` from the evidence bucket's staging key, so
+  multipart upload never touches this bucket. (See the 5 GiB note below.)
+- **`GetBucketVersioning` / `GetBucketObjectLockConfiguration`.**
+  `detectBucketProtection()` probes only the evidence bucket, because that is the
+  bucket whose protection posture the platform makes claims about.
+
+Why the evidence grants are needed — none is padding:
 
 - `PutObject` / `GetObject` / `DeleteObject` — write originals and derivatives,
   read them back for verification and presigned download, and clean up staged
@@ -196,6 +225,30 @@ Deliberately **not** granted: `DeleteBucket`, `PutBucketVersioning`,
 application never needs to weaken the protections it reports on. If you later
 want per-object retention set by the app rather than by bucket default, that
 needs `s3:PutObjectRetention` added consciously.
+
+### Quarantine bucket settings
+
+| Setting | Value | Why |
+| --- | --- | --- |
+| Object Lock | **off** | You must be able to purge malware. Locking it removes that option permanently. |
+| Versioning | off (optional) | Keys are content-addressed by SHA-256, so an "overwrite" is byte-identical and version history carries no information. |
+| CORS | **none** | `presignGet` always signs against the evidence bucket, so a quarantined object can never be handed to a browser. Adding CORS here would create reachability the application does not need. |
+| Public access | blocked (default) | — |
+
+### Known limit: objects over 5 GiB
+
+`promoteToOriginal` moves bytes from staging to their final key with a single
+`CopyObjectCommand`, and S3-compatible APIs cap single-part server-side copy at
+5 GiB. `CDFIR_UPLOAD_MAX_BYTES` defaults to 10 GiB, so an upload between 5 and
+10 GiB stages successfully (staging uses multipart) and then **fails at
+promotion**. There is no guard on this today.
+
+It affects both buckets, since promotion into quarantine uses the same copy. If
+this is fixed by switching to a multipart copy (`UploadPartCopy`), the
+destination buckets will additionally need `s3:AbortMultipartUpload` and
+`s3:ListMultipartUploadParts` — quarantine included. Until then, keep individual
+uploads under 5 GiB, or lower `CDFIR_UPLOAD_MAX_BYTES` to 5 GiB so the API
+rejects them up front rather than failing after the bytes have been transferred.
 
 ## Step 4 — CORS on the evidence bucket
 
