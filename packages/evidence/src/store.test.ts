@@ -1,6 +1,9 @@
 import { Readable } from 'node:stream';
 import {
+  AbortMultipartUploadCommand,
+  CompleteMultipartUploadCommand,
   CopyObjectCommand,
+  CreateMultipartUploadCommand,
   DeleteObjectCommand,
   GetBucketVersioningCommand,
   GetObjectCommand,
@@ -8,6 +11,7 @@ import {
   HeadObjectCommand,
   PutObjectCommand,
   S3Client,
+  UploadPartCopyCommand,
   type GetObjectCommandOutput,
 } from '@aws-sdk/client-s3';
 import { mockClient } from 'aws-sdk-client-mock';
@@ -452,5 +456,203 @@ describe('detectBucketProtection', () => {
     s3Mock.on(GetObjectLockConfigurationCommand).rejects(notFound('AccessDenied'));
     const store = makeStore();
     await expect(store.detectBucketProtection()).rejects.toThrow('AccessDenied');
+  });
+});
+
+/**
+ * S3-compatible APIs cap a single-part server-side copy at 5 GiB, while
+ * CDFIR_UPLOAD_MAX_BYTES defaults to 10 GiB. Before this, an upload in that
+ * range staged successfully — staging uses multipart — and then failed at
+ * promotion, after every byte had already been transferred.
+ */
+describe('promoteToOriginal — objects above the 5 GiB single-part copy limit', () => {
+  const srcKey = stagingKey(TENANT, STAGING_UUID);
+  const destKey = originalKey(TENANT, HELLO_SHA);
+  const GIB = 1024 ** 3;
+  const FIVE_GIB = 5 * GIB;
+
+  function arrangeHeads(size: number): void {
+    s3Mock
+      .on(HeadObjectCommand, { Bucket: EVIDENCE_BUCKET, Key: destKey })
+      .rejectsOnce(notFound())
+      .resolves({ ContentLength: size });
+    s3Mock
+      .on(HeadObjectCommand, { Bucket: EVIDENCE_BUCKET, Key: srcKey })
+      .resolves({ ContentLength: size });
+    s3Mock.on(DeleteObjectCommand).resolves({});
+  }
+
+  function arrangeMultipartOk(): void {
+    s3Mock.on(CreateMultipartUploadCommand).resolves({ UploadId: 'upload-1' });
+    let n = 0;
+    s3Mock.on(UploadPartCopyCommand).callsFake(() => {
+      n += 1;
+      return Promise.resolve({ CopyPartResult: { ETag: `"etag-${String(n)}"` } });
+    });
+    s3Mock.on(CompleteMultipartUploadCommand).resolves({});
+  }
+
+  it('still uses a single CopyObject exactly at the 5 GiB boundary', async () => {
+    arrangeHeads(FIVE_GIB);
+    s3Mock.on(CopyObjectCommand).resolves({});
+    await makeStore().promoteToOriginal(TENANT, srcKey, { sha256: HELLO_SHA, size: FIVE_GIB });
+
+    expect(s3Mock.commandCalls(CopyObjectCommand).length).toBe(1);
+    expect(s3Mock.commandCalls(CreateMultipartUploadCommand).length).toBe(0);
+  });
+
+  it('switches to multipart copy one byte over the boundary', async () => {
+    arrangeHeads(FIVE_GIB + 1);
+    arrangeMultipartOk();
+    await makeStore().promoteToOriginal(TENANT, srcKey, { sha256: HELLO_SHA, size: FIVE_GIB + 1 });
+
+    expect(s3Mock.commandCalls(CopyObjectCommand).length).toBe(0);
+    expect(s3Mock.commandCalls(CreateMultipartUploadCommand).length).toBe(1);
+    expect(s3Mock.commandCalls(CompleteMultipartUploadCommand).length).toBe(1);
+  });
+
+  it('copies a 10 GiB object as contiguous, gapless, inclusive ranges', async () => {
+    const size = 10 * GIB;
+    arrangeHeads(size);
+    arrangeMultipartOk();
+    await makeStore().promoteToOriginal(TENANT, srcKey, { sha256: HELLO_SHA, size });
+
+    const calls = s3Mock.commandCalls(UploadPartCopyCommand);
+    expect(calls.length).toBe(20); // 10 GiB at 512 MiB parts
+
+    let expectedStart = 0;
+    calls.forEach((c, i) => {
+      const input = c.args[0].input;
+      expect(input.PartNumber).toBe(i + 1);
+      expect(input.UploadId).toBe('upload-1');
+      expect(input.CopySource).toBe(`${EVIDENCE_BUCKET}/${srcKey}`);
+      const m = /^bytes=(\d+)-(\d+)$/.exec(String(input.CopySourceRange));
+      expect(m).not.toBeNull();
+      const start = Number(m![1]);
+      const end = Number(m![2]);
+      // No gaps and no overlaps: each part resumes exactly where the last ended.
+      expect(start).toBe(expectedStart);
+      expect(end).toBeGreaterThanOrEqual(start);
+      expectedStart = end + 1;
+    });
+    // The final range must land exactly on the last byte, not past it.
+    expect(expectedStart).toBe(size);
+  });
+
+  it('sends the parts to CompleteMultipartUpload in order with their ETags', async () => {
+    const size = 6 * GIB;
+    arrangeHeads(size);
+    arrangeMultipartOk();
+    await makeStore().promoteToOriginal(TENANT, srcKey, { sha256: HELLO_SHA, size });
+
+    const complete = s3Mock.commandCalls(CompleteMultipartUploadCommand)[0]!.args[0].input;
+    const parts = complete.MultipartUpload?.Parts ?? [];
+    expect(parts.length).toBe(12);
+    parts.forEach((part, i) => {
+      expect(part.PartNumber).toBe(i + 1);
+      expect(part.ETag).toBe(`"etag-${String(i + 1)}"`);
+    });
+  });
+
+  it('keeps the part count within the 10,000 limit by growing the part size', async () => {
+    // 8 TiB at a fixed 512 MiB part size would need 16,384 parts and be rejected.
+    const size = 8 * 1024 ** 4;
+    arrangeHeads(size);
+    arrangeMultipartOk();
+    await makeStore().promoteToOriginal(TENANT, srcKey, { sha256: HELLO_SHA, size });
+
+    const calls = s3Mock.commandCalls(UploadPartCopyCommand);
+    expect(calls.length).toBeLessThanOrEqual(10_000);
+    expect(calls.length).toBeGreaterThan(0);
+  });
+
+  it('aborts the upload when a part fails, so orphaned parts are not left billing', async () => {
+    const size = 6 * GIB;
+    arrangeHeads(size);
+    s3Mock.on(CreateMultipartUploadCommand).resolves({ UploadId: 'upload-1' });
+    s3Mock
+      .on(UploadPartCopyCommand)
+      .resolvesOnce({ CopyPartResult: { ETag: '"etag-1"' } })
+      .rejects(new Error('network blip'));
+    s3Mock.on(AbortMultipartUploadCommand).resolves({});
+
+    await expect(
+      makeStore().promoteToOriginal(TENANT, srcKey, { sha256: HELLO_SHA, size }),
+    ).rejects.toThrow('network blip');
+
+    const aborts = s3Mock.commandCalls(AbortMultipartUploadCommand);
+    expect(aborts.length).toBe(1);
+    expect(aborts[0]!.args[0].input).toMatchObject({
+      Bucket: EVIDENCE_BUCKET,
+      Key: destKey,
+      UploadId: 'upload-1',
+    });
+    expect(s3Mock.commandCalls(CompleteMultipartUploadCommand).length).toBe(0);
+  });
+
+  it('surfaces the original failure even if the abort also fails', async () => {
+    const size = 6 * GIB;
+    arrangeHeads(size);
+    s3Mock.on(CreateMultipartUploadCommand).resolves({ UploadId: 'upload-1' });
+    s3Mock.on(UploadPartCopyCommand).rejects(new Error('the real cause'));
+    s3Mock.on(AbortMultipartUploadCommand).rejects(new Error('abort also failed'));
+
+    // The abort error must not mask why the promotion failed.
+    await expect(
+      makeStore().promoteToOriginal(TENANT, srcKey, { sha256: HELLO_SHA, size }),
+    ).rejects.toThrow('the real cause');
+  });
+
+  it('rejects a part copy that returns no ETag rather than completing a corrupt object', async () => {
+    const size = 6 * GIB;
+    arrangeHeads(size);
+    s3Mock.on(CreateMultipartUploadCommand).resolves({ UploadId: 'upload-1' });
+    s3Mock.on(UploadPartCopyCommand).resolves({});
+    s3Mock.on(AbortMultipartUploadCommand).resolves({});
+
+    await expect(
+      makeStore().promoteToOriginal(TENANT, srcKey, { sha256: HELLO_SHA, size }),
+    ).rejects.toThrow(IntegrityError);
+    expect(s3Mock.commandCalls(CompleteMultipartUploadCommand).length).toBe(0);
+    expect(s3Mock.commandCalls(AbortMultipartUploadCommand).length).toBe(1);
+  });
+
+  it('fails closed when CreateMultipartUpload returns no UploadId', async () => {
+    const size = 6 * GIB;
+    arrangeHeads(size);
+    s3Mock.on(CreateMultipartUploadCommand).resolves({});
+
+    await expect(
+      makeStore().promoteToOriginal(TENANT, srcKey, { sha256: HELLO_SHA, size }),
+    ).rejects.toThrow(IntegrityError);
+    expect(s3Mock.commandCalls(UploadPartCopyCommand).length).toBe(0);
+  });
+
+  it('routes a large infected object into the quarantine bucket', async () => {
+    const size = 6 * GIB;
+    const qKey = quarantineKey(TENANT, HELLO_SHA);
+    s3Mock
+      .on(HeadObjectCommand, { Bucket: QUARANTINE_BUCKET, Key: qKey })
+      .rejectsOnce(notFound())
+      .resolves({ ContentLength: size });
+    s3Mock
+      .on(HeadObjectCommand, { Bucket: EVIDENCE_BUCKET, Key: srcKey })
+      .resolves({ ContentLength: size });
+    s3Mock.on(DeleteObjectCommand).resolves({});
+    arrangeMultipartOk();
+
+    const result = await makeStore().promoteToOriginal(
+      TENANT,
+      srcKey,
+      { sha256: HELLO_SHA, size },
+      { quarantine: true },
+    );
+
+    expect(result).toEqual({ objectKey: qKey, bucket: QUARANTINE_BUCKET });
+    const created = s3Mock.commandCalls(CreateMultipartUploadCommand)[0]!.args[0].input;
+    expect(created.Bucket).toBe(QUARANTINE_BUCKET);
+    // Source is still the evidence bucket's staging key.
+    const part = s3Mock.commandCalls(UploadPartCopyCommand)[0]!.args[0].input;
+    expect(part.CopySource).toBe(`${EVIDENCE_BUCKET}/${srcKey}`);
   });
 });

@@ -1,7 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import {
+  AbortMultipartUploadCommand,
+  CompleteMultipartUploadCommand,
   CopyObjectCommand,
+  CreateMultipartUploadCommand,
   DeleteObjectCommand,
   GetBucketVersioningCommand,
   GetObjectCommand,
@@ -9,6 +12,8 @@ import {
   ListObjectsV2Command,
   HeadObjectCommand,
   PutObjectCommand,
+  UploadPartCopyCommand,
+  type CompletedPart,
   type S3Client,
 } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
@@ -99,6 +104,18 @@ function isNotFoundError(err: unknown): boolean {
 function encodeCopySource(bucket: string, key: string): string {
   return `${bucket}/${key.split('/').map(encodeURIComponent).join('/')}`;
 }
+
+/**
+ * S3-compatible APIs cap a single-part server-side copy at 5 GiB. Anything
+ * larger must be copied part by part with UploadPartCopy, or promotion fails
+ * *after* the bytes have already been staged — the worst possible place for it,
+ * since all the transfer work is done by then.
+ */
+const MAX_SINGLE_PART_COPY_BYTES = 5 * 1024 ** 3;
+/** Part size for multipart copy. 512 MiB keeps a 10 GiB object at 20 parts. */
+const COPY_PART_BYTES = 512 * 1024 ** 2;
+/** S3 allows at most 10,000 parts; scale the part size up rather than exceed it. */
+const MAX_COPY_PARTS = 10_000;
 
 /**
  * Content-addressed, tenant-scoped object store for evidence originals,
@@ -211,13 +228,12 @@ export class EvidenceObjectStore {
       });
     }
 
-    await this.s3.send(
-      new CopyObjectCommand({
-        Bucket: destBucket,
-        Key: destKey,
-        CopySource: encodeCopySource(this.evidenceBucket, sourceStagingKey),
-        MetadataDirective: 'COPY',
-      }),
+    await this.copySized(
+      this.evidenceBucket,
+      sourceStagingKey,
+      destBucket,
+      destKey,
+      expected.size,
     );
 
     // Verify the copy landed with the right size before deleting staging.
@@ -427,6 +443,106 @@ export class EvidenceObjectStore {
     if (defaultRetentionDays !== undefined) result.defaultRetentionDays = defaultRetentionDays;
     if (defaultRetentionYears !== undefined) result.defaultRetentionYears = defaultRetentionYears;
     return result;
+  }
+
+  /**
+   * Server-side copy that works above the 5 GiB single-part ceiling.
+   *
+   * Under the limit this is a plain CopyObject. Over it, the object is copied
+   * range by range with UploadPartCopy. Either way no bytes travel through this
+   * process — the copy happens inside the storage provider.
+   *
+   * Parts are copied sequentially rather than in parallel: a failed multipart
+   * copy must be aborted to avoid leaving parts that are billed and invisible,
+   * and sequential execution keeps that cleanup path simple and deterministic.
+   * Copy throughput is the provider's, not ours, so the wall-clock cost is
+   * modest (a 10 GiB object is 20 parts).
+   */
+  private async copySized(
+    sourceBucket: string,
+    sourceKey: string,
+    destBucket: string,
+    destKey: string,
+    size: number,
+  ): Promise<void> {
+    const copySource = encodeCopySource(sourceBucket, sourceKey);
+
+    if (size <= MAX_SINGLE_PART_COPY_BYTES) {
+      await this.s3.send(
+        new CopyObjectCommand({
+          Bucket: destBucket,
+          Key: destKey,
+          CopySource: copySource,
+          MetadataDirective: 'COPY',
+        }),
+      );
+      return;
+    }
+
+    // Grow the part size for very large objects so the part count stays within
+    // the 10,000 limit instead of failing partway through.
+    const partSize = Math.max(COPY_PART_BYTES, Math.ceil(size / MAX_COPY_PARTS));
+
+    const created = await this.s3.send(
+      new CreateMultipartUploadCommand({ Bucket: destBucket, Key: destKey }),
+    );
+    const uploadId = created.UploadId;
+    if (uploadId === undefined || uploadId.length === 0) {
+      throw new IntegrityError('CreateMultipartUpload returned no UploadId', { key: destKey });
+    }
+
+    try {
+      const parts: CompletedPart[] = [];
+      let partNumber = 1;
+      for (let start = 0; start < size; start += partSize) {
+        // CopySourceRange is inclusive at both ends.
+        const end = Math.min(start + partSize, size) - 1;
+        const res = await this.s3.send(
+          new UploadPartCopyCommand({
+            Bucket: destBucket,
+            Key: destKey,
+            UploadId: uploadId,
+            PartNumber: partNumber,
+            CopySource: copySource,
+            CopySourceRange: `bytes=${String(start)}-${String(end)}`,
+          }),
+        );
+        const etag = res.CopyPartResult?.ETag;
+        if (etag === undefined || etag.length === 0) {
+          throw new IntegrityError('UploadPartCopy returned no ETag', {
+            key: destKey,
+            partNumber,
+          });
+        }
+        parts.push({ ETag: etag, PartNumber: partNumber });
+        partNumber += 1;
+      }
+
+      await this.s3.send(
+        new CompleteMultipartUploadCommand({
+          Bucket: destBucket,
+          Key: destKey,
+          UploadId: uploadId,
+          MultipartUpload: { Parts: parts },
+        }),
+      );
+    } catch (err) {
+      // Abandoned parts are billed and do not appear in a bucket listing, so
+      // aborting matters even though the promotion is already failing. Abort is
+      // best-effort: surfacing its error would mask the real cause.
+      try {
+        await this.s3.send(
+          new AbortMultipartUploadCommand({
+            Bucket: destBucket,
+            Key: destKey,
+            UploadId: uploadId,
+          }),
+        );
+      } catch {
+        // fall through and rethrow the original failure
+      }
+      throw err;
+    }
   }
 
   private async headOrNull(bucket: string, key: string): Promise<{ size: number } | null> {
