@@ -152,6 +152,15 @@ services:
       AUTHENTIK_REDIS__HOST: authentik-redis
       AUTHENTIK_BOOTSTRAP_PASSWORD: ${CDFIR_LOCAL_AUTHENTIK_ADMIN_PASSWORD:-admin-local-only}
       AUTHENTIK_BOOTSTRAP_EMAIL: ${CDFIR_AUTHENTIK_ADMIN_EMAIL:-akadmin@localhost}
+      # Consumed by the blueprint's !Env lookups. Derived from the API's public
+      # URL so the callback and launch URLs cannot drift from where the API
+      # actually lives. CDFIR_OIDC_CLIENT_SECRET_BOOTSTRAP MUST equal the API's
+      # CDFIR_OIDC_CLIENT_SECRET: the blueprint is authoritative for the
+      # provider, so a mismatch silently rotates the secret out from under the
+      # API and every login fails at the token exchange.
+      CDFIR_OIDC_CLIENT_SECRET_BOOTSTRAP: ${CDFIR_OIDC_CLIENT_SECRET:-changeme-local-only}
+      CDFIR_OIDC_REDIRECT_URI: ${CDFIR_API_PUBLIC_URL:-http://localhost:4000}/auth/callback
+      CDFIR_OIDC_LAUNCH_URL: ${CDFIR_API_PUBLIC_URL:-http://localhost:4000}/auth/login?redirectTo=%2F
     volumes:
       - ../authentik/blueprints:/blueprints/custom:ro
     ports:
@@ -181,6 +190,15 @@ services:
       # docs/guides/first-admin.md).
       AUTHENTIK_BOOTSTRAP_PASSWORD: ${CDFIR_LOCAL_AUTHENTIK_ADMIN_PASSWORD:-admin-local-only}
       AUTHENTIK_BOOTSTRAP_EMAIL: ${CDFIR_AUTHENTIK_ADMIN_EMAIL:-akadmin@localhost}
+      # Consumed by the blueprint's !Env lookups. Derived from the API's public
+      # URL so the callback and launch URLs cannot drift from where the API
+      # actually lives. CDFIR_OIDC_CLIENT_SECRET_BOOTSTRAP MUST equal the API's
+      # CDFIR_OIDC_CLIENT_SECRET: the blueprint is authoritative for the
+      # provider, so a mismatch silently rotates the secret out from under the
+      # API and every login fails at the token exchange.
+      CDFIR_OIDC_CLIENT_SECRET_BOOTSTRAP: ${CDFIR_OIDC_CLIENT_SECRET:-changeme-local-only}
+      CDFIR_OIDC_REDIRECT_URI: ${CDFIR_API_PUBLIC_URL:-http://localhost:4000}/auth/callback
+      CDFIR_OIDC_LAUNCH_URL: ${CDFIR_API_PUBLIC_URL:-http://localhost:4000}/auth/login?redirectTo=%2F
     volumes:
       - ../authentik/blueprints:/blueprints/custom:ro
     depends_on:
