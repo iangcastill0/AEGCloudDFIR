@@ -4,10 +4,19 @@
 # supplied passwords instead.
 set -eu
 
-psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<'SQL'
-CREATE ROLE cdfir_migrator LOGIN PASSWORD 'changeme-local-only'
+# Password comes from the environment so production never ships a literal.
+# Use an alphanumeric value (e.g. `openssl rand -hex 24`) to avoid SQL quoting
+# issues. Runs once, on first start of an empty data volume.
+: "${CDFIR_DB_PASSWORD:=changeme-local-only}"
+case "$CDFIR_DB_PASSWORD" in
+  *"'"*) echo "CDFIR_DB_PASSWORD must not contain a single quote" >&2; exit 1 ;;
+esac
+
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
+     -v pw="$CDFIR_DB_PASSWORD" <<'SQL'
+CREATE ROLE cdfir_migrator LOGIN PASSWORD :'pw'
   NOSUPERUSER NOCREATEDB NOCREATEROLE;
-CREATE ROLE cdfir LOGIN PASSWORD 'changeme-local-only'
+CREATE ROLE cdfir LOGIN PASSWORD :'pw'
   NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
 
 GRANT CONNECT ON DATABASE cdfir TO cdfir, cdfir_migrator;

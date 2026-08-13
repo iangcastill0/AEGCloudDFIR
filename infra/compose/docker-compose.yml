@@ -12,6 +12,10 @@ services:
       POSTGRES_DB: cdfir
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${CDFIR_LOCAL_PG_SUPER_PASSWORD:-changeme-local-only}
+      # Password for the cdfir/cdfir_migrator roles created by init/postgres.
+      # Only applied on FIRST start (empty data volume) — set it before the very
+      # first `up`, or change it later with ALTER ROLE.
+      CDFIR_DB_PASSWORD: ${CDFIR_DB_PASSWORD:-changeme-local-only}
     command: ['postgres', '-c', 'shared_preload_libraries=pg_stat_statements']
     volumes:
       - postgres-data:/var/lib/postgresql/data
@@ -177,8 +181,8 @@ services:
       dockerfile: infra/docker/api.Dockerfile
     env_file: ../../.env
     environment:
-      CDFIR_DATABASE_URL: postgresql://cdfir:changeme-local-only@postgres:5432/cdfir
-      CDFIR_DATABASE_MIGRATION_URL: postgresql://cdfir_migrator:changeme-local-only@postgres:5432/cdfir
+      CDFIR_DATABASE_URL: postgresql://cdfir:${CDFIR_DB_PASSWORD:-changeme-local-only}@postgres:5432/cdfir
+      CDFIR_DATABASE_MIGRATION_URL: postgresql://cdfir_migrator:${CDFIR_DB_PASSWORD:-changeme-local-only}@postgres:5432/cdfir
       CDFIR_REDIS_URL: redis://redis:6379
       CDFIR_OPENSEARCH_URL: http://opensearch:9200
       CDFIR_S3_ENDPOINT: http://minio:9000
@@ -204,7 +208,7 @@ services:
       dockerfile: infra/docker/worker.Dockerfile
     env_file: ../../.env
     environment:
-      CDFIR_DATABASE_URL: postgresql://cdfir:changeme-local-only@postgres:5432/cdfir
+      CDFIR_DATABASE_URL: postgresql://cdfir:${CDFIR_DB_PASSWORD:-changeme-local-only}@postgres:5432/cdfir
       CDFIR_REDIS_URL: redis://redis:6379
       CDFIR_OPENSEARCH_URL: http://opensearch:9200
       CDFIR_S3_ENDPOINT: http://minio:9000
