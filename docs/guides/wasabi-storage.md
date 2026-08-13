@@ -171,6 +171,68 @@ direct-to-bucket, so no `PUT` is needed here. Do not use `*` as the origin: thes
 presigned URLs grant read access to evidence, and a wildcard lets any page a
 reviewer has open read them if it obtains a URL.
 
+## Optional bucket features: what to enable and what to skip
+
+Neither of these is required — no code path reads either one, and
+`detectBucketProtection()` probes only versioning and Object Lock. Both can be
+turned on later, unlike Object Lock.
+
+### Bucket logging — recommended
+
+Worth enabling, because it closes a gap the application cannot close itself.
+
+Downloads are audited (`evidence.native_downloaded`, `export.downloaded`) at the
+moment a **presigned URL is issued**, not when bytes are fetched — the URL is
+deliberately never logged. So the audit chain cannot show whether the bytes were
+actually retrieved, how many times inside the TTL, or from where, because those
+requests go straight to Wasabi and never reach the API. Nor can it show access
+made with the S3 credentials directly, bypassing the application. Bucket logging
+is the only record of either.
+
+Treat the result as corroborating evidence, not as an audit control. Server
+access logs are best-effort and delayed, so they do not meet the standard the
+hash-chained audit log does and must not be used to support a completeness
+claim.
+
+Configuration:
+
+- **Log to a separate bucket.** Never into the evidence bucket: it pollutes the
+  content-addressed namespace, the log objects inherit Object Lock retention, and
+  log writes generate further log entries.
+- **No Compliance-mode Object Lock on the log bucket.** Logs grow without bound
+  and must remain prunable.
+- Add a lifecycle rule expiring logs after your retention window, and remember
+  the 90-day minimum storage duration applies to them too.
+
+### Object Replication — skip for now
+
+It protects against a different failure than versioning and Object Lock do:
+those prevent modification and deletion of evidence, replication protects against
+losing the whole bucket or region. The integrity property is the one that matters
+for custody, and it is already covered.
+
+It roughly doubles storage spend, the 90-day minimum applies to the replica, and
+replication is asynchronous — so it is not a consistency or verification
+mechanism. Because it can be enabled at any time, deferring costs only the window
+before you turn it on.
+
+If you do enable it later:
+
+- The **destination bucket needs its own Object Lock**, created with it enabled.
+  A replica in an unlocked bucket is a deletable copy of protected evidence.
+  Confirm against Wasabi's documentation whether retention metadata is carried
+  across replication and under what conditions.
+- **Write down which copy is authoritative.** The platform treats the
+  content-addressed object in the evidence bucket as the record. A replica is a
+  backup, not a second custody record; restoring from one is an event worth
+  documenting, because "which copy did this hash come from" is a fair question.
+
+A note on priorities: the likelier loss scenario is not Wasabi losing a region,
+it is PostgreSQL going away. Evidence bytes are content-addressed and immutable,
+but the custody chain, audit hash-chain, tags and review work live in Postgres.
+Losing it leaves verifiable bytes with no record of what they are or who touched
+them. Database backups deserve attention before bucket replication.
+
 ## Step 5 — The endpoint and region must match
 
 Wasabi's endpoint hostname encodes the region, and the region in the config is
