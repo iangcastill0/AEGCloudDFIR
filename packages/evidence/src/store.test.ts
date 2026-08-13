@@ -340,7 +340,7 @@ describe('presignGet', () => {
 });
 
 describe('detectBucketProtection', () => {
-  it('reports WORM only when versioning and Object Lock are both enabled', async () => {
+  it('reports WORM only when versioning, Object Lock AND a default retention rule exist', async () => {
     s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
     s3Mock.on(GetObjectLockConfigurationCommand).resolves({
       ObjectLockConfiguration: {
@@ -353,7 +353,70 @@ describe('detectBucketProtection', () => {
     expect(result.versioningEnabled).toBe(true);
     expect(result.objectLockEnabled).toBe(true);
     expect(result.objectLockMode).toBe('COMPLIANCE');
+    expect(result.defaultRetentionConfigured).toBe(true);
+    expect(result.defaultRetentionDays).toBe(30);
     expect(result.honest).toContain('WORM retention applies');
+    expect(result.honest).toContain('30 day(s)');
+  });
+
+  it('reports a years-based default retention period', async () => {
+    s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
+    s3Mock.on(GetObjectLockConfigurationCommand).resolves({
+      ObjectLockConfiguration: {
+        ObjectLockEnabled: 'Enabled',
+        Rule: { DefaultRetention: { Mode: 'GOVERNANCE', Years: 7 } },
+      },
+    });
+    const result = await makeStore().detectBucketProtection();
+    expect(result.defaultRetentionConfigured).toBe(true);
+    expect(result.defaultRetentionYears).toBe(7);
+    expect(result.honest).toContain('GOVERNANCE mode, 7 year(s)');
+    expect(result.honest).toContain('WORM retention applies');
+  });
+
+  // The regression this guards: Object Lock enabled on the bucket makes retention
+  // POSSIBLE, not automatic. Objects get retention from a bucket default or from
+  // a per-object value at upload — and this application never sets per-object
+  // retention. So with no default rule, nothing is retained, and claiming WORM
+  // would be false.
+  it('does NOT claim WORM when Object Lock is enabled but no default retention rule exists', async () => {
+    s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
+    s3Mock.on(GetObjectLockConfigurationCommand).resolves({
+      ObjectLockConfiguration: { ObjectLockEnabled: 'Enabled' },
+    });
+    const result = await makeStore().detectBucketProtection();
+    expect(result.objectLockEnabled).toBe(true);
+    expect(result.defaultRetentionConfigured).toBe(false);
+    expect(result.honest).not.toContain('WORM retention applies');
+    expect(result.honest).toContain('NO default retention rule');
+    expect(result.honest).toContain('no object is actually retained');
+  });
+
+  it('treats a retention rule with a mode but no period as unconfigured', async () => {
+    s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
+    s3Mock.on(GetObjectLockConfigurationCommand).resolves({
+      ObjectLockConfiguration: {
+        ObjectLockEnabled: 'Enabled',
+        Rule: { DefaultRetention: { Mode: 'GOVERNANCE' } },
+      },
+    });
+    const result = await makeStore().detectBucketProtection();
+    // A mode with neither Days nor Years retains nothing.
+    expect(result.defaultRetentionConfigured).toBe(false);
+    expect(result.honest).not.toContain('WORM retention applies');
+  });
+
+  it('treats a zero-length retention period as unconfigured', async () => {
+    s3Mock.on(GetBucketVersioningCommand).resolves({ Status: 'Enabled' });
+    s3Mock.on(GetObjectLockConfigurationCommand).resolves({
+      ObjectLockConfiguration: {
+        ObjectLockEnabled: 'Enabled',
+        Rule: { DefaultRetention: { Mode: 'COMPLIANCE', Days: 0 } },
+      },
+    });
+    const result = await makeStore().detectBucketProtection();
+    expect(result.defaultRetentionConfigured).toBe(false);
+    expect(result.honest).not.toContain('WORM retention applies');
   });
 
   it('never claims WORM when Object Lock is absent', async () => {
@@ -366,6 +429,7 @@ describe('detectBucketProtection', () => {
     expect(result.versioningEnabled).toBe(false);
     expect(result.objectLockEnabled).toBe(false);
     expect(result.objectLockMode).toBeUndefined();
+    expect(result.defaultRetentionConfigured).toBe(false);
     expect(result.honest).not.toContain('WORM retention applies');
     expect(result.honest).toContain('application logic and IAM policy only');
   });

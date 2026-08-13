@@ -61,7 +61,21 @@ export interface BucketProtection {
   versioningEnabled: boolean;
   objectLockEnabled: boolean;
   objectLockMode?: string;
-  /** Honest, human-readable statement — never claims WORM unless Object Lock is actually on. */
+  /**
+   * Whether the bucket carries a DEFAULT retention rule.
+   *
+   * This is load-bearing, not informational. Enabling Object Lock on a bucket
+   * only makes retention *possible*; it locks nothing by itself. Objects acquire
+   * retention either from a bucket default or from a per-object retention set at
+   * upload time — and this application never sets per-object retention (it holds
+   * no s3:PutObjectRetention grant, deliberately). So on a bucket with Object
+   * Lock enabled and no default rule, not one object is actually retained.
+   */
+  defaultRetentionConfigured: boolean;
+  /** Days or years from the bucket default rule, when one exists. */
+  defaultRetentionDays?: number;
+  defaultRetentionYears?: number;
+  /** Honest, human-readable statement — never claims WORM unless objects are genuinely retained. */
   honest: string;
 }
 
@@ -339,22 +353,43 @@ export class EvidenceObjectStore {
 
     let objectLockEnabled = false;
     let objectLockMode: string | undefined;
+    let defaultRetentionDays: number | undefined;
+    let defaultRetentionYears: number | undefined;
     try {
       const lock = await this.s3.send(
         new GetObjectLockConfigurationCommand({ Bucket: this.evidenceBucket }),
       );
       objectLockEnabled = lock.ObjectLockConfiguration?.ObjectLockEnabled === 'Enabled';
-      objectLockMode = lock.ObjectLockConfiguration?.Rule?.DefaultRetention?.Mode;
+      const rule = lock.ObjectLockConfiguration?.Rule?.DefaultRetention;
+      objectLockMode = rule?.Mode;
+      defaultRetentionDays = rule?.Days;
+      defaultRetentionYears = rule?.Years;
     } catch (err) {
       if (!isNotFoundError(err)) throw err;
       // No Object Lock configuration: leave objectLockEnabled = false.
     }
 
+    // A default rule needs a mode AND a period. A mode with neither Days nor
+    // Years retains nothing, so treat it as unconfigured rather than assuming a
+    // period the bucket never stated.
+    const defaultRetentionConfigured =
+      objectLockMode !== undefined &&
+      ((defaultRetentionDays ?? 0) > 0 || (defaultRetentionYears ?? 0) > 0);
+
+    const period =
+      defaultRetentionYears !== undefined && defaultRetentionYears > 0
+        ? `${defaultRetentionYears} year(s)`
+        : defaultRetentionDays !== undefined && defaultRetentionDays > 0
+          ? `${defaultRetentionDays} day(s)`
+          : 'unspecified period';
+
     let honest: string;
-    if (objectLockEnabled && versioningEnabled) {
-      honest = `Bucket versioning and Object Lock are enabled${
-        objectLockMode !== undefined ? ` (${objectLockMode} mode)` : ''
-      } (WORM retention applies).`;
+    if (objectLockEnabled && versioningEnabled && defaultRetentionConfigured) {
+      honest = `Bucket versioning and Object Lock are enabled with a default retention rule (${String(objectLockMode)} mode, ${period}) (WORM retention applies).`;
+    } else if (objectLockEnabled && versioningEnabled) {
+      // The trap this method exists to catch: Object Lock on, nothing retained.
+      honest =
+        'Bucket versioning and Object Lock are enabled but NO default retention rule is configured, and this application does not set per-object retention: no object is actually retained (no WORM guarantee). Configure a bucket default retention rule.';
     } else if (objectLockEnabled) {
       honest =
         'Object Lock reports enabled but bucket versioning does not: configuration is inconsistent; do not rely on WORM retention until verified.';
@@ -366,8 +401,15 @@ export class EvidenceObjectStore {
         'Neither bucket versioning nor Object Lock is enabled: originals are protected by application logic and IAM policy only (no WORM guarantee).';
     }
 
-    const result: BucketProtection = { versioningEnabled, objectLockEnabled, honest };
+    const result: BucketProtection = {
+      versioningEnabled,
+      objectLockEnabled,
+      defaultRetentionConfigured,
+      honest,
+    };
     if (objectLockMode !== undefined) result.objectLockMode = objectLockMode;
+    if (defaultRetentionDays !== undefined) result.defaultRetentionDays = defaultRetentionDays;
+    if (defaultRetentionYears !== undefined) result.defaultRetentionYears = defaultRetentionYears;
     return result;
   }
 

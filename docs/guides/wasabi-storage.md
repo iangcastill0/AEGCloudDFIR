@@ -59,6 +59,27 @@ For the **evidence** bucket:
   originals and relies on versioning as its recovery floor.
 - **Object Lock: enable now** if you want WORM (see above). Enabling it forces
   versioning on.
+- **Default Object Retention: enable it, with a real period.** This is not
+  optional decoration. Enabling Object Lock only makes retention *possible* —
+  objects acquire it from a bucket default or from a per-object value set at
+  upload, and this application never sets per-object retention (it holds no
+  `s3:PutObjectRetention` grant, deliberately). With Object Lock on and no
+  default rule, **not one object is retained** and you have the cost and rigidity
+  of Object Lock with none of the protection. The platform detects exactly this
+  case and says so rather than claiming WORM.
+
+Choosing the default retention period:
+
+- The rule applies to **every** object written to the bucket — not just
+  originals, but derivatives, previews, extracted text, exports and productions,
+  all of which are regenerable from the originals. Under Compliance mode they are
+  all undeletable and billable for the full period.
+- Changing the default later affects **newly uploaded objects only**; existing
+  objects keep the retention they were given.
+- So if you do not yet have a written retention obligation, set something modest
+  now (30 days is reasonable while testing) in **Governance** mode, and raise it
+  deliberately before the first real matter. Starting at 7 years on Compliance
+  mode locks every test artefact you create for 7 years.
 
 For the **quarantine** bucket: versioning is optional and Object Lock is a
 liability — you may legitimately need to purge malware. Leave Object Lock off.
