@@ -53,6 +53,30 @@ function errName(err: unknown): string {
   return String(err);
 }
 
+/**
+ * Name plus message, because the name alone loses the part that identifies the
+ * fix. A real example: every check reported "AccessDenied", while the message
+ * said "... with an explicit deny" — which means an explicit Deny statement is
+ * in force and adding an Allow policy will change nothing, since Deny always
+ * wins. Truncated because SDK messages can be long, but the leading text is
+ * where the cause lives.
+ */
+function errDetail(err: unknown): string {
+  const name = errName(err);
+  const msg = err instanceof Error ? err.message : '';
+  if (msg.length === 0 || msg === name) return name;
+  const trimmed = msg.length > 240 ? `${msg.slice(0, 240)}…` : msg;
+  return `${name}: ${trimmed}`;
+}
+
+/** Explicit Deny cannot be fixed by granting an Allow — call that out. */
+function denyHint(err: unknown): string {
+  const msg = err instanceof Error ? err.message : '';
+  return /explicit deny/i.test(msg)
+    ? ' NOTE: an EXPLICIT DENY is in force — an IAM Deny beats any Allow, so adding permissions will not help. Find and remove the Deny (user policies, group policies, or a bucket policy) first.'
+    : '';
+}
+
 async function main(): Promise<number> {
   const write = process.argv.includes('--write');
 
@@ -114,7 +138,7 @@ async function main(): Promise<number> {
       record(
         `${label} bucket reachable (ListBucket)`,
         'fail',
-        `${bucket}: ${errName(err)} — check the bucket name, region, and that the policy grants s3:ListBucket on the bucket ARN (not just /*)`,
+        `${bucket}: ${errDetail(err)} — check the bucket name, region, and that the policy grants s3:ListBucket on the bucket ARN (not just /*).${denyHint(err)}`,
       );
     }
   }
@@ -131,7 +155,7 @@ async function main(): Promise<number> {
     record(
       'multipart uploads listable',
       'fail',
-      `${errName(err)} — grant s3:ListBucketMultipartUploads, or a failed multi-GB upload leaves billable parts you cannot clean up`,
+      `${errDetail(err)} — grant s3:ListBucketMultipartUploads, or a failed multi-GB upload leaves billable parts you cannot clean up.${denyHint(err)}`,
     );
   }
 
@@ -151,7 +175,7 @@ async function main(): Promise<number> {
       isNotFound ? 'pass' : 'fail',
       isNotFound
         ? 'absent keys answer NotFound, so the store can distinguish "not yet uploaded" from an error'
-        : `absent key answered ${name}, not NotFound — the store rethrows anything that is not NotFound, so stage/verify/promote will break on every new object. This is the s3:ListBucket grant.`,
+        : `absent key answered ${errDetail(err)}, not NotFound — the store rethrows anything that is not NotFound, so stage/verify/promote will break on every new object. This is the s3:ListBucket grant.${denyHint(err)}`,
     );
   }
 
@@ -177,7 +201,7 @@ async function main(): Promise<number> {
     record(
       'protection posture',
       'fail',
-      `${errName(err)} — grant s3:GetBucketVersioning and s3:GetBucketObjectLockConfiguration, or the platform cannot determine what to claim`,
+      `${errDetail(err)} — grant s3:GetBucketVersioning and s3:GetBucketObjectLockConfiguration, or the platform cannot determine what to claim.${denyHint(err)}`,
     );
   }
 
@@ -223,7 +247,7 @@ async function main(): Promise<number> {
         );
       }
     } catch (err) {
-      record('byte round trip', 'fail', `${errName(err)}`);
+      record('byte round trip', 'fail', `${errDetail(err)}${denyHint(err)}`);
     } finally {
       if (wrote) {
         try {
@@ -233,7 +257,7 @@ async function main(): Promise<number> {
           record(
             'cleanup',
             'warn',
-            `could not delete ${key}: ${errName(err)}. Expected if a default Object Lock retention applies — the object is immutable until retention expires. It is 4 KiB; leave it.`,
+            `could not delete ${key}: ${errDetail(err)}. Expected if a default Object Lock retention applies — the object is immutable until retention expires. It is 4 KiB; leave it.`,
           );
         }
       }
