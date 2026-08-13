@@ -250,6 +250,72 @@ destination buckets will additionally need `s3:AbortMultipartUpload` and
 uploads under 5 GiB, or lower `CDFIR_UPLOAD_MAX_BYTES` to 5 GiB so the API
 rejects them up front rather than failing after the bytes have been transferred.
 
+## Step 4 — CORS: nothing to do
+
+**Skip this. Wasabi does not support the S3 CORS configuration API**, so there is
+nothing to paste — not XML, not JSON. Attempting it returns an invalid-format
+error. Wasabi instead returns a fixed set of CORS headers on every response.
+
+Verified against a live bucket, including a real presigned URL (headers are
+returned even on a 404):
+
+```
+Access-Control-Allow-Origin: *
+Access-Control-Allow-Methods: GET, HEAD, POST, PUT, DELETE, MOVE, OPTIONS
+Access-Control-Allow-Headers: *
+Access-Control-Expose-Headers: Date, Etag, Content-Length, Accept-Ranges, Content-Range, ...
+Access-Control-Max-Age: 86400
+```
+
+`Etag` and `Content-Length` are already exposed, so browser previews and
+downloads work with no configuration.
+
+### You cannot restrict the origin, and why that is tolerable
+
+`Access-Control-Allow-Origin: *` is broader than you would choose, and on Wasabi
+it cannot be narrowed — the headers are not configurable. Do not plan around
+tightening it.
+
+The exposure is narrower than `*` suggests. A presigned URL is a **bearer
+credential**: anyone holding it can fetch the object with curl, no browser and no
+CORS involved. CORS governs only whether JavaScript on another origin may read
+the response, so `*` does not widen who can reach evidence — it means a page on
+another origin could read a presigned URL's contents *if it already had the URL*,
+and holding the URL was already sufficient.
+
+The controls that actually bound this, all already in place:
+
+- `CDFIR_S3_PRESIGN_TTL_SECONDS` (default 300) — the real limit. Keep it short.
+- Presigned URLs are never logged or audited (enforced in `evidence.service.ts`).
+- A URL is only minted after an authenticated, role-checked, audited API call.
+
+True origin restriction would require fronting the bucket with a CDN or proxy you
+control. That is a deliberate architectural choice, not a bucket setting.
+
+### Quarantine bucket settings
+
+| Setting | Value | Why |
+| --- | --- | --- |
+| Object Lock | **off** | You must be able to purge malware. Locking it removes that option permanently. |
+| Versioning | off (optional) | Keys are content-addressed by SHA-256, so an "overwrite" is byte-identical and version history carries no information. |
+| CORS | **none** | `presignGet` always signs against the evidence bucket, so a quarantined object can never be handed to a browser. Adding CORS here would create reachability the application does not need. |
+| Public access | blocked (default) | — |
+
+### Known limit: objects over 5 GiB
+
+`promoteToOriginal` moves bytes from staging to their final key with a single
+`CopyObjectCommand`, and S3-compatible APIs cap single-part server-side copy at
+5 GiB. `CDFIR_UPLOAD_MAX_BYTES` defaults to 10 GiB, so an upload between 5 and
+10 GiB stages successfully (staging uses multipart) and then **fails at
+promotion**. There is no guard on this today.
+
+It affects both buckets, since promotion into quarantine uses the same copy. If
+this is fixed by switching to a multipart copy (`UploadPartCopy`), the
+destination buckets will additionally need `s3:AbortMultipartUpload` and
+`s3:ListMultipartUploadParts` — quarantine included. Until then, keep individual
+uploads under 5 GiB, or lower `CDFIR_UPLOAD_MAX_BYTES` to 5 GiB so the API
+rejects them up front rather than failing after the bytes have been transferred.
+
 ## Step 4 — CORS on the evidence bucket
 
 Previews and downloads are served to the browser via presigned URLs that go
