@@ -67,30 +67,51 @@ wildcard, so the three records below are enough — but deleting the wildcard is
 cleaner, because otherwise any typo'd hostname silently resolves to a parking
 page instead of failing loudly.
 
-**Add three A records** (Type `A`, TTL 600):
+**Add these A records** (Type `A`, TTL 600) — all answer `38.248.7.156`:
 
-| Host   | Answer         |
-| ------ | -------------- |
-| `app`  | `38.248.7.156` |
-| `api`  | `38.248.7.156` |
-| `auth` | `38.248.7.156` |
+| Host    | Serves                                                     |
+| ------- | ---------------------------------------------------------- |
+| `app`   | the review application (Next.js)                           |
+| `api`   | the API, including the OIDC login/callback endpoints        |
+| `auth`  | Authentik — the OIDC issuer; this hostname is baked into    |
+|         | `CDFIR_OIDC_ISSUER` and cannot be renamed without reissuing |
+| `admin` | memorable alias that redirects to Authentik's admin console |
+| `@`     | the apex — the sign-in front door (see below)               |
+| `www`   | same as the apex                                            |
 
-Leave the apex (`aegclouddfir.com`) on parking for now if you want a marketing
-page there later. If you would rather serve the app itself at the bare domain,
-point the apex `A` record at `38.248.7.156` too and use `aegclouddfir.com` in
-place of `app.aegclouddfir.com` everywhere below — the cookie rules still work,
-because apex and `api.` share the same registrable domain.
+**Apex and `www` are the front door.** They 301 into
+`https://api.aegclouddfir.com/auth/login`, which starts the OIDC flow at
+Authentik; the callback drops the authenticated user on
+`https://app.aegclouddfir.com`. So `aegclouddfir.com` means "sign me in", while
+`app.aegclouddfir.com` remains the real application origin and is what you
+bookmark or deep-link to. Visiting the app while signed out lands in the same
+flow (the client redirects on a 401 from `/api/v1/me`) and returns you to the
+path you asked for, so nothing is lost by entering either way.
+
+**`admin` is a redirect, not a second Authentik origin.** It sends you to
+`https://auth.aegclouddfir.com/if/admin/`. Authentik's session cookies are
+scoped to the host that set them, so serving one Authentik instance under two
+hostnames would split sessions and strand you mid-login. The redirect gives a
+memorable URL while Authentik keeps enforcing its own admin authentication —
+there is no extra nginx-level password, and adding one would only break the
+OAuth flows that share this host. Restrict who can reach the admin interface
+inside Authentik (admin group membership plus an MFA stage on the
+`default-authentication-flow`), not in nginx.
 
 **Verify propagation before continuing** (Porkbun is usually quick, but TTLs on
 the old parking records can delay it):
 
 ```bash
-dig +short app.aegclouddfir.com api.aegclouddfir.com auth.aegclouddfir.com
-# each must return exactly 38.248.7.156 — NOT 207.207.210.x and NOT uixie.porkbun.com
+dig +short app.aegclouddfir.com api.aegclouddfir.com auth.aegclouddfir.com \
+            admin.aegclouddfir.com aegclouddfir.com www.aegclouddfir.com
+# every answer must be exactly 38.248.7.156
+# — NOT 207.207.210.x and NOT uixie.porkbun.com
 ```
 
 If you still see the parking host, wait for the old TTL to expire and re-check;
-do not proceed to TLS until all three answer with the server IP.
+do not proceed to TLS until every name answers with the server IP. Certbot
+validates over HTTP-01, so a name that still points at parking makes issuance
+fail for the whole request.
 
 ## 2. Environment configuration
 
@@ -227,23 +248,39 @@ server {
 Enable it and obtain certificates. Run these on the server (each needs sudo):
 
 ```bash
-sudo ln -s /etc/nginx/sites-available/aegclouddfir /etc/nginx/sites-enabled/
+sudo cp infra/nginx/aegclouddfir.conf      /etc/nginx/sites-available/aegclouddfir
+sudo cp infra/nginx/aegclouddfir-apex.conf /etc/nginx/sites-available/aegclouddfir-apex
+sudo ln -sf /etc/nginx/sites-available/aegclouddfir      /etc/nginx/sites-enabled/
+sudo ln -sf /etc/nginx/sites-available/aegclouddfir-apex /etc/nginx/sites-enabled/
 sudo nginx -t                       # must pass before reloading
 sudo systemctl reload nginx
 
-sudo certbot --nginx \
+sudo certbot --nginx --expand \
   -d app.aegclouddfir.com \
   -d api.aegclouddfir.com \
-  -d auth.aegclouddfir.com
+  -d auth.aegclouddfir.com \
+  -d admin.aegclouddfir.com \
+  -d aegclouddfir.com \
+  -d www.aegclouddfir.com
 ```
 
 certbot inserts the `ssl_certificate` lines and a renewal timer. It needs the
 DNS from step 1 already pointing here, and port 80 reachable from the internet.
+`--expand` is what lets you add names to the existing certificate instead of
+being told one already covers a subset; all six names end up on one certificate
+under `/etc/letsencrypt/live/app.aegclouddfir.com/`.
 
-> The `listen 443 ssl` blocks above have no certificate paths yet — that is
-> intentional. Run `certbot --nginx` and it fills them in. If you prefer to
-> reload nginx before certbot runs, comment out the three 443 blocks first,
-> otherwise `nginx -t` fails on the missing certificate.
+> **Do not re-copy `aegclouddfir.conf` after certbot has run.** certbot edits
+> the *installed* file in place to add the certificate paths, so overwriting it
+> with the repo template silently removes TLS. The repo copy is the pre-certbot
+> starting point only. `aegclouddfir-apex.conf` carries its own hand-written 443
+> blocks pointing at the same certificate, so it is safe to re-copy — but verify
+> with `diff` first in case certbot touched it:
+>
+> ```bash
+> diff -u /etc/nginx/sites-available/aegclouddfir-apex \
+>         infra/nginx/aegclouddfir-apex.conf
+> ```
 
 ## 5. Update the OIDC redirect URI in Authentik
 
@@ -333,9 +370,18 @@ curl -sI "https://api.aegclouddfir.com/auth/login?redirectTo=/" | grep -i locati
 
 # 5. The BROWSER bundle points at the right API (catches a stale web image)
 curl -s https://app.aegclouddfir.com/collections/new | grep -o 'api\.example\.com' | head -1
+
+# 6. Front door: apex and www start the login flow (301 -> api/auth/login)
+for h in aegclouddfir.com www.aegclouddfir.com; do
+  curl -sI "https://$h/" | grep -i '^location'
+done
+
+# 7. admin alias reaches the Authentik admin console (301 -> auth/if/admin/)
+curl -sI https://admin.aegclouddfir.com/ | grep -i '^location'
 ```
 
-Then log in through the UI and confirm `/api/v1/me` returns your identity.
+Then open `https://aegclouddfir.com`, sign in, and confirm you land on
+`app.aegclouddfir.com` with `/api/v1/me` returning your identity.
 
 ## Troubleshooting
 
