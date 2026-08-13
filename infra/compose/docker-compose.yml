@@ -217,7 +217,12 @@ services:
       CDFIR_DATABASE_MIGRATION_URL: postgresql://cdfir_migrator:${CDFIR_DB_PASSWORD:-changeme-local-only}@postgres:5432/cdfir
       CDFIR_REDIS_URL: redis://redis:6379
       CDFIR_OPENSEARCH_URL: http://opensearch:9200
-      CDFIR_S3_ENDPOINT: http://minio:9000
+      # Defaults to the bundled MinIO for local development, but MUST stay
+      # overridable: unlike the datastores below, object storage is genuinely
+      # external in production (Wasabi). Hardcoding it silently overrode .env and
+      # sent Wasabi credentials to the MinIO container, which answers
+      # InvalidAccessKeyId — a confusing error for a config precedence problem.
+      CDFIR_S3_ENDPOINT: ${CDFIR_S3_ENDPOINT:-http://minio:9000}
       CDFIR_CLAMAV_HOST: clamav
       CDFIR_TIKA_URL: http://tika:9998
     ports:
@@ -243,7 +248,12 @@ services:
       CDFIR_DATABASE_URL: postgresql://cdfir:${CDFIR_DB_PASSWORD:-changeme-local-only}@postgres:5432/cdfir
       CDFIR_REDIS_URL: redis://redis:6379
       CDFIR_OPENSEARCH_URL: http://opensearch:9200
-      CDFIR_S3_ENDPOINT: http://minio:9000
+      # Defaults to the bundled MinIO for local development, but MUST stay
+      # overridable: unlike the datastores below, object storage is genuinely
+      # external in production (Wasabi). Hardcoding it silently overrode .env and
+      # sent Wasabi credentials to the MinIO container, which answers
+      # InvalidAccessKeyId — a confusing error for a config precedence problem.
+      CDFIR_S3_ENDPOINT: ${CDFIR_S3_ENDPOINT:-http://minio:9000}
       CDFIR_CLAMAV_HOST: clamav
       CDFIR_TIKA_URL: http://tika:9998
     depends_on:
