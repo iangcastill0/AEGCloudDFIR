@@ -4,6 +4,8 @@ export type { TenantScopedTx } from './client.js';
 export { withPlatformContext } from './platform.js';
 export type { PlatformScopedTx } from './platform.js';
 export { bootstrapOrgAdmin, BootstrapError, DEFAULT_BOOTSTRAP_ROLES } from './bootstrap.js';
+export { runBackup, backupObjectKey, BackupError } from './backup.js';
+export type { BackupManifest, BackupResult, RunBackupOptions } from './backup.js';
 export type { BootstrapOrgAdminInput, BootstrapOrgAdminResult } from './bootstrap.js';
 export {
   canonicalJson,

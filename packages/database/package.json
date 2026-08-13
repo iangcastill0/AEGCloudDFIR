@@ -20,16 +20,21 @@
     "migrate:deploy": "prisma migrate deploy",
     "migrate:status": "prisma migrate status",
     "test:integration": "vitest run src/rls.integration.test.ts",
-    "bootstrap:admin": "node dist/bootstrap-cli.js"
+    "bootstrap:admin": "node dist/bootstrap-cli.js",
+    "backup": "node dist/backup-cli.js",
+    "restore": "node dist/restore-cli.js"
   },
   "dependencies": {
-    "@prisma/client": "6.19.3"
+    "@prisma/client": "6.19.3",
+    "@aws-sdk/client-s3": "3.1105.0",
+    "@aws-sdk/lib-storage": "3.1105.0"
   },
   "devDependencies": {
     "@types/node": "26.1.2",
     "eslint": "^10.8.0",
     "prisma": "6.19.3",
     "typescript": "~5.9.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "aws-sdk-client-mock": "4.1.0"
   }
 }
