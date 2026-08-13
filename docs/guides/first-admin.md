@@ -18,6 +18,33 @@ guessed outside Authentik. Only a real sign-in can create the app's user row.
 
 So the sequence is: create the IdP account → sign in once → grant roles.
 
+## 0. If you cannot log into Authentik at all
+
+`AUTHENTIK_BOOTSTRAP_PASSWORD` and `AUTHENTIK_BOOTSTRAP_EMAIL` are read by the
+**worker**, which runs the migrations that create `akadmin`. They also apply only
+on the first start against an empty database. If the worker started without them,
+`akadmin` exists with no usable password and nobody can reach the admin console.
+
+Check:
+
+```bash
+docker compose -f infra/compose/docker-compose.yml exec authentik-server \
+  ak shell -c 'from authentik.core.models import User; u=User.objects.get(username="akadmin"); print(u.email, u.has_usable_password())'
+```
+
+`False` means there is no password to log in with. Adding the environment
+variables now will not help — bootstrap has already run. Mint a one-time
+recovery link instead:
+
+```bash
+docker compose -f infra/compose/docker-compose.yml exec authentik-worker \
+  ak create_recovery_key 1 akadmin
+```
+
+Open the printed URL in a browser and set a password. The link is valid for one
+day and is itself a credential — treat it like a password: do not paste it into
+a ticket, a chat, or anywhere it will be logged.
+
 ## 1. Create the Authentik account
 
 In the Authentik admin console (`https://admin.aegclouddfir.com`, or

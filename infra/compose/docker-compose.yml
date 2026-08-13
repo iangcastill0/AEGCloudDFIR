@@ -151,7 +151,7 @@ services:
       AUTHENTIK_POSTGRESQL__PASSWORD: ${CDFIR_LOCAL_AUTHENTIK_PG_PASSWORD:-changeme-local-only}
       AUTHENTIK_REDIS__HOST: authentik-redis
       AUTHENTIK_BOOTSTRAP_PASSWORD: ${CDFIR_LOCAL_AUTHENTIK_ADMIN_PASSWORD:-admin-local-only}
-      AUTHENTIK_BOOTSTRAP_EMAIL: akadmin@localhost
+      AUTHENTIK_BOOTSTRAP_EMAIL: ${CDFIR_AUTHENTIK_ADMIN_EMAIL:-akadmin@localhost}
     volumes:
       - ../authentik/blueprints:/blueprints/custom:ro
     ports:
@@ -172,6 +172,15 @@ services:
       AUTHENTIK_POSTGRESQL__NAME: authentik
       AUTHENTIK_POSTGRESQL__PASSWORD: ${CDFIR_LOCAL_AUTHENTIK_PG_PASSWORD:-changeme-local-only}
       AUTHENTIK_REDIS__HOST: authentik-redis
+      # These MUST be on the worker, not only the server: the worker runs the
+      # migrations that create akadmin, and the bootstrap values are read there.
+      # With them on the server alone, akadmin is created with no usable password
+      # and the default root@example.com address, locking everyone out of the
+      # admin console. They apply only on first start against an empty database —
+      # an existing deployment needs `ak create_recovery_key` instead (see
+      # docs/guides/first-admin.md).
+      AUTHENTIK_BOOTSTRAP_PASSWORD: ${CDFIR_LOCAL_AUTHENTIK_ADMIN_PASSWORD:-admin-local-only}
+      AUTHENTIK_BOOTSTRAP_EMAIL: ${CDFIR_AUTHENTIK_ADMIN_EMAIL:-akadmin@localhost}
     volumes:
       - ../authentik/blueprints:/blueprints/custom:ro
     depends_on:
