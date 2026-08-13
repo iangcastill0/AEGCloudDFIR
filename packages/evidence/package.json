@@ -15,7 +15,8 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src",
-    "test": "vitest run"
+    "test": "vitest run",
+    "storage:check": "node dist/storage-check-cli.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1105.0",
