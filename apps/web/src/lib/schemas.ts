@@ -113,6 +113,7 @@ export const exceptionListResponse = paginated(exceptionEntry);
 // --- Search / evidence ---
 
 export const searchHit = evidenceSummary.extend({
+  kind: z.string(),
   highlights: z.array(z.string()).default([]),
   familyRole: z.enum(['none', 'parent', 'child']).default('none'),
 });
@@ -123,6 +124,32 @@ export const searchFacet = z.object({
   label: z.string().default(''),
   values: z.array(z.object({ value: z.string(), count: z.number() })),
 });
+
+/**
+ * Raw shape returned by POST /api/v1/search (the search package's hits are
+ * passed through by the API); adapted to `searchResponse` in hooks.ts.
+ */
+export const rawSearchResponse = z.object({
+  total: z.number().int().default(0),
+  items: z
+    .array(
+      z.object({
+        id: z.string(),
+        score: z.number().nullable().optional(),
+        source: z.record(z.string(), z.unknown()),
+        highlights: z.record(z.string(), z.array(z.string())).optional(),
+      }),
+    )
+    .default([]),
+  searchAfter: z
+    .array(z.union([z.string(), z.number()]))
+    .nullable()
+    .optional(),
+  facets: z
+    .record(z.string(), z.array(z.object({ value: z.string(), count: z.number() })))
+    .optional(),
+});
+export type RawSearchResponse = z.infer<typeof rawSearchResponse>;
 
 export const searchResponse = z.object({
   items: z.array(searchHit),

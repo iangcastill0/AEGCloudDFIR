@@ -10,6 +10,7 @@ import {
   caseResponse,
 } from '@aeg-clouddfir/contracts';
 import type { CreateCollectionRequest } from '@aeg-clouddfir/contracts';
+import { z } from 'zod';
 import { apiFetch } from './api';
 import {
   auditListResponse,
@@ -27,7 +28,6 @@ import {
   custodianListResponse,
   evidenceDetail,
   exceptionListResponse,
-  explainResponse,
   exportListResponse,
   logoutResponse,
   meResponse,
@@ -35,7 +35,9 @@ import {
   previewResponse,
   productionDetail,
   productionListResponse,
-  searchResponse,
+  rawSearchResponse,
+  type RawSearchResponse,
+  type SearchResponse,
   submitProductionResponse,
   tagListResponse,
   savedSearchListResponse,
@@ -207,45 +209,221 @@ export interface SearchRequestInput {
   limit?: number;
 }
 
+/** Facet fields we both aggregate on and can express as query-language filters. */
+const FACET_QUERY_FIELDS: Record<string, string> = {
+  custodianEmail: 'custodian',
+  extension: 'ext',
+  provider: 'provider',
+  tagNames: 'tag',
+};
+
+/** Compose the API's single query string from the rail's filters. */
+export function composeQuery(input: SearchRequestInput): string {
+  const parts: string[] = [];
+  const text = input.queryText.trim();
+  if (text.length > 0) parts.push(`(${text})`);
+  if (input.custodianEmail) parts.push(`custodian:${input.custodianEmail.trim()}`);
+  if (input.source === 'email') parts.push('(type:email OR type:attachment)');
+  if (input.source === 'drive') parts.push('type:file');
+  for (const [field, values] of Object.entries(input.facetFilters ?? {})) {
+    const queryField = FACET_QUERY_FIELDS[field];
+    if (!queryField || values.length === 0) continue;
+    const clause = values.map((v) => `${queryField}:"${v.replaceAll('"', '')}"`).join(' OR ');
+    parts.push(values.length > 1 ? `(${clause})` : clause);
+  }
+  return parts.join(' AND ');
+}
+
+function docString(doc: Record<string, unknown>, key: string): string {
+  const v = doc[key];
+  return typeof v === 'string' ? v : '';
+}
+
+/** Adapt the API's raw hits (search-package shape) to what the UI renders. */
+export function adaptSearchResponse(raw: RawSearchResponse): SearchResponse {
+  return {
+    total: raw.total,
+    nextCursor:
+      raw.searchAfter && raw.searchAfter.length > 0 ? JSON.stringify(raw.searchAfter) : null,
+    facets: Object.entries(raw.facets ?? {}).map(([field, values]) => ({
+      field,
+      label: field,
+      values,
+    })),
+    items: raw.items.map(({ id, source, highlights }) => {
+      const doc = source;
+      const dates = (doc['dates'] ?? {}) as Record<string, unknown>;
+      const tags = Array.isArray(doc['tags']) ? (doc['tags'] as Record<string, unknown>[]) : [];
+      return {
+        id,
+        kind: docString(doc, 'kind') || 'file',
+        name: docString(doc, 'name'),
+        extension: docString(doc, 'extension'),
+        mimeType: docString(doc, 'mimeType'),
+        size: String(typeof doc['size'] === 'number' ? doc['size'] : 0),
+        sha256: docString(doc, 'sha256'),
+        custodianEmail: docString(doc, 'custodianEmail') || null,
+        sourcePath: docString(doc, 'sourcePath'),
+        primaryDate: typeof dates['primary'] === 'string' ? (dates['primary'] as string) : null,
+        processingStatus: docString(doc, 'processingStatus') || 'pending',
+        malwareStatus: docString(doc, 'malwareStatus') || 'not_scanned',
+        isApiExportDerivative: doc['isApiExportDerivative'] === true,
+        tags: tags.map((t) => ({
+          id: typeof t['id'] === 'string' ? t['id'] : '',
+          name: typeof t['name'] === 'string' ? t['name'] : '',
+          color: typeof t['color'] === 'string' ? (t['color'] as string) : '#6b7280',
+        })),
+        highlights: Object.values(highlights ?? {}).flat(),
+        familyRole: (doc['isFamilyChild'] === true
+          ? 'child'
+          : typeof doc['familyId'] === 'string' && doc['familyId'] !== ''
+            ? 'parent'
+            : 'none') as 'none' | 'parent' | 'child',
+      };
+    }),
+  };
+}
+
 export function useSearch(input: SearchRequestInput, enabled: boolean) {
   return useQuery({
     queryKey: ['search', input],
-    queryFn: () =>
-      apiFetch('/api/v1/search', {
+    queryFn: async () => {
+      const raw = await apiFetch('/api/v1/search', {
         method: 'POST',
-        body: { limit: 100, ...input },
-        schema: searchResponse,
-      }),
+        body: {
+          query: composeQuery(input),
+          ...(input.caseId ? { caseId: input.caseId } : {}),
+          ...(input.cursor ? { searchAfter: JSON.parse(input.cursor) as unknown[] } : {}),
+          limit: input.limit ?? 100,
+          facets: Object.keys(FACET_QUERY_FIELDS),
+          includeHighlights: true,
+        },
+        schema: rawSearchResponse,
+      });
+      return adaptSearchResponse(raw);
+    },
     enabled,
     placeholderData: keepPreviousData,
   });
 }
 
+const rawExplainResponse = z.object({
+  fields: z.array(z.string()).default([]),
+  clauseCount: z.number().int().default(0),
+  highlightTerms: z.array(z.string()).default([]),
+});
+
 export function useExplain(queryText: string, evidenceItemId: string | null) {
   return useQuery({
     queryKey: ['explain', queryText, evidenceItemId],
-    queryFn: () =>
-      apiFetch('/api/v1/search/explain', {
+    queryFn: async () => {
+      const raw = await apiFetch('/api/v1/search/explain', {
         method: 'POST',
-        body: { queryText, evidenceItemId },
-        schema: explainResponse,
-      }),
+        body: { query: queryText },
+        schema: rawExplainResponse,
+      });
+      return {
+        matches: raw.fields.map((field) => ({
+          field,
+          fragment: '',
+          reason: `matched via ${field}${raw.highlightTerms.length > 0 ? ` — terms: ${raw.highlightTerms.join(', ')}` : ''} (${raw.clauseCount} clause${raw.clauseCount === 1 ? '' : 's'})`,
+        })),
+      };
+    },
     enabled: evidenceItemId !== null && queryText.length > 0,
   });
 }
 
+const rawChainResponse = z.object({
+  acquisition: z
+    .object({
+      acquiredAt: z.string(),
+      collectionId: z.string().nullable().default(null),
+      provider: z.string().nullable().default(null),
+      providerItemId: z.string().default(''),
+      sourcePath: z.string().default(''),
+      sha256: z.string().default(''),
+      blobSha256: z.string().default(''),
+      isApiExportDerivative: z.boolean().default(false),
+    })
+    .nullable()
+    .optional(),
+  events: z
+    .array(
+      z.object({
+        sequence: z.string(),
+        action: z.string(),
+        actorDisplay: z.string().default(''),
+        occurredAt: z.string(),
+        summary: z.record(z.string(), z.unknown()).default({}),
+        eventHash: z.string().default(''),
+      }),
+    )
+    .default([]),
+});
+
 export function useEvidence(id: string | null) {
   return useQuery({
     queryKey: ['evidence', id],
-    queryFn: () => apiFetch(`/api/v1/evidence/${id}`, { schema: evidenceDetail }),
+    queryFn: async () => {
+      // The custody chain lives on its own endpoint; merge it into the
+      // detail object the panel renders.
+      const [detail, chain] = await Promise.all([
+        apiFetch(`/api/v1/evidence/${id}`, { schema: evidenceDetail }),
+        apiFetch(`/api/v1/evidence/${id}/chain`, { schema: rawChainResponse }).catch(() => null),
+      ]);
+      if (chain === null) return detail;
+      const acquisitionEntry = chain.acquisition
+        ? [
+            {
+              sequence: '—',
+              action: 'evidence.preserved',
+              actorDisplay: `${chain.acquisition.provider ?? 'provider'} collection`,
+              occurredAt: chain.acquisition.acquiredAt,
+              summary: {
+                sha256: chain.acquisition.sha256,
+                sourcePath: chain.acquisition.sourcePath,
+                providerItemId: chain.acquisition.providerItemId,
+                collectionId: chain.acquisition.collectionId,
+                ...(chain.acquisition.isApiExportDerivative ? { apiExportDerivative: true } : {}),
+              },
+              eventHash: '',
+            },
+          ]
+        : [];
+      return { ...detail, custody: [...acquisitionEntry, ...chain.events] };
+    },
     enabled: id !== null,
   });
 }
 
+const rawPreviewResponse = z.object({
+  items: z
+    .array(z.object({ kind: z.string(), mimeType: z.string().default(''), url: z.string() }))
+    .default([]),
+  note: z.string().default(''),
+});
+
 export function useEvidencePreview(id: string | null) {
   return useQuery({
     queryKey: ['evidence-preview', id],
-    queryFn: () => apiFetch(`/api/v1/evidence/${id}/preview`, { schema: previewResponse }),
+    queryFn: async () => {
+      // The API returns short-lived presigned URLs to the stored preview
+      // derivatives; fetch the best one (safe HTML, else text) for inline
+      // sandboxed rendering. Previews never load remote resources.
+      const raw = await apiFetch(`/api/v1/evidence/${id}/preview`, { schema: rawPreviewResponse });
+      const pick =
+        raw.items.find((p) => p.kind === 'safe_html') ??
+        raw.items.find((p) => p.kind === 'text' || p.kind === 'preview-text');
+      if (!pick) return previewResponse.parse({ kind: 'none', content: raw.note });
+      const res = await fetch(pick.url);
+      if (!res.ok) return previewResponse.parse({ kind: 'none', content: raw.note });
+      const content = await res.text();
+      return previewResponse.parse({
+        kind: pick.kind === 'safe_html' ? 'safe_html' : 'text',
+        content,
+      });
+    },
     enabled: id !== null,
   });
 }
