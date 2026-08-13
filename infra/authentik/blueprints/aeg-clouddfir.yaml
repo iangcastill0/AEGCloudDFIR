@@ -10,6 +10,12 @@ metadata:
     blueprints.goauthentik.io/description: 'AEG-CloudDFIR OIDC provider + application'
 entries:
   - model: authentik_providers_oauth2.oauth2provider
+    # `id` is what !KeyOf resolves against — it is NOT the same as `identifiers`.
+    # Without it the application entry below fails with
+    #   KeyOf: failed to find entry with `id` of `cdfir` and a model instance
+    # and the whole blueprint is rejected, silently leaving the provider
+    # unmanaged.
+    id: cdfir
     identifiers:
       name: cdfir
     attrs:
