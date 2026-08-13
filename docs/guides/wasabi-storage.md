@@ -81,8 +81,38 @@ Choosing the default retention period:
   deliberately before the first real matter. Starting at 7 years on Compliance
   mode locks every test artefact you create for 7 years.
 
+### Why there are two buckets
+
+The quarantine bucket holds objects ClamAV flagged as infected. It **isolates,
+it does not destroy**: on a forensic platform the malware is frequently the
+evidence in dispute, so the bytes are preserved, the item is marked
+`malwareStatus: infected`, and download is locked behind an explicitly audited
+`org_admin` override.
+
+A separate bucket rather than a `quarantine/` prefix, for four reasons:
+
+- **Object Lock cannot be applied selectively.** A prefix inside the evidence
+  bucket would inherit its default retention, so quarantined malware could never
+  be purged even when you legitimately need to.
+- **CORS is per-bucket.** The evidence bucket allows browser `GET` for previews;
+  quarantine must never be browser-reachable.
+- **Exclusion becomes structural.** Exports and productions read the evidence
+  bucket, so malware living elsewhere makes "never produce this" a property of
+  where the bytes are rather than a filter someone can forget to apply.
+- **Lifecycle rules are per-bucket**, so malware can carry a shorter retention
+  than evidence.
+
 For the **quarantine** bucket: versioning is optional and Object Lock is a
 liability — you may legitimately need to purge malware. Leave Object Lock off.
+
+**Consequence of enabling Object Lock on the evidence bucket.** When an object is
+quarantined the worker copies it across and then attempts to delete the
+evidence-bucket original. Object Lock will refuse that delete, by design. So
+infected bytes exist in **both** buckets until the evidence bucket's retention
+expires. The outcome is recorded rather than assumed — protection in that window
+is application-level (marked infected, download gated and audited, excluded from
+production), not physical. This is an inherent trade of Object Lock, and worth
+knowing before someone asks where the malware went.
 
 Do **not** enable Wasabi's automatic compression or encryption-at-rest key
 rotation features on the evidence bucket without telling me first. The platform
