@@ -292,55 +292,6 @@ The controls that actually bound this, all already in place:
 True origin restriction would require fronting the bucket with a CDN or proxy you
 control. That is a deliberate architectural choice, not a bucket setting.
 
-### Quarantine bucket settings
-
-| Setting | Value | Why |
-| --- | --- | --- |
-| Object Lock | **off** | You must be able to purge malware. Locking it removes that option permanently. |
-| Versioning | off (optional) | Keys are content-addressed by SHA-256, so an "overwrite" is byte-identical and version history carries no information. |
-| CORS | **none** | `presignGet` always signs against the evidence bucket, so a quarantined object can never be handed to a browser. Adding CORS here would create reachability the application does not need. |
-| Public access | blocked (default) | — |
-
-### Known limit: objects over 5 GiB
-
-`promoteToOriginal` moves bytes from staging to their final key with a single
-`CopyObjectCommand`, and S3-compatible APIs cap single-part server-side copy at
-5 GiB. `CDFIR_UPLOAD_MAX_BYTES` defaults to 10 GiB, so an upload between 5 and
-10 GiB stages successfully (staging uses multipart) and then **fails at
-promotion**. There is no guard on this today.
-
-It affects both buckets, since promotion into quarantine uses the same copy. If
-this is fixed by switching to a multipart copy (`UploadPartCopy`), the
-destination buckets will additionally need `s3:AbortMultipartUpload` and
-`s3:ListMultipartUploadParts` — quarantine included. Until then, keep individual
-uploads under 5 GiB, or lower `CDFIR_UPLOAD_MAX_BYTES` to 5 GiB so the API
-rejects them up front rather than failing after the bytes have been transferred.
-
-## Step 4 — CORS on the evidence bucket
-
-Previews and downloads are served to the browser via presigned URLs that go
-straight to Wasabi, so the bucket must allow the web origin. On the **evidence**
-bucket → **Settings** → **CORS**:
-
-```xml
-<CORSConfiguration>
-  <CORSRule>
-    <AllowedOrigin>https://app.aegclouddfir.com</AllowedOrigin>
-    <AllowedMethod>GET</AllowedMethod>
-    <AllowedMethod>HEAD</AllowedMethod>
-    <AllowedHeader>*</AllowedHeader>
-    <ExposeHeader>ETag</ExposeHeader>
-    <ExposeHeader>Content-Length</ExposeHeader>
-    <MaxAgeSeconds>3000</MaxAgeSeconds>
-  </CORSRule>
-</CORSConfiguration>
-```
-
-Only `GET`/`HEAD`, and only that one origin. Uploads go through the API, not
-direct-to-bucket, so no `PUT` is needed here. Do not use `*` as the origin: these
-presigned URLs grant read access to evidence, and a wildcard lets any page a
-reviewer has open read them if it obtains a URL.
-
 ## Optional bucket features: what to enable and what to skip
 
 Neither of these is required — no code path reads either one, and
@@ -463,7 +414,8 @@ Once `.env` is set, I will:
    the `ListBucket` trap above.
 5. Report exactly what `detectBucketProtection()` says about versioning and
    Object Lock, using its wording, not a rosier paraphrase.
-6. Confirm a presigned URL is fetchable from the web origin.
+6. Confirm a presigned URL is fetchable. (Wasabi's CORS headers are fixed and
+   permissive, so there is no origin configuration to validate — see Step 4.)
 7. Leave MinIO running but unused until you confirm you are happy, then it can be
    removed from the compose profile.
 
