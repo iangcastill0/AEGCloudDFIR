@@ -6,6 +6,7 @@ import {
   GetBucketVersioningCommand,
   GetObjectCommand,
   GetObjectLockConfigurationCommand,
+  ListObjectsV2Command,
   HeadObjectCommand,
   PutObjectCommand,
   type S3Client,
@@ -339,6 +340,21 @@ export class EvidenceObjectStore {
     const stream = await this.getStream(bucketClass, key);
     const { sha256, size } = await hashStreamToNull(stream);
     return { ok: sha256 === expectedSha256, actualSha256: sha256, size };
+  }
+
+  /**
+   * Cheap reachability + credential probe for readiness checks.
+   *
+   * Uses ListObjectsV2 with MaxKeys=1 rather than a HEAD on a known key: it
+   * needs no object to exist, and it exercises the same s3:ListBucket grant the
+   * store depends on to tell "not uploaded yet" from "denied". Throws the
+   * underlying SDK error so the caller can report the cause rather than a
+   * generic failure.
+   */
+  async checkReachable(): Promise<void> {
+    await this.s3.send(
+      new ListObjectsV2Command({ Bucket: this.evidenceBucket, MaxKeys: 1 }),
+    );
   }
 
   /**
