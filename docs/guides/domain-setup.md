@@ -168,8 +168,7 @@ server {
 
 # Web UI
 server {
-    listen 443 ssl;
-    http2 on;
+    listen 443 ssl http2;   # nginx 1.24 syntax; 1.25.1+ uses a separate `http2 on;`
     server_name app.aegclouddfir.com;
 
     location / {
@@ -186,8 +185,7 @@ server {
 
 # API — CDFIR_TRUST_PROXY=true makes it honour the X-Forwarded-* headers below
 server {
-    listen 443 ssl;
-    http2 on;
+    listen 443 ssl http2;   # nginx 1.24 syntax; 1.25.1+ uses a separate `http2 on;`
     server_name api.aegclouddfir.com;
 
     # PST/OST uploads: nginx defaults to 1 MB and would 413 every upload.
@@ -210,8 +208,7 @@ server {
 
 # Authentik (identity provider)
 server {
-    listen 443 ssl;
-    http2 on;
+    listen 443 ssl http2;   # nginx 1.24 syntax; 1.25.1+ uses a separate `http2 on;`
     server_name auth.aegclouddfir.com;
 
     location / {
