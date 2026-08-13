@@ -7,7 +7,11 @@ COPY apps/api ./apps/api
 COPY packages ./packages
 RUN pnpm install --frozen-lockfile --filter @aeg-clouddfir/api... \
  && pnpm --filter @aeg-clouddfir/api... build \
- && pnpm --filter @aeg-clouddfir/api deploy --prod /out
+ \
+ # --legacy keeps the pre-pnpm-10 deploy behaviour; the alternative
+ # (inject-workspace-packages=true) would change how local dev links
+ # workspace packages.
+ && pnpm --filter @aeg-clouddfir/api deploy --legacy --prod /out
 
 FROM node:22-alpine
 RUN apk add --no-cache wget tini && addgroup -S ev && adduser -S ev -G ev

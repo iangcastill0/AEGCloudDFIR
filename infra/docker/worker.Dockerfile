@@ -7,7 +7,11 @@ COPY apps/worker ./apps/worker
 COPY packages ./packages
 RUN pnpm install --frozen-lockfile --filter @aeg-clouddfir/worker... \
  && pnpm --filter @aeg-clouddfir/worker... build \
- && pnpm --filter @aeg-clouddfir/worker deploy --prod /out
+ \
+ # --legacy keeps the pre-pnpm-10 deploy behaviour; the alternative
+ # (inject-workspace-packages=true) would change how local dev links
+ # workspace packages.
+ && pnpm --filter @aeg-clouddfir/worker deploy --legacy --prod /out
 
 # Worker runtime: extraction/OCR/conversion tools live ONLY here, never in api.
 FROM node:22-bookworm-slim
