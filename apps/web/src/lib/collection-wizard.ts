@@ -3,9 +3,19 @@
  * Pure (no DOM) so step gating, persistence and idempotency-key stability
  * are unit testable. The page component owns sessionStorage persistence via
  * serializeWizard / hydrateWizard.
+ *
+ * Providers: 'microsoft' | 'google' collect through a connector; 'upload'
+ * preserves user-supplied PST/OST mailbox containers. For uploads the step
+ * sequence keeps its shape but changes meaning: Account becomes Upload,
+ * Sources is fixed to email, Custodians is a named-custodian form, and
+ * Scope is fixed to the whole container.
  */
 import { z } from 'zod';
-import { createCollectionRequest, type CreateCollectionRequest } from '@aeg-clouddfir/contracts';
+import {
+  TRUTHFULNESS_NOTICES,
+  collectionScope,
+  createCollectionRequest,
+} from '@aeg-clouddfir/contracts';
 
 export const WIZARD_STEPS = [
   'Provider',
@@ -28,22 +38,48 @@ export const STEP_REVIEW = 6;
 export const STEP_START = 7;
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+/** Pragmatic RFC-lite email shape: something@domain.tld, no whitespace. */
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * PST-extraction truthfulness notice. Lives in contracts as
+ * TRUTHFULNESS_NOTICES.pstExtraction; the local fallback covers the window
+ * where the web ships before the contracts key lands.
+ */
+const PST_EXTRACTION_FALLBACK =
+  'Uploaded container files (.pst/.ost) are preserved byte-for-byte and hashed as received. Messages extracted from a container are reconstructions for search and review — not provider-native RFC 822 originals — and the preserved container remains the authoritative evidence.';
+export const PST_EXTRACTION_NOTICE: string =
+  (TRUTHFULNESS_NOTICES as Record<string, string | undefined>)['pstExtraction'] ??
+  PST_EXTRACTION_FALLBACK;
 
 const wizardCustodian = z.object({ id: z.string(), email: z.string() });
 
+/** A completed multipart upload (POST /api/v1/uploads response). */
+export const wizardUpload = z.object({
+  uploadId: z.string(),
+  filename: z.string(),
+  sha256: z.string(),
+  size: z.number(),
+});
+export type WizardUpload = z.infer<typeof wizardUpload>;
+
 /** Persisted shape — versioned so stale sessionStorage never breaks resume. */
 export const wizardStateSchema = z.object({
-  v: z.literal(1),
+  v: z.literal(2),
   step: z.number().int().min(0).max(7),
   maxStepReached: z.number().int().min(0).max(7),
   /** Generated once per wizard run; reused across retries of the same start. */
   idempotencyKey: z.string().min(8),
   name: z.string(),
-  provider: z.enum(['microsoft', 'google', '']),
+  provider: z.enum(['microsoft', 'google', 'upload', '']),
   connectorAccountId: z.string(),
   connectorMode: z.enum(['delegated', 'organization', '']),
   sources: z.object({ email: z.boolean(), drive: z.boolean(), audit: z.boolean() }),
   custodians: z.array(wizardCustodian),
+  /** Completed PST/OST uploads (provider 'upload' only). */
+  uploads: z.array(wizardUpload),
+  /** Named custodian the extracted messages are attributed to (uploads only). */
+  uploadCustodian: z.object({ email: z.string(), displayName: z.string() }),
   scope: z.object({
     dateKind: z.enum(['all_time', 'range']),
     startDate: z.string(),
@@ -88,7 +124,7 @@ export type WizardAuditScope = WizardState['scope']['audit'];
 
 export function freshWizard(idempotencyKey: string): WizardState {
   return {
-    v: 1,
+    v: 2,
     step: 0,
     maxStepReached: 0,
     idempotencyKey,
@@ -98,6 +134,8 @@ export function freshWizard(idempotencyKey: string): WizardState {
     connectorMode: '',
     sources: { email: true, drive: false, audit: false },
     custodians: [],
+    uploads: [],
+    uploadCustodian: { email: '', displayName: '' },
     scope: {
       dateKind: 'all_time',
       startDate: '',
@@ -126,8 +164,21 @@ export function freshWizard(idempotencyKey: string): WizardState {
   };
 }
 
+/** True when the wizard preserves uploaded PST/OST containers. */
+export function isUploadCollection(state: WizardState): boolean {
+  return state.provider === 'upload';
+}
+
+/** Step labels adapted to the selected provider (Account → Upload). */
+export function wizardStepLabels(state: WizardState): string[] {
+  return WIZARD_STEPS.map((label, index) =>
+    index === STEP_ACCOUNT && isUploadCollection(state) ? 'Upload' : label,
+  );
+}
+
 /** True when the collection selects only the audit source (no email/drive). */
 export function isAuditOnly(state: WizardState): boolean {
+  if (isUploadCollection(state)) return false;
   return state.sources.audit && !state.sources.email && !state.sources.drive;
 }
 
@@ -146,6 +197,7 @@ export function auditScopeConfigured(state: WizardState): boolean {
 /** Validation errors for a single step (empty array = step is valid). */
 export function validateStep(state: WizardState, step: number): string[] {
   const errors: string[] = [];
+  const upload = isUploadCollection(state);
   switch (step) {
     case STEP_PROVIDER:
       if (!state.provider) errors.push('Choose a provider.');
@@ -153,9 +205,17 @@ export function validateStep(state: WizardState, step: number): string[] {
       if (state.name.trim().length > 200) errors.push('Name must be 200 characters or fewer.');
       break;
     case STEP_ACCOUNT:
-      if (!state.connectorAccountId) errors.push('Select a connected account.');
+      if (upload) {
+        // The Account step is the Upload step for mailbox-file collections.
+        if (state.uploads.length === 0)
+          errors.push('Upload at least one .pst or .ost mailbox file.');
+      } else if (!state.connectorAccountId) {
+        errors.push('Select a connected account.');
+      }
       break;
     case STEP_SOURCES:
+      // Uploads are fixed to the email source; nothing to validate.
+      if (upload) break;
       if (!state.sources.email && !state.sources.drive && !state.sources.audit)
         errors.push('Select at least one source (email, drive, or audit logs).');
       // Audit logs are organization-wide (app permission / domain-wide
@@ -166,11 +226,18 @@ export function validateStep(state: WizardState, step: number): string[] {
         );
       break;
     case STEP_CUSTODIANS:
+      if (upload) {
+        if (!EMAIL_RE.test(state.uploadCustodian.email.trim()))
+          errors.push('Enter a valid custodian email address to attribute extracted messages to.');
+        break;
+      }
       // Audit is org-scoped and selects no custodian; only email/drive need one.
       if ((state.sources.email || state.sources.drive) && state.custodians.length === 0)
         errors.push('Add at least one custodian.');
       break;
     case STEP_SCOPE: {
+      // Upload scope is fixed to the whole container: informational only.
+      if (upload) break;
       const s = state.scope;
       if (state.sources.audit && !auditScopeConfigured(state)) {
         errors.push(
@@ -198,7 +265,9 @@ export function validateStep(state: WizardState, step: number): string[] {
       break;
     }
     case STEP_TYPE:
-      // kind is constrained by the type; nothing free-form to validate.
+      // Containers are fixed point-in-time files: only snapshot is valid.
+      if (upload && state.kind === 'continuous')
+        errors.push('Uploaded mailbox files support snapshot collections only.');
       break;
     case STEP_REVIEW: {
       for (let s = 0; s < STEP_REVIEW; s += 1) errors.push(...validateStep(state, s));
@@ -223,6 +292,8 @@ export type WizardAction =
     }
   | { type: 'patchScope'; patch: Partial<Omit<WizardState['scope'], 'audit'>> }
   | { type: 'patchAudit'; patch: Partial<WizardAuditScope> }
+  | { type: 'addUpload'; upload: WizardUpload }
+  | { type: 'removeUpload'; uploadId: string }
   | { type: 'next' }
   | { type: 'back' }
   | { type: 'goto'; step: number };
@@ -238,6 +309,14 @@ export function wizardReducer(state: WizardState, action: WizardAction): WizardS
         ...state,
         scope: { ...state.scope, audit: { ...state.scope.audit, ...action.patch } },
       };
+    case 'addUpload': {
+      // Idempotent: a retried upload of the same container never duplicates.
+      if (state.uploads.some((u) => u.uploadId === action.upload.uploadId)) return state;
+      return { ...state, uploads: [...state.uploads, action.upload] };
+    }
+    case 'removeUpload':
+      // Removes from the wizard only; the preserved upload stays in the store.
+      return { ...state, uploads: state.uploads.filter((u) => u.uploadId !== action.uploadId) };
     case 'next': {
       if (state.step >= STEP_START) return state;
       if (!canAdvance(state)) return state; // gate: invalid step never advances
@@ -258,11 +337,24 @@ export function serializeWizard(state: WizardState): string {
   return JSON.stringify(state);
 }
 
+/** Lift a v1 payload to v2 by adding the upload slice with empty defaults. */
+function migrateLegacyPayload(value: unknown): unknown {
+  if (
+    typeof value === 'object' &&
+    value !== null &&
+    (value as { v?: unknown }).v === 1 &&
+    !('uploads' in value)
+  ) {
+    return { ...value, v: 2, uploads: [], uploadCustodian: { email: '', displayName: '' } };
+  }
+  return value;
+}
+
 /** Resume from sessionStorage; falls back to a fresh wizard on any mismatch. */
 export function hydrateWizard(raw: string | null, freshKey: string): WizardState {
   if (!raw) return freshWizard(freshKey);
   try {
-    const parsed = wizardStateSchema.safeParse(JSON.parse(raw));
+    const parsed = wizardStateSchema.safeParse(migrateLegacyPayload(JSON.parse(raw)));
     return parsed.success ? parsed.data : freshWizard(freshKey);
   } catch {
     return freshWizard(freshKey);
@@ -277,24 +369,73 @@ export function parseIdList(text: string): string[] {
 }
 
 /**
- * API-relaxed create schema: audit-only collections legitimately select no
- * custodian, but the shared contract requires at least one. The API mirrors
- * this relaxation server-side, so the web builds against the same shape.
+ * Web-side create schema, a superset of the shared contract:
+ * - audit-only collections legitimately select no custodian (API mirrors
+ *   this relaxation server-side);
+ * - upload collections omit connectorAccountId (the API resolves the
+ *   synthetic upload connector itself), carry uploadCustodian instead of
+ *   custodianIds, and scope.uploads lists the preserved upload ids.
  */
-const relaxedCreateRequest = createCollectionRequest
-  .extend({ custodianIds: z.array(z.string().uuid()) })
+const webCreateCollectionRequest = z
+  .object({
+    ...createCollectionRequest.shape,
+    connectorAccountId: z.string().uuid().optional(),
+    custodianIds: z.array(z.string().uuid()),
+    uploadCustodian: z
+      .object({ email: z.string().regex(EMAIL_RE), displayName: z.string() })
+      .optional(),
+    scope: z.object({
+      ...collectionScope.shape,
+      uploads: z.object({ evidenceItemIds: z.array(z.string()).min(1) }).optional(),
+    }),
+  })
   .superRefine((value, ctx) => {
-    const needsCustodian = value.sources.some((s) => s !== 'audit');
-    if (needsCustodian && value.custodianIds.length === 0) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['custodianIds'],
-        message: 'email and drive collections require at least one custodian',
-      });
+    const isUpload = value.scope.uploads !== undefined || value.uploadCustodian !== undefined;
+    if (isUpload) {
+      if (!value.scope.uploads)
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['scope', 'uploads'],
+          message: 'upload collections list the preserved upload ids in scope.uploads',
+        });
+      if (!value.uploadCustodian)
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['uploadCustodian'],
+          message: 'upload collections attribute extracted messages to an upload custodian',
+        });
+      if (!(value.sources.length === 1 && value.sources[0] === 'email'))
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['sources'],
+          message: 'upload collections must have sources exactly [email]',
+        });
+      if (value.kind !== 'snapshot')
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['kind'],
+          message: 'upload collections must be snapshots',
+        });
+    } else {
+      if (!value.connectorAccountId)
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['connectorAccountId'],
+          message: 'connector collections require a connected account',
+        });
+      const needsCustodian = value.sources.some((s) => s !== 'audit');
+      if (needsCustodian && value.custodianIds.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['custodianIds'],
+          message: 'email and drive collections require at least one custodian',
+        });
+      }
     }
   });
+export type WebCreateCollectionRequest = z.infer<typeof webCreateCollectionRequest>;
 
-function buildAuditScope(state: WizardState): CreateCollectionRequest['scope']['audit'] {
+function buildAuditScope(state: WizardState): WebCreateCollectionRequest['scope']['audit'] {
   const a = state.scope.audit;
   const actorFilter = parseIdList(a.actorFilterText);
   return {
@@ -321,7 +462,28 @@ function buildAuditScope(state: WizardState): CreateCollectionRequest['scope']['
 }
 
 /** Build the POST /api/v1/collections body; throws if the wizard is invalid. */
-export function buildCreateRequest(state: WizardState): CreateCollectionRequest {
+export function buildCreateRequest(state: WizardState): WebCreateCollectionRequest {
+  if (isUploadCollection(state)) {
+    // The backend resolves the synthetic upload connector itself, so
+    // connectorAccountId is omitted; uploadCustodian replaces custodianIds.
+    return webCreateCollectionRequest.parse({
+      idempotencyKey: state.idempotencyKey,
+      name: state.name.trim(),
+      kind: 'snapshot' as const,
+      sources: ['email' as const],
+      custodianIds: [],
+      uploadCustodian: {
+        email: state.uploadCustodian.email.trim(),
+        displayName: state.uploadCustodian.displayName.trim(),
+      },
+      scope: {
+        // No date range for v1 — extraction covers the whole container.
+        dateRange: { kind: 'all_time' as const },
+        uploads: { evidenceItemIds: state.uploads.map((u) => u.uploadId) },
+      },
+    });
+  }
+
   const sources: Array<'email' | 'drive' | 'audit'> = [];
   if (state.sources.email) sources.push('email');
   if (state.sources.drive) sources.push('drive');
@@ -371,5 +533,5 @@ export function buildCreateRequest(state: WizardState): CreateCollectionRequest 
       ...(state.sources.audit ? { audit: buildAuditScope(state) } : {}),
     },
   };
-  return relaxedCreateRequest.parse(body);
+  return webCreateCollectionRequest.parse(body);
 }

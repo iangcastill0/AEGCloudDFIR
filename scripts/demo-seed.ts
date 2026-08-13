@@ -147,6 +147,58 @@ async function main(): Promise<void> {
           summary: { provider: seed.provider, mode: 'delegated', demo: true },
         });
       }
+
+      // Organization-mode Microsoft connector so the wizard's org path is
+      // demoable: the fake provider serves the /graph/users directory and the
+      // /{tenant}/oauth2/v2.0/token client-credentials endpoint. The stored
+      // client_secret activates the demo-only token fallback (client id
+      // 'demo-client') that applies ONLY when CDFIR_MS_CLIENT_ID is empty.
+      const orgLabel = 'Demo Microsoft org (fake provider)';
+      const existingOrg = await tx.connectorAccount.findFirst({
+        where: { provider: 'microsoft', mode: 'organization', label: orgLabel },
+      });
+      if (!existingOrg) {
+        const orgAccount = await tx.connectorAccount.create({
+          data: {
+            tenantId: tenantA.id,
+            provider: 'microsoft',
+            mode: 'organization',
+            label: orgLabel,
+            externalIdentity: 'contoso.example.com',
+            externalTenantId: 'demo-tenant-id',
+            status: 'connected',
+            statusDetail: 'demo seed — fake provider server',
+          },
+        });
+        const orgSecret = await encryptSecret(
+          kek,
+          tenantA.id,
+          `connector:${orgAccount.id}`,
+          Buffer.from('demo-client-secret'),
+        );
+        await tx.connectorSecret.create({
+          data: {
+            tenantId: tenantA.id,
+            connectorAccountId: orgAccount.id,
+            kind: 'client_secret',
+            kekKeyId: orgSecret.kekKeyId,
+            wrappedDek: new Uint8Array(orgSecret.wrappedDek),
+            dekIv: new Uint8Array(orgSecret.dekIv),
+            dekTag: new Uint8Array(orgSecret.dekTag),
+            ciphertext: new Uint8Array(orgSecret.ciphertext),
+            cipherIv: new Uint8Array(orgSecret.cipherIv),
+            cipherTag: new Uint8Array(orgSecret.cipherTag),
+          },
+        });
+        await appendAuditEvent(tx, {
+          tenantId: tenantA.id,
+          actorDisplay: 'demo-seed script',
+          action: 'connector.demo_seeded',
+          targetType: 'connector_account',
+          targetId: orgAccount.id,
+          summary: { provider: 'microsoft', mode: 'organization', demo: true },
+        });
+      }
     });
 
     console.log('demo seed complete:');

@@ -95,6 +95,12 @@ export const configSchema = z.object({
   CDFIR_CLAMAV_PORT: port.default(3310),
   CDFIR_CLAMAV_ENABLED: booleanString('true'),
 
+  // --- Uploaded container files (PST/OST) ---
+  /** Max accepted upload size in bytes (default 10 GiB; PSTs are big). */
+  CDFIR_UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(10_737_418_240),
+  /** Cap on messages extracted from a single container before an honest stop. */
+  CDFIR_PST_MAX_MESSAGES: z.coerce.number().int().min(1).default(250_000),
+
   // --- Extraction / Tika ---
   CDFIR_TIKA_URL: z.string().url().default('http://tika:9998'),
   CDFIR_OCR_LANGS: z.string().default('eng'),

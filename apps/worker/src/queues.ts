@@ -9,6 +9,7 @@ export const QUEUES = {
   collectionFetchPage: 'collection.fetch-page',
   collectionFetchItem: 'collection.fetch-item',
   collectionFinalize: 'collection.finalize',
+  pstExtract: 'pst.extract',
   processParse: 'process.parse',
   processExtract: 'process.extract',
   processOcr: 'process.ocr',
@@ -71,6 +72,8 @@ export const dedupKeys = {
     providerItemId: string,
   ) => `item:${collectionId}:${custodianId}:${source}:${providerItemId}`,
   collectionFinalize: (collectionId: string) => `finalize:${collectionId}`,
+  pstExtract: (collectionId: string, evidenceItemId: string) =>
+    `pst:${collectionId}:${evidenceItemId}`,
   processStage: (stage: string, evidenceItemId: string, version: number) =>
     `${stage}:${evidenceItemId}:v${version}`,
   /**

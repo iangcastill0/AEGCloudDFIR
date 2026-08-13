@@ -735,7 +735,7 @@ function PreviewPane({
                 {
                   id: 'content',
                   label: 'Content',
-                  panel: <ContentTab previewState={preview} />,
+                  panel: <ContentTab previewState={preview} itemKind={item.kind} />,
                 },
                 ...((item.kind as string) === 'audit_batch'
                   ? [{ id: 'audit', label: 'Audit', panel: <AuditTab itemId={item.id} /> }]
@@ -925,7 +925,22 @@ function PreviewPane({
   );
 }
 
-function ContentTab({ previewState }: { previewState: ReturnType<typeof useEvidencePreview> }) {
+function ContentTab({
+  previewState,
+  itemKind,
+}: {
+  previewState: ReturnType<typeof useEvidencePreview>;
+  itemKind: string;
+}) {
+  // Uploaded PST/OST containers are preserved whole and never previewed
+  // inline; their extracted messages are separate evidence items.
+  if (itemKind === 'container')
+    return (
+      <p>
+        Container file — see extracted messages in Family. The preserved container is the
+        authoritative evidence and has no inline preview.
+      </p>
+    );
   if (previewState.isPending) return <Skeleton label="Loading preview" lines={4} />;
   if (previewState.error != null)
     return <p role="alert">Preview unavailable: {errorMessage(previewState.error)}</p>;

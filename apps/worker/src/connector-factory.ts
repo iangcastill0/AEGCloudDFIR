@@ -148,6 +148,40 @@ const serviceAccountShape = (value: unknown): { client_email: string; private_ke
 };
 
 /**
+ * Resolve Microsoft client credentials for organization (app-permission) mode.
+ * Production always uses the configured app registration (CDFIR_MS_CLIENT_ID /
+ * CDFIR_MS_CLIENT_SECRET). DEMO-ONLY FALLBACK: when no app registration is
+ * configured AND the account carries a stored per-connector client_secret
+ * (only scripts/demo-seed.ts writes one), that secret is decrypted and used
+ * with the fixed client id 'demo-client' so the fake provider's
+ * client-credentials flow works without real credentials.
+ */
+async function resolveMicrosoftAppCredentials(
+  ctx: WorkerContext,
+  tenantId: string,
+  connectorAccountId: string,
+  secrets: SecretRow[],
+): Promise<{ clientId: string; clientSecret: string }> {
+  if (ctx.config.CDFIR_MS_CLIENT_ID !== '') {
+    return {
+      clientId: ctx.config.CDFIR_MS_CLIENT_ID,
+      clientSecret: ctx.config.CDFIR_MS_CLIENT_SECRET,
+    };
+  }
+  const row = secrets.find((s) => s.kind === 'client_secret');
+  if (row === undefined) {
+    return {
+      clientId: ctx.config.CDFIR_MS_CLIENT_ID,
+      clientSecret: ctx.config.CDFIR_MS_CLIENT_SECRET,
+    };
+  }
+  const clientSecret = (await decryptSecretRow(ctx, tenantId, connectorAccountId, row)).toString(
+    'utf8',
+  );
+  return { clientId: 'demo-client', clientSecret };
+}
+
+/**
  * Build provider connectors for a connector account, decrypting stored
  * secrets and wiring the correct TokenProvider for the provider/mode pair.
  * Base URLs come from config so the demo fake-provider server works.
@@ -165,6 +199,12 @@ export async function buildConnectorsForAccount(
   );
   if (account === null) {
     throw new Error(`connector account ${connectorAccountId} not found`);
+  }
+
+  if (account.provider === 'upload') {
+    throw new Error(
+      'upload connector accounts have no provider clients; uploaded containers are processed locally',
+    );
   }
 
   const secrets = account.secrets as unknown as SecretRow[];
@@ -189,11 +229,17 @@ export async function buildConnectorsForAccount(
       if (account.externalTenantId === '') {
         throw new Error('microsoft organization mode requires the connector externalTenantId');
       }
+      const credentials = await resolveMicrosoftAppCredentials(
+        ctx,
+        tenantId,
+        connectorAccountId,
+        secrets,
+      );
       tokenProvider = new MicrosoftAppTokenSource({
         msLoginBaseUrl: ctx.config.CDFIR_MS_LOGIN_BASE_URL,
         tenantId: account.externalTenantId,
-        clientId: ctx.config.CDFIR_MS_CLIENT_ID,
-        clientSecret: ctx.config.CDFIR_MS_CLIENT_SECRET,
+        clientId: credentials.clientId,
+        clientSecret: credentials.clientSecret,
       });
       if (args.custodian === undefined) {
         throw new Error('microsoft organization mode requires a custodian to address');
@@ -305,16 +351,26 @@ export async function buildAuditConnectors(
   const auditScope = args.auditScope;
   const connectors: TaggedAuditConnector[] = [];
 
+  if (account.provider === 'upload') {
+    throw new Error('upload connector accounts cannot collect audit logs');
+  }
+
   if (account.provider === 'microsoft') {
     if (account.externalTenantId === '') {
       throw new Error('microsoft organization mode requires the connector externalTenantId');
     }
+    const credentials = await resolveMicrosoftAppCredentials(
+      ctx,
+      tenantId,
+      connectorAccountId,
+      secrets,
+    );
     const appToken = (scope: string): MicrosoftAppTokenSource =>
       new MicrosoftAppTokenSource({
         msLoginBaseUrl: ctx.config.CDFIR_MS_LOGIN_BASE_URL,
         tenantId: account.externalTenantId,
-        clientId: ctx.config.CDFIR_MS_CLIENT_ID,
-        clientSecret: ctx.config.CDFIR_MS_CLIENT_SECRET,
+        clientId: credentials.clientId,
+        clientSecret: credentials.clientSecret,
         scope,
       });
 

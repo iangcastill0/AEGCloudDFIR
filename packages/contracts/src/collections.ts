@@ -95,17 +95,91 @@ export const collectionScope = z.object({
       actorFilter: z.array(z.string()).default([]),
     })
     .optional(),
+  /**
+   * Uploaded-container scope: previously uploaded evidence items (kind
+   * 'container', provider 'upload') to extract messages from. Present ONLY on
+   * upload collections; the containers stay the authoritative originals and
+   * extracted messages are labeled reconstructions (see
+   * TRUTHFULNESS_NOTICES.pstExtraction).
+   */
+  uploads: z
+    .object({
+      evidenceItemIds: z.array(uuid).min(1),
+    })
+    .optional(),
 });
 export type CollectionScope = z.infer<typeof collectionScope>;
 
-export const createCollectionRequest = z.object({
+/**
+ * Custodian attribution for an upload collection: uploaded files have no
+ * provider directory, so the custodian is declared at collection time (or an
+ * existing upload custodian is selected via custodianIds instead).
+ */
+export const uploadCustodian = z.object({
+  email: z.string().email(),
+  displayName: z.string().max(200).default(''),
+});
+
+/**
+ * Field shape of the create-collection request WITHOUT cross-field rules.
+ * The API layer extends this object (e.g. custodianIds cap) and re-applies
+ * its own cross-field rules; other consumers should use
+ * `createCollectionRequest`, which enforces the rules below.
+ */
+export const createCollectionRequestFields = z.object({
   idempotencyKey,
-  connectorAccountId: uuid,
+  /** Required for provider collections; resolved server-side for uploads. */
+  connectorAccountId: uuid.optional(),
   name: z.string().min(1).max(200),
   kind: z.enum(['snapshot', 'continuous']).default('snapshot'),
   sources: z.array(collectionSource).min(1),
-  custodianIds: z.array(uuid).min(1),
+  custodianIds: z.array(uuid),
+  uploadCustodian: uploadCustodian.optional(),
   scope: collectionScope,
+});
+
+export const createCollectionRequest = createCollectionRequestFields.superRefine((value, ctx) => {
+  const isUpload = value.scope.uploads !== undefined;
+  if (isUpload) {
+    if (value.sources.length !== 1 || value.sources[0] !== 'email') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['sources'],
+        message: 'upload collections support only the email source',
+      });
+    }
+    const hasCustodianIds = value.custodianIds.length > 0;
+    const hasUploadCustodian = value.uploadCustodian !== undefined;
+    if (hasCustodianIds === hasUploadCustodian) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['custodianIds'],
+        message: 'upload collections require exactly one of custodianIds or uploadCustodian',
+      });
+    }
+  } else {
+    if (value.connectorAccountId === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['connectorAccountId'],
+        message: 'connectorAccountId is required for provider collections',
+      });
+    }
+    if (value.custodianIds.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['custodianIds'],
+        message: 'at least one custodian is required',
+      });
+    }
+    if (value.uploadCustodian !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['uploadCustodian'],
+        message: 'uploadCustodian applies only to upload collections (scope.uploads)',
+      });
+    }
+  }
 });
 export type CreateCollectionRequest = z.infer<typeof createCollectionRequest>;
 

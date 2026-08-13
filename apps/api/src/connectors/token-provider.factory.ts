@@ -147,11 +147,26 @@ export async function buildConnectorTokenProvider(
     if (account.externalTenantId.length === 0) {
       throw new ConnectorCredentialsError('organization connector has no external tenant id');
     }
+    // Production uses the configured app registration. DEMO-ONLY FALLBACK:
+    // when no app registration is configured AND the account carries a stored
+    // per-connector client_secret (only scripts/demo-seed.ts writes one), use
+    // it with the fixed client id 'demo-client' against the fake provider.
+    let clientId = config.CDFIR_MS_CLIENT_ID;
+    let clientSecret = config.CDFIR_MS_CLIENT_SECRET;
+    if (clientId.length === 0) {
+      const row = findSecret(secrets, SecretKind.client_secret);
+      if (row) {
+        clientId = 'demo-client';
+        clientSecret = (
+          await decryptSecret(kek, account.tenantId, connectorSecretScope(account.id), row)
+        ).toString('utf8');
+      }
+    }
     return new MicrosoftAppTokenSource({
       msLoginBaseUrl: config.CDFIR_MS_LOGIN_BASE_URL,
       tenantId: account.externalTenantId,
-      clientId: config.CDFIR_MS_CLIENT_ID,
-      clientSecret: config.CDFIR_MS_CLIENT_SECRET,
+      clientId,
+      clientSecret,
       fetchImpl: input.fetchImpl,
     });
   }

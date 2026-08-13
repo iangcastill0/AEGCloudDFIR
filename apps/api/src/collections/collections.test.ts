@@ -183,6 +183,161 @@ describe('CollectionsService.create', () => {
   });
 });
 
+describe('CollectionsService.create (uploads)', () => {
+  const UPLOAD_CONNECTOR_ID = '99999999-9999-4999-8999-999999999999';
+  const CONTAINER_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+
+  const uploadBody = {
+    idempotencyKey: 'idem-upload-1',
+    name: 'PST intake',
+    kind: 'snapshot',
+    sources: ['email'],
+    custodianIds: [],
+    uploadCustodian: { email: 'jane@example.com', displayName: 'Jane Doe' },
+    scope: {
+      dateRange: { kind: 'all_time' },
+      uploads: { evidenceItemIds: [CONTAINER_ID] },
+    },
+  };
+
+  function uploadModels(overrides: Record<string, unknown> = {}) {
+    return {
+      collection: {
+        findFirst: vi.fn(async () => null),
+        count: vi.fn(async () => 0),
+        create: vi.fn(async () => ({ id: COLLECTION_ID, status: CollectionStatus.created })),
+      },
+      connectorAccount: {
+        findFirst: vi.fn(async () => ({ id: UPLOAD_CONNECTOR_ID, mode: 'organization' })),
+        create: vi.fn(async () => ({ id: UPLOAD_CONNECTOR_ID, mode: 'organization' })),
+      },
+      custodian: {
+        upsert: vi.fn(async () => ({ id: CUSTODIAN_ID })),
+        findMany: vi.fn(async () => [{ id: CUSTODIAN_ID }]),
+      },
+      evidenceItem: {
+        findMany: vi.fn(async () => [
+          { id: CONTAINER_ID, kind: 'container', provider: 'upload', collectionId: null },
+        ]),
+      },
+      tenant: { findUnique: vi.fn(async () => ({ id: TENANT_ID, planQuota: {} })) },
+      collectionCustodian: { createMany: vi.fn(async () => ({ count: 1 })) },
+      outboxEvent: { create: vi.fn(async () => ({})) },
+      ...overrides,
+    };
+  }
+
+  it('reuses the synthetic upload connector, upserts the custodian, and enqueues discover', async () => {
+    const models = uploadModels();
+    const { service } = makeService(models);
+
+    const result = await service.create(auth, uploadBody, fakeRequest());
+    expect(result).toEqual({ id: COLLECTION_ID, status: 'created', replayed: false });
+
+    // Existing synthetic connector is reused, never duplicated.
+    expect(models.connectorAccount.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { tenantId: TENANT_ID, provider: 'upload' } }),
+    );
+    expect(models.connectorAccount.create).not.toHaveBeenCalled();
+
+    // Declared custodian is upserted under the synthetic connector.
+    const upsertArgs = models.custodian.upsert.mock.calls[0]?.[0] as {
+      create: Record<string, unknown>;
+    };
+    expect(upsertArgs.create).toMatchObject({
+      connectorAccountId: UPLOAD_CONNECTOR_ID,
+      externalId: 'jane@example.com',
+      email: 'jane@example.com',
+      displayName: 'Jane Doe',
+    });
+
+    // The collection hangs off the synthetic connector.
+    const collectionData = (
+      models.collection.create.mock.calls[0]?.[0] as { data: Record<string, unknown> }
+    ).data;
+    expect(collectionData.connectorAccountId).toBe(UPLOAD_CONNECTOR_ID);
+    expect(collectionData.sources).toEqual(['email']);
+
+    const outboxArgs = models.outboxEvent.create.mock.calls[0]?.[0] as {
+      data: Record<string, unknown>;
+    };
+    expect(outboxArgs.data.topic).toBe('collection.discover');
+  });
+
+  it('creates the synthetic connector on first use', async () => {
+    const models = uploadModels({
+      connectorAccount: {
+        findFirst: vi.fn(async () => null),
+        create: vi.fn(async () => ({ id: UPLOAD_CONNECTOR_ID, mode: 'organization' })),
+      },
+    });
+    const { service } = makeService(models);
+
+    await service.create(auth, uploadBody, fakeRequest());
+
+    const createArgs = (models.connectorAccount as { create: ReturnType<typeof vi.fn> }).create.mock
+      .calls[0]?.[0] as { data: Record<string, unknown> };
+    expect(createArgs.data).toMatchObject({
+      provider: 'upload',
+      mode: 'organization',
+      label: 'File uploads',
+      externalIdentity: 'uploaded files',
+      status: 'connected',
+    });
+  });
+
+  it('returns 409 when a container is already claimed by another collection', async () => {
+    const models = uploadModels({
+      evidenceItem: {
+        findMany: vi.fn(async () => [
+          {
+            id: CONTAINER_ID,
+            kind: 'container',
+            provider: 'upload',
+            collectionId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+          },
+        ]),
+      },
+    });
+    const { service } = makeService(models);
+    await expect(service.create(auth, uploadBody, fakeRequest())).rejects.toThrow(
+      ConflictException,
+    );
+  });
+
+  it('rejects evidence items that are not uploaded containers', async () => {
+    const models = uploadModels({
+      evidenceItem: {
+        findMany: vi.fn(async () => [
+          { id: CONTAINER_ID, kind: 'email', provider: 'microsoft', collectionId: null },
+        ]),
+      },
+    });
+    const { service } = makeService(models);
+    await expect(service.create(auth, uploadBody, fakeRequest())).rejects.toThrow(
+      BadRequestException,
+    );
+  });
+
+  it('rejects upload collections with non-email sources or ambiguous custodian input', async () => {
+    const { service } = makeService(uploadModels());
+    await expect(
+      service.create(
+        auth,
+        { ...uploadBody, idempotencyKey: 'idem-upload-2', sources: ['email', 'drive'] },
+        fakeRequest(),
+      ),
+    ).rejects.toThrow(BadRequestException);
+    await expect(
+      service.create(
+        auth,
+        { ...uploadBody, idempotencyKey: 'idem-upload-3', custodianIds: [CUSTODIAN_ID] },
+        fakeRequest(),
+      ),
+    ).rejects.toThrow(BadRequestException);
+  });
+});
+
 describe('CollectionsService.action', () => {
   it('rejects illegal transitions with 409 (pause on a completed collection)', async () => {
     const { service } = makeService({

@@ -60,6 +60,86 @@ describe('collection contracts', () => {
     expect(completeness.safeParse('all data').success).toBe(false);
     expect(completeness.safeParse('complete_within_selected_api_scope').success).toBe(true);
   });
+
+  it('upload scope requires a non-empty evidenceItemIds list', () => {
+    const base = { dateRange: { kind: 'all_time' } };
+    expect(collectionScope.safeParse({ ...base, uploads: { evidenceItemIds: [] } }).success).toBe(
+      false,
+    );
+    expect(
+      collectionScope.safeParse({
+        ...base,
+        uploads: { evidenceItemIds: ['55555555-5555-4555-8555-555555555555'] },
+      }).success,
+    ).toBe(true);
+  });
+
+  it('upload collections require exactly one of custodianIds / uploadCustodian', () => {
+    const uploadBase = {
+      idempotencyKey: 'client-key-upload-1',
+      name: 'PST intake',
+      sources: ['email'],
+      custodianIds: [],
+      scope: {
+        dateRange: { kind: 'all_time' },
+        uploads: { evidenceItemIds: ['55555555-5555-4555-8555-555555555555'] },
+      },
+    };
+    const custodian = { email: 'jane@example.com', displayName: 'Jane' };
+    // neither
+    expect(createCollectionRequest.safeParse(uploadBase).success).toBe(false);
+    // exactly one (uploadCustodian) — connectorAccountId is resolved server-side
+    expect(
+      createCollectionRequest.safeParse({ ...uploadBase, uploadCustodian: custodian }).success,
+    ).toBe(true);
+    // exactly one (custodianIds)
+    expect(
+      createCollectionRequest.safeParse({
+        ...uploadBase,
+        custodianIds: ['22222222-2222-4222-8222-222222222222'],
+      }).success,
+    ).toBe(true);
+    // both
+    expect(
+      createCollectionRequest.safeParse({
+        ...uploadBase,
+        custodianIds: ['22222222-2222-4222-8222-222222222222'],
+        uploadCustodian: custodian,
+      }).success,
+    ).toBe(false);
+    // upload collections are email-only
+    expect(
+      createCollectionRequest.safeParse({
+        ...uploadBase,
+        uploadCustodian: custodian,
+        sources: ['email', 'drive'],
+      }).success,
+    ).toBe(false);
+  });
+
+  it('provider collections still require connectorAccountId and reject uploadCustodian', () => {
+    const base = {
+      idempotencyKey: 'client-key-prov-1',
+      name: 'Q1 snapshot',
+      sources: ['email'],
+      custodianIds: ['22222222-2222-4222-8222-222222222222'],
+      scope: { dateRange: { kind: 'all_time' } },
+    };
+    expect(createCollectionRequest.safeParse(base).success).toBe(false);
+    expect(
+      createCollectionRequest.safeParse({
+        ...base,
+        connectorAccountId: '11111111-1111-4111-8111-111111111111',
+      }).success,
+    ).toBe(true);
+    expect(
+      createCollectionRequest.safeParse({
+        ...base,
+        connectorAccountId: '11111111-1111-4111-8111-111111111111',
+        uploadCustodian: { email: 'jane@example.com' },
+      }).success,
+    ).toBe(false);
+  });
 });
 
 describe('production contracts', () => {
@@ -132,8 +212,17 @@ describe('truthfulness notices', () => {
       'googleNativeExports',
       'exceptions',
       'defensibility',
+      'auditScope',
+      'pstExtraction',
     ] as const) {
       expect(TRUTHFULNESS_NOTICES[key].length).toBeGreaterThan(40);
     }
+  });
+
+  it('pstExtraction notice is honest about reconstruction vs. original', () => {
+    expect(TRUTHFULNESS_NOTICES.pstExtraction).toMatch(/byte-for-byte/);
+    expect(TRUTHFULNESS_NOTICES.pstExtraction).toMatch(/reconstruction/);
+    expect(TRUTHFULNESS_NOTICES.pstExtraction).toMatch(/not provider-native/);
+    expect(TRUTHFULNESS_NOTICES.pstExtraction).toMatch(/authoritative source/);
   });
 });

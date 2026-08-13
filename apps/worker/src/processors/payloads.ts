@@ -63,6 +63,18 @@ export const fetchItemPayload = z.object({
 });
 export type FetchItemPayload = z.infer<typeof fetchItemPayload>;
 
+/**
+ * pst.extract: reconstruct messages from one preserved uploaded container
+ * (PST/OST). The container evidence item stays the immutable original.
+ */
+export const pstExtractPayload = z.object({
+  tenantId: uuid,
+  collectionId: uuid,
+  custodianId: uuid,
+  evidenceItemId: uuid,
+});
+export type PstExtractPayload = z.infer<typeof pstExtractPayload>;
+
 export const finalizePayload = z.object({
   tenantId: uuid,
   collectionId: uuid,

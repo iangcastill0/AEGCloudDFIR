@@ -26,7 +26,7 @@ export const completeness = z.enum([
 ]);
 export type Completeness = z.infer<typeof completeness>;
 
-export const provider = z.enum(['microsoft', 'google']);
+export const provider = z.enum(['microsoft', 'google', 'upload']);
 export const connectionMode = z.enum(['delegated', 'organization']);
 export const collectionSource = z.enum(['email', 'drive', 'audit']);
 
@@ -76,4 +76,6 @@ export const TRUTHFULNESS_NOTICES = {
     'Hashes, manifests, and chain-of-custody records support defensibility but do not by themselves guarantee legal admissibility or regulatory compliance. Consult qualified counsel.',
   auditScope:
     'Audit logs are constrained by the provider’s retention window (e.g. Purview Audit Standard ~180 days, Google Workspace reports ~180 days) and the enabled audit configuration at the time events occurred. Events outside the retained window, or not captured because auditing was disabled, cannot be collected and are reported as scope limitations.',
+  pstExtraction:
+    'Uploaded container files (e.g. PST/OST mailboxes) are preserved byte-for-byte as immutable originals. Messages extracted from a container are reconstructions built from the container’s stored properties (true transport headers are used when the container retains them) and are not provider-native RFC 822 messages; the uploaded container remains the authoritative source.',
 } as const;

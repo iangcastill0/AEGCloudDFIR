@@ -12,6 +12,7 @@ import { ConnectorsModule } from './connectors/connectors.module.js';
 import { CollectionsModule } from './collections/collections.module.js';
 import { SearchModule } from './search/search.module.js';
 import { EvidenceModule } from './evidence/evidence.module.js';
+import { UploadsModule } from './uploads/uploads.module.js';
 import { TagsModule } from './tags/tags.module.js';
 import { CasesModule } from './cases/cases.module.js';
 import { ExportsModule } from './exports/exports.module.js';
@@ -32,6 +33,7 @@ import { PRISMA } from './common/tokens.js';
     CollectionsModule,
     SearchModule,
     EvidenceModule,
+    UploadsModule,
     TagsModule,
     CasesModule,
     ExportsModule,

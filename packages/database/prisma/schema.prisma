@@ -155,6 +155,9 @@ model ConnectorAccount {
 enum Provider {
   microsoft
   google
+  /// Synthetic provider for user-uploaded container files (PST/OST): no
+  /// provider API is involved; originals arrive via the uploads endpoint.
+  upload
 }
 
 enum ConnectionMode {

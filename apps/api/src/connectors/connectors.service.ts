@@ -69,6 +69,8 @@ export const PROVIDER_REVOCATION_NOTES: Record<Provider, string> = {
     'Stored tokens were deleted. To revoke the grant on the provider side, remove the app under https://myaccount.microsoft.com > App permissions (or via Entra admin center for organization connections).',
   google:
     'Stored tokens were deleted. To revoke the grant on the provider side, remove the app under https://myaccount.google.com/permissions (or delete the service-account key for organization connections).',
+  upload:
+    'There is no provider-side grant for file uploads; nothing further to revoke. Already-preserved uploaded files remain in evidence storage.',
 };
 
 const createConnectorSchema = z.object({
@@ -245,6 +247,12 @@ export class ConnectorsService {
     flowCookie?: { value: string; maxAge: number };
   }> {
     const input = zodValidate(createConnectorSchema, body);
+
+    if (input.provider === 'upload') {
+      throw new BadRequestException(
+        'the upload connector is managed automatically; upload container files via POST /api/v1/uploads instead',
+      );
+    }
 
     if (input.mode === 'delegated' && this.clientIdFor(input.provider).length === 0) {
       throw new ConflictException(
@@ -727,6 +735,11 @@ export class ConnectorsService {
     account: Awaited<ReturnType<ConnectorsService['loadAccountWithSecrets']>>,
     impersonateEmail?: string,
   ) {
+    if (account.provider === Provider.upload) {
+      throw new ConflictException(
+        'upload connectors have no provider tokens; uploaded files are processed locally',
+      );
+    }
     return buildConnectorTokenProvider({
       kek: this.kek,
       config: this.config,
@@ -782,37 +795,43 @@ export class ConnectorsService {
 
     let ok = false;
     let detail: string;
-    try {
-      const tokenProvider = await this.tokenProviderFor(account);
-      if (account.mode === 'delegated') {
-        const mail =
-          account.provider === Provider.microsoft
-            ? new GraphEmailConnector({
-                tokenProvider,
-                graphBaseUrl: this.config.CDFIR_MS_GRAPH_BASE_URL,
-                mode: 'delegated',
-                fetchImpl: this.fetchImpl,
-              })
-            : new GmailConnector({
-                tokenProvider,
-                googleApiBaseUrl: this.config.CDFIR_GOOGLE_API_BASE_URL,
-                fetchImpl: this.fetchImpl,
-              });
-        const discovery = await mail.listMailFolders('me');
-        ok = true;
-        detail = `ok: ${discovery.folders.length} mail folders visible`;
-      } else {
-        const directory = this.directoryFor(account, tokenProvider);
-        const page = await directory.listUsers({});
-        ok = true;
-        detail = `ok: directory reachable (${page.users.length} users on first page)`;
+    if (account.provider === Provider.upload) {
+      // Uploads have no provider side to test: never build provider clients.
+      ok = true;
+      detail = 'local uploads';
+    } else {
+      try {
+        const tokenProvider = await this.tokenProviderFor(account);
+        if (account.mode === 'delegated') {
+          const mail =
+            account.provider === Provider.microsoft
+              ? new GraphEmailConnector({
+                  tokenProvider,
+                  graphBaseUrl: this.config.CDFIR_MS_GRAPH_BASE_URL,
+                  mode: 'delegated',
+                  fetchImpl: this.fetchImpl,
+                })
+              : new GmailConnector({
+                  tokenProvider,
+                  googleApiBaseUrl: this.config.CDFIR_GOOGLE_API_BASE_URL,
+                  fetchImpl: this.fetchImpl,
+                });
+          const discovery = await mail.listMailFolders('me');
+          ok = true;
+          detail = `ok: ${discovery.folders.length} mail folders visible`;
+        } else {
+          const directory = this.directoryFor(account, tokenProvider);
+          const page = await directory.listUsers({});
+          ok = true;
+          detail = `ok: directory reachable (${page.users.length} users on first page)`;
+        }
+      } catch (err) {
+        // ConnectorError messages are sanitized by the connectors package.
+        detail =
+          err instanceof ConnectorError || err instanceof ConnectorCredentialsError
+            ? err.message
+            : 'provider call failed';
       }
-    } catch (err) {
-      // ConnectorError messages are sanitized by the connectors package.
-      detail =
-        err instanceof ConnectorError || err instanceof ConnectorCredentialsError
-          ? err.message
-          : 'provider call failed';
     }
 
     await withTenantContext(this.prisma, auth.tenantId, async (tx) => {
@@ -851,6 +870,27 @@ export class ConnectorsService {
     const account = await this.loadAccountWithSecrets(auth, connectorId);
     if (account.status === ConnectorStatus.revoked) {
       throw new ConflictException('connector has been revoked');
+    }
+
+    if (account.provider === Provider.upload) {
+      // Upload custodians are declared at collection time (uploadCustodian);
+      // there is no provider directory to enumerate.
+      const rows = await withTenantContext(this.prisma, auth.tenantId, (tx) =>
+        tx.custodian.findMany({
+          where: { tenantId: auth.tenantId, connectorAccountId: account.id },
+          orderBy: { id: 'asc' },
+        }),
+      );
+      return {
+        items: rows.map((c) => ({
+          id: c.id,
+          externalId: c.externalId,
+          email: c.email,
+          displayName: c.displayName,
+        })),
+        nextCursor: null,
+        notice: TRUTHFULNESS_NOTICES.pstExtraction,
+      };
     }
 
     if (account.mode === 'delegated') {

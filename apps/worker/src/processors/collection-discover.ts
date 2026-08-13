@@ -9,7 +9,7 @@ import {
   type ConnectorBundle,
 } from '../connector-factory.js';
 import { AuditRequiresOrganizationModeError, composeAuditScopeKey } from '../audit.js';
-import { recordException } from '../progress.js';
+import { incrementProgress, recordException } from '../progress.js';
 import { QUEUES, dedupKeys } from '../queues.js';
 import { emailFolderIncluded, parseCollectionScope } from '../scope.js';
 import type { DiscoverPayload } from './payloads.js';
@@ -164,7 +164,10 @@ export async function processCollectionDiscover(
   const collection = await withTenantContext(ctx.prisma, tenantId, (tx) =>
     tx.collection.findUnique({
       where: { id: collectionId },
-      include: { custodians: { include: { custodian: true } } },
+      include: {
+        custodians: { include: { custodian: true } },
+        connectorAccount: { select: { provider: true } },
+      },
     }),
   );
   if (collection === null) {
@@ -192,6 +195,14 @@ export async function processCollectionDiscover(
       summary: { sources: collection.sources },
     });
   });
+
+  // Uploaded-container collections have no provider clients: the containers
+  // are already preserved originals, so discovery just claims them and
+  // schedules reconstruction (pst.extract) per container.
+  if (collection.connectorAccount.provider === 'upload') {
+    await discoverUploads(ctx, tenantId, collectionId, collection, scope);
+    return;
+  }
 
   const discovered: DiscoveredScope[] = [];
   const folderCounts: Record<string, number> = {};
@@ -348,6 +359,160 @@ export async function processCollectionDiscover(
       targetId: collectionId,
       actorDisplay: 'worker',
       summary: { folderCounts, scopeCount: discovered.length, failedEnumerations: failed },
+    });
+  });
+}
+
+/**
+ * Upload-collection discovery: each scoped container evidence item (already a
+ * preserved, content-addressed original) is claimed into the collection as a
+ * 'preserved' CollectionItem and a pst.extract job is scheduled to
+ * reconstruct its messages. Idempotent: re-discovery upserts and never
+ * double-counts progress.
+ */
+async function discoverUploads(
+  ctx: WorkerContext,
+  tenantId: string,
+  collectionId: string,
+  collection: { custodians: { custodianId: string }[] },
+  scope: CollectionScope,
+): Promise<void> {
+  const uploads = scope.uploads;
+  const custodianId = collection.custodians[0]?.custodianId;
+
+  const failDiscovery = async (message: string): Promise<void> => {
+    await withTenantContext(ctx.prisma, tenantId, async (tx) => {
+      await recordException(tx, {
+        tenantId,
+        collectionId,
+        source: 'email',
+        kind: 'other',
+        message,
+      });
+      await tx.collection.update({
+        where: { id: collectionId },
+        data: { status: 'failed', finishedAt: new Date() },
+      });
+      await appendAuditEvent(tx, {
+        tenantId,
+        action: 'collection.discovery_failed',
+        targetType: 'collection',
+        targetId: collectionId,
+        actorDisplay: 'worker',
+        summary: { reason: message },
+      });
+    });
+  };
+
+  if (uploads === undefined || uploads.evidenceItemIds.length === 0) {
+    await failDiscovery('upload collection has no scope.uploads.evidenceItemIds');
+    return;
+  }
+  if (custodianId === undefined) {
+    await failDiscovery('upload collection has no custodian');
+    return;
+  }
+
+  let claimed = 0;
+  let missing = 0;
+  for (const evidenceItemId of uploads.evidenceItemIds) {
+    // One transaction per container so a crash never loses claimed files.
+    await withTenantContext(ctx.prisma, tenantId, async (tx) => {
+      const evidence = await tx.evidenceItem.findUnique({
+        where: { id: evidenceItemId },
+        select: { id: true, kind: true, provider: true, collectionId: true },
+      });
+      if (
+        evidence === null ||
+        evidence.kind !== 'container' ||
+        evidence.provider !== 'upload' ||
+        (evidence.collectionId !== null && evidence.collectionId !== collectionId)
+      ) {
+        missing += 1;
+        await recordException(tx, {
+          tenantId,
+          collectionId,
+          custodianId,
+          source: 'email',
+          providerItemId: `pst:${evidenceItemId}`,
+          kind: 'unavailable_item',
+          message:
+            evidence === null
+              ? 'uploaded container no longer exists'
+              : 'evidence item is not an unclaimed uploaded container',
+        });
+        return;
+      }
+      await tx.evidenceItem.update({
+        where: { id: evidenceItemId },
+        data: { collectionId, custodianId },
+      });
+      const providerItemId = `pst:${evidenceItemId}`;
+      const existing = await tx.collectionItem.findUnique({
+        where: {
+          collectionId_custodianId_source_providerItemId: {
+            collectionId,
+            custodianId,
+            source: 'email',
+            providerItemId,
+          },
+        },
+        select: { id: true },
+      });
+      if (existing === null) {
+        // The container is already preserved (uploaded + content-addressed).
+        await tx.collectionItem.create({
+          data: {
+            tenantId,
+            collectionId,
+            custodianId,
+            source: 'email',
+            providerItemId,
+            state: 'preserved',
+            evidenceItemId,
+          },
+        });
+        await incrementProgress(tx, collectionId, custodianId, 'email', {
+          discovered: 1,
+          fetched: 1,
+          preserved: 1,
+        });
+      }
+      await tx.outboxEvent.createMany({
+        data: [
+          {
+            tenantId,
+            topic: QUEUES.pstExtract,
+            dedupKey: dedupKeys.pstExtract(collectionId, evidenceItemId),
+            payload: { tenantId, collectionId, custodianId, evidenceItemId },
+          },
+        ],
+        skipDuplicates: true,
+      });
+      claimed += 1;
+    });
+  }
+
+  if (claimed === 0) {
+    // Nothing claimable: with no pst.extract jobs there is no finalize nudge,
+    // so close the collection out as failed instead of leaving it fetching.
+    await failDiscovery('none of the scoped uploaded containers could be claimed');
+    return;
+  }
+
+  await withTenantContext(ctx.prisma, tenantId, async (tx) => {
+    await tx.collection.update({ where: { id: collectionId }, data: { status: 'fetching' } });
+    await appendAuditEvent(tx, {
+      tenantId,
+      action: 'collection.discovery_completed',
+      targetType: 'collection',
+      targetId: collectionId,
+      actorDisplay: 'worker',
+      summary: {
+        folderCounts: { uploads: claimed },
+        scopeCount: claimed,
+        failedEnumerations: missing,
+      },
     });
   });
 }

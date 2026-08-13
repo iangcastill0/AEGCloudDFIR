@@ -1,6 +1,12 @@
 'use client';
 /** React Query hooks for the AEG-CloudDFIR API. */
-import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+  keepPreviousData,
+} from '@tanstack/react-query';
 import {
   collectionStatusResponse,
   validateProductionResponse,
@@ -9,9 +15,9 @@ import {
   savedSearchResponse,
   caseResponse,
 } from '@aeg-clouddfir/contracts';
-import type { CreateCollectionRequest } from '@aeg-clouddfir/contracts';
 import { z } from 'zod';
-import { apiFetch } from './api';
+import { apiFetch, apiUpload } from './api';
+import type { WebCreateCollectionRequest } from './collection-wizard';
 import {
   auditListResponse,
   auditRecordsResponse,
@@ -41,6 +47,7 @@ import {
   submitProductionResponse,
   tagListResponse,
   savedSearchListResponse,
+  uploadResponse,
 } from './schemas';
 
 // --- Session ---
@@ -124,16 +131,40 @@ export function useRevokeConnector() {
   });
 }
 
+/**
+ * Live-directory custodian lookup, cursor-paginated. Organization-mode
+ * connectors return directory matches for `search`; delegated connectors
+ * return exactly the connected identity.
+ */
 export function useCustodians(connectorId: string, search: string) {
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: ['custodians', connectorId, search],
-    queryFn: () =>
+    queryFn: ({ pageParam }) =>
       apiFetch(
-        `/api/v1/connectors/${connectorId}/custodians?limit=50&query=${encodeURIComponent(search)}`,
+        `/api/v1/connectors/${connectorId}/custodians?limit=50${
+          search ? `&search=${encodeURIComponent(search)}` : ''
+        }${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ''}`,
         { schema: custodianListResponse },
       ),
+    initialPageParam: '',
+    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
     enabled: connectorId.length > 0,
     placeholderData: keepPreviousData,
+  });
+}
+
+// --- Uploads ---
+
+export interface UploadFileInput {
+  file: File;
+  onProgress?: (fraction: number) => void;
+}
+
+/** Upload one PST/OST container; call sequentially for multiple files. */
+export function useUpload() {
+  return useMutation({
+    mutationFn: ({ file, onProgress }: UploadFileInput) =>
+      apiUpload('/api/v1/uploads', file, { schema: uploadResponse, onProgress }),
   });
 }
 
@@ -171,7 +202,7 @@ export function useCollectionStatus(id: string) {
 export function useCreateCollection() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: CreateCollectionRequest) =>
+    mutationFn: (body: WebCreateCollectionRequest) =>
       apiFetch('/api/v1/collections', { method: 'POST', body, schema: createdIdResponse }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['collections'] }),
   });

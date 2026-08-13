@@ -11,6 +11,7 @@ import { processExtract } from './processors/process-extract.js';
 import { processOcr } from './processors/process-ocr.js';
 import { processParse } from './processors/process-parse.js';
 import { processScan } from './processors/process-scan.js';
+import { processPstExtract } from './processors/pst-extract.js';
 import { processProductionRun } from './processors/production-run.js';
 import { deletionRun, deletionRunPayload } from './processors/deletion-run.js';
 import { processSearchIndex } from './processors/search-index.js';
@@ -22,6 +23,7 @@ import {
   fetchPagePayload,
   finalizePayload,
   productionRunPayload,
+  pstExtractPayload,
   tenantOnlyPayload,
 } from './processors/payloads.js';
 import { BACKOFF_STRATEGIES, DEFAULT_JOB_OPTIONS, QUEUES, type QueueName } from './queues.js';
@@ -32,6 +34,8 @@ export const QUEUE_CONCURRENCY: Record<QueueName, number> = {
   [QUEUES.collectionFetchPage]: 2,
   [QUEUES.collectionFetchItem]: 8,
   [QUEUES.collectionFinalize]: 2,
+  // Container extraction is memory/disk heavy (temp copy of the whole PST).
+  [QUEUES.pstExtract]: 1,
   [QUEUES.processParse]: 4,
   [QUEUES.processExtract]: 4,
   [QUEUES.processOcr]: 4,
@@ -57,6 +61,7 @@ export function buildHandlers(): Record<QueueName, QueueHandler> {
       processCollectionFetchItem(ctx, fetchItemPayload.parse(data)),
     [QUEUES.collectionFinalize]: (ctx, data) =>
       processCollectionFinalize(ctx, finalizePayload.parse(data)),
+    [QUEUES.pstExtract]: (ctx, data) => processPstExtract(ctx, pstExtractPayload.parse(data)),
     [QUEUES.processParse]: (ctx, data) => processParse(ctx, evidenceStagePayload.parse(data)),
     [QUEUES.processExtract]: (ctx, data) => processExtract(ctx, evidenceStagePayload.parse(data)),
     [QUEUES.processOcr]: (ctx, data) => processOcr(ctx, evidenceStagePayload.parse(data)),

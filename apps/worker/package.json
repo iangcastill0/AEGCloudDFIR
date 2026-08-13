@@ -12,7 +12,6 @@
     "start": "node dist/main.js"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "3.1105.0",
     "@aeg-clouddfir/config": "workspace:*",
     "@aeg-clouddfir/connectors": "workspace:*",
     "@aeg-clouddfir/contracts": "workspace:*",
@@ -20,12 +19,14 @@
     "@aeg-clouddfir/evidence": "workspace:*",
     "@aeg-clouddfir/production": "workspace:*",
     "@aeg-clouddfir/search": "workspace:*",
+    "@aws-sdk/client-s3": "3.1105.0",
     "@nestjs/common": "^10.4.22",
     "@nestjs/core": "^10.4.22",
     "bullmq": "6.0.8",
     "ioredis": "6.0.0",
     "pino": "10.3.1",
     "prom-client": "15.1.3",
+    "pst-extractor": "1.12.0",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2",
     "zod": "^4.4.3"

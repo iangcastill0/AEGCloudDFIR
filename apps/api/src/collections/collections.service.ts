@@ -12,11 +12,12 @@ import {
   Prisma,
   withTenantContext,
   type PrismaClient,
+  type TenantScopedTx,
 } from '@aeg-clouddfir/database';
 import { z } from 'zod';
 import {
   collectionAction,
-  createCollectionRequest,
+  createCollectionRequestFields,
   type CollectionStatusResponse,
 } from '@aeg-clouddfir/contracts';
 import type { FastifyRequest } from 'fastify';
@@ -39,14 +40,48 @@ const ACTIVE_STATUSES: CollectionStatus[] = [
 ];
 
 /**
- * API-level create schema. The shared contract requires at least one custodian,
- * but audit-log collections are organization-scoped and select no custodians, so
- * we relax that field to `[]` and re-require it only when an email/drive source
- * is present. (The contract stays strict for other consumers.)
+ * API-level create schema, built from the contract's field shape (the refined
+ * contract schema cannot be extended). Relaxations relative to the contract:
+ * audit-log collections are organization-scoped and select no custodians, so
+ * custodianIds may be empty when only the audit source is present. Upload
+ * collections follow the contract rules: email-only, connectorAccountId
+ * resolved server-side, exactly one of custodianIds / uploadCustodian.
  */
-const createCollectionApiSchema = createCollectionRequest
+const createCollectionApiSchema = createCollectionRequestFields
   .extend({ custodianIds: z.array(z.string().uuid()).max(10000) })
   .superRefine((value, ctx) => {
+    const isUpload = value.scope.uploads !== undefined;
+    if (isUpload) {
+      if (value.sources.length !== 1 || value.sources[0] !== 'email') {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['sources'],
+          message: 'upload collections support only the email source',
+        });
+      }
+      if (value.custodianIds.length > 0 === (value.uploadCustodian !== undefined)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['custodianIds'],
+          message: 'upload collections require exactly one of custodianIds or uploadCustodian',
+        });
+      }
+      return;
+    }
+    if (value.connectorAccountId === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['connectorAccountId'],
+        message: 'connectorAccountId is required for provider collections',
+      });
+    }
+    if (value.uploadCustodian !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['uploadCustodian'],
+        message: 'uploadCustodian applies only to upload collections (scope.uploads)',
+      });
+    }
     const needsCustodian = value.sources.some((s) => s !== 'audit');
     if (needsCustodian && value.custodianIds.length === 0) {
       ctx.addIssue({
@@ -167,6 +202,7 @@ export class CollectionsService {
   ): Promise<{ id: string; status: string; replayed: boolean }> {
     const input = zodValidate(createCollectionApiSchema, body);
     const includesAudit = input.sources.includes('audit');
+    const uploadsScope = input.scope.uploads;
 
     try {
       const result = await withTenantContext(this.prisma, auth.tenantId, async (tx) => {
@@ -177,31 +213,64 @@ export class CollectionsService {
         });
         if (existing) return { id: existing.id, status: existing.status, replayed: true };
 
-        const connector = await tx.connectorAccount.findFirst({
-          where: { id: input.connectorAccountId, tenantId: auth.tenantId },
-        });
-        if (!connector) throw new NotFoundException();
-        if (connector.status !== ConnectorStatus.connected) {
-          throw new ConflictException('connector is not connected');
-        }
-        // Audit logs are tenant/organization-wide (app permission / DWD); a
-        // delegated connector cannot collect them.
-        if (includesAudit && connector.mode !== 'organization') {
-          throw new ConflictException(
-            'audit-log collection requires an organization-mode connector; delegated connectors cannot collect audit logs',
-          );
+        let connector: { id: string; mode: string };
+        let custodianIds = input.custodianIds;
+        if (uploadsScope !== undefined) {
+          // Uploads live under one synthetic per-tenant connector, resolved
+          // (or created) server-side — clients never manage it directly.
+          connector = await this.resolveUploadConnector(tx, auth);
+          if (input.uploadCustodian !== undefined) {
+            const custodian = await tx.custodian.upsert({
+              where: {
+                connectorAccountId_externalId: {
+                  connectorAccountId: connector.id,
+                  externalId: input.uploadCustodian.email,
+                },
+              },
+              create: {
+                tenantId: auth.tenantId,
+                connectorAccountId: connector.id,
+                externalId: input.uploadCustodian.email,
+                email: input.uploadCustodian.email,
+                displayName: input.uploadCustodian.displayName,
+              },
+              update: { displayName: input.uploadCustodian.displayName },
+              select: { id: true },
+            });
+            custodianIds = [custodian.id];
+          }
+          await this.assertUploadsClaimable(tx, auth, uploadsScope.evidenceItemIds);
+        } else {
+          if (input.connectorAccountId === undefined) {
+            throw new BadRequestException('connectorAccountId is required');
+          }
+          const found = await tx.connectorAccount.findFirst({
+            where: { id: input.connectorAccountId, tenantId: auth.tenantId },
+          });
+          if (!found) throw new NotFoundException();
+          if (found.status !== ConnectorStatus.connected) {
+            throw new ConflictException('connector is not connected');
+          }
+          // Audit logs are tenant/organization-wide (app permission / DWD); a
+          // delegated connector cannot collect them.
+          if (includesAudit && found.mode !== 'organization') {
+            throw new ConflictException(
+              'audit-log collection requires an organization-mode connector; delegated connectors cannot collect audit logs',
+            );
+          }
+          connector = found;
         }
 
-        if (input.custodianIds.length > 0) {
+        if (custodianIds.length > 0) {
           const custodians = await tx.custodian.findMany({
             where: {
-              id: { in: input.custodianIds },
+              id: { in: custodianIds },
               tenantId: auth.tenantId,
               connectorAccountId: connector.id,
             },
             select: { id: true },
           });
-          if (custodians.length !== input.custodianIds.length) {
+          if (custodians.length !== custodianIds.length) {
             throw new BadRequestException(
               'every custodianId must belong to the selected connector',
             );
@@ -232,9 +301,9 @@ export class CollectionsService {
             createdById: auth.userId,
           },
         });
-        if (input.custodianIds.length > 0) {
+        if (custodianIds.length > 0) {
           await tx.collectionCustodian.createMany({
-            data: input.custodianIds.map((custodianId) => ({
+            data: custodianIds.map((custodianId) => ({
               tenantId: auth.tenantId,
               collectionId: collection.id,
               custodianId,
@@ -261,7 +330,10 @@ export class CollectionsService {
           summary: {
             name: input.name,
             sources: input.sources,
-            custodianCount: input.custodianIds.length,
+            custodianCount: custodianIds.length,
+            ...(uploadsScope !== undefined
+              ? { uploadedContainers: uploadsScope.evidenceItemIds.length }
+              : {}),
           },
           request,
         });
@@ -280,6 +352,69 @@ export class CollectionsService {
         if (existing) return { id: existing.id, status: existing.status, replayed: true };
       }
       throw err;
+    }
+  }
+
+  /**
+   * Resolve (or lazily create) the tenant's synthetic 'upload' connector: the
+   * anchor for uploaded-container custodians and collections. There is no
+   * provider side — it exists so uploads flow through the same connector /
+   * custodian / collection model as API sources.
+   */
+  private async resolveUploadConnector(
+    tx: TenantScopedTx,
+    auth: AuthContext,
+  ): Promise<{ id: string; mode: string }> {
+    const existing = await tx.connectorAccount.findFirst({
+      where: { tenantId: auth.tenantId, provider: 'upload' },
+      select: { id: true, mode: true },
+    });
+    if (existing) return existing;
+    return tx.connectorAccount.create({
+      data: {
+        tenantId: auth.tenantId,
+        provider: 'upload',
+        mode: 'organization',
+        label: 'File uploads',
+        externalIdentity: 'uploaded files',
+        status: ConnectorStatus.connected,
+        createdById: auth.userId,
+      },
+      select: { id: true, mode: true },
+    });
+  }
+
+  /**
+   * Every scoped upload must be an existing, unclaimed uploaded container.
+   * A container already claimed by another collection is a 409 — one
+   * container belongs to exactly one collection.
+   */
+  private async assertUploadsClaimable(
+    tx: TenantScopedTx,
+    auth: AuthContext,
+    evidenceItemIds: string[],
+  ): Promise<void> {
+    const uniqueIds = [...new Set(evidenceItemIds)];
+    const items = await tx.evidenceItem.findMany({
+      where: { id: { in: uniqueIds }, tenantId: auth.tenantId },
+      select: { id: true, kind: true, provider: true, collectionId: true },
+    });
+    if (items.length !== uniqueIds.length) {
+      throw new BadRequestException(
+        'every uploads.evidenceItemIds entry must reference an existing uploaded file',
+      );
+    }
+    for (const item of items) {
+      if (item.kind !== 'container' || item.provider !== 'upload') {
+        throw new BadRequestException(
+          'uploads.evidenceItemIds must reference uploaded container files',
+        );
+      }
+      if (item.collectionId !== null) {
+        throw new ConflictException(
+          'an uploaded container is already claimed by another collection',
+        );
+      }
     }
   }
 

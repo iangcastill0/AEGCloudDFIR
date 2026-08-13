@@ -4,6 +4,7 @@ import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fa
 import helmet from '@fastify/helmet';
 import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
+import multipart from '@fastify/multipart';
 import type { FastifyInstance } from 'fastify';
 import { redactConfig, type AppConfig } from '@aeg-clouddfir/config';
 import './common/http.js';
@@ -62,6 +63,11 @@ async function bootstrap(): Promise<void> {
     noSniff: true,
   });
   await fastify.register(cookie);
+  // Container-file uploads (PST/OST) stream through the evidence store and
+  // are never buffered; the size limit is separate from the JSON body limit.
+  await fastify.register(multipart, {
+    limits: { files: 1, fileSize: config.CDFIR_UPLOAD_MAX_BYTES },
+  });
   await fastify.register(cors, {
     origin:
       config.CDFIR_CORS_ALLOWED_ORIGINS.length > 0 ? config.CDFIR_CORS_ALLOWED_ORIGINS : false,

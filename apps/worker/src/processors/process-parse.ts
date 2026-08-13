@@ -371,7 +371,14 @@ export async function processParse(
       where: { id: evidenceItemId },
       data: {
         processingStatus: 'parsed',
-        processingDetail: parsed.parserName === 'minimal-parser' ? 'minimal-parser' : '',
+        // 'extracted-from-pst' marks a reconstruction (not provider-native)
+        // and must survive re-parsing of the synthesized .eml.
+        processingDetail:
+          item.processingDetail === 'extracted-from-pst'
+            ? 'extracted-from-pst'
+            : parsed.parserName === 'minimal-parser'
+              ? 'minimal-parser'
+              : '',
       },
     });
 

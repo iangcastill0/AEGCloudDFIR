@@ -83,6 +83,17 @@ export type CustodianEntry = z.infer<typeof custodianEntry>;
 
 export const custodianListResponse = paginated(custodianEntry);
 
+// --- Uploads ---
+
+/** POST /api/v1/uploads response: the preserved container's identity. */
+export const uploadResponse = z.object({
+  uploadId: z.string(),
+  filename: z.string(),
+  sha256: z.string(),
+  size: z.number(),
+});
+export type UploadResponse = z.infer<typeof uploadResponse>;
+
 // --- Collections ---
 
 export const collectionSummary = z.object({

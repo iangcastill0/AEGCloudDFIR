@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  STEP_ACCOUNT,
   STEP_CUSTODIANS,
   STEP_REVIEW,
   STEP_SCOPE,
+  STEP_SOURCES,
+  STEP_TYPE,
   buildCreateRequest,
   canAdvance,
   freshWizard,
@@ -10,7 +13,9 @@ import {
   serializeWizard,
   validateStep,
   wizardReducer,
+  wizardStepLabels,
   type WizardState,
+  type WizardUpload,
 } from './collection-wizard';
 
 const KEY = 'test-idempotency-key-1234';
@@ -81,6 +86,152 @@ describe('wizard step gating', () => {
     expect(wizardReducer(s, { type: 'goto', step: 5 })).toBe(s);
     expect(wizardReducer(s, { type: 'goto', step: 0 }).step).toBe(0);
     expect(wizardReducer(s, { type: 'back' }).step).toBe(0);
+  });
+});
+
+const PST_UPLOAD: WizardUpload = {
+  uploadId: 'up-11111111',
+  filename: 'alice-archive.pst',
+  sha256: 'f'.repeat(64),
+  size: 52_428_800,
+};
+
+function uploadWizard(): WizardState {
+  let s = freshWizard(KEY);
+  s = wizardReducer(s, {
+    type: 'patch',
+    patch: {
+      name: 'PST intake — Doe custodial files',
+      provider: 'upload',
+      sources: { email: true, drive: false, audit: false },
+      kind: 'snapshot',
+    },
+  });
+  return s;
+}
+
+describe('upload provider path', () => {
+  it('relabels the Account step as Upload', () => {
+    expect(wizardStepLabels(uploadWizard())[STEP_ACCOUNT]).toBe('Upload');
+    expect(wizardStepLabels(freshWizard(KEY))[STEP_ACCOUNT]).toBe('Account');
+  });
+
+  it('cannot pass the Upload step with zero completed uploads', () => {
+    let s = uploadWizard();
+    s = wizardReducer(s, { type: 'next' });
+    expect(s.step).toBe(STEP_ACCOUNT);
+    expect(validateStep(s, STEP_ACCOUNT).join(' ')).toMatch(/\.pst/);
+    expect(wizardReducer(s, { type: 'next' }).step).toBe(STEP_ACCOUNT); // gated
+
+    s = wizardReducer(s, { type: 'addUpload', upload: PST_UPLOAD });
+    expect(validateStep(s, STEP_ACCOUNT)).toEqual([]);
+    expect(wizardReducer(s, { type: 'next' }).step).toBe(STEP_ACCOUNT + 1);
+  });
+
+  it('addUpload is idempotent by uploadId; removeUpload takes it back out', () => {
+    let s = uploadWizard();
+    s = wizardReducer(s, { type: 'addUpload', upload: PST_UPLOAD });
+    s = wizardReducer(s, { type: 'addUpload', upload: PST_UPLOAD });
+    expect(s.uploads).toHaveLength(1);
+    s = wizardReducer(s, { type: 'removeUpload', uploadId: PST_UPLOAD.uploadId });
+    expect(s.uploads).toHaveLength(0);
+  });
+
+  it('sources and scope steps are informational (never block) for uploads', () => {
+    const s = uploadWizard();
+    expect(validateStep(s, STEP_SOURCES)).toEqual([]);
+    expect(validateStep(s, STEP_SCOPE)).toEqual([]);
+  });
+
+  it('requires a valid custodian email on the custodian step', () => {
+    let s = uploadWizard();
+    expect(validateStep(s, STEP_CUSTODIANS).join(' ')).toMatch(/valid custodian email/i);
+    s = wizardReducer(s, {
+      type: 'patch',
+      patch: { uploadCustodian: { email: 'not-an-email', displayName: '' } },
+    });
+    expect(validateStep(s, STEP_CUSTODIANS).length).toBe(1);
+    s = wizardReducer(s, {
+      type: 'patch',
+      patch: { uploadCustodian: { email: 'alice@acme.example', displayName: 'Alice Doe' } },
+    });
+    expect(validateStep(s, STEP_CUSTODIANS)).toEqual([]);
+  });
+
+  it('rejects continuous collections for uploads', () => {
+    let s = uploadWizard();
+    s = wizardReducer(s, { type: 'patch', patch: { kind: 'continuous' } });
+    expect(validateStep(s, STEP_TYPE).join(' ')).toMatch(/snapshot/i);
+  });
+
+  it('buildCreateRequest emits uploadCustodian + scope.uploads and omits the connector', () => {
+    let s = uploadWizard();
+    s = wizardReducer(s, { type: 'addUpload', upload: PST_UPLOAD });
+    s = wizardReducer(s, {
+      type: 'addUpload',
+      upload: { ...PST_UPLOAD, uploadId: 'up-22222222', filename: 'bob.ost' },
+    });
+    s = wizardReducer(s, {
+      type: 'patch',
+      patch: { uploadCustodian: { email: 'alice@acme.example', displayName: ' Alice Doe ' } },
+    });
+    const req = buildCreateRequest(s);
+    expect(req.connectorAccountId).toBeUndefined();
+    expect(req.kind).toBe('snapshot');
+    expect(req.sources).toEqual(['email']);
+    expect(req.custodianIds).toEqual([]);
+    expect(req.uploadCustodian).toEqual({ email: 'alice@acme.example', displayName: 'Alice Doe' });
+    expect(req.scope.dateRange).toEqual({ kind: 'all_time' });
+    expect(req.scope.uploads?.evidenceItemIds).toEqual(['up-11111111', 'up-22222222']);
+    expect(req.scope.email).toBeUndefined();
+    expect(req.scope.audit).toBeUndefined();
+  });
+
+  it('buildCreateRequest throws with no uploads or an invalid custodian email', () => {
+    const s = uploadWizard();
+    expect(() => buildCreateRequest(s)).toThrow();
+    const withUpload = wizardReducer(s, { type: 'addUpload', upload: PST_UPLOAD });
+    expect(() => buildCreateRequest(withUpload)).toThrow(); // custodian email still empty
+  });
+
+  it('resume round-trips the upload slice', () => {
+    let s = uploadWizard();
+    s = wizardReducer(s, { type: 'addUpload', upload: PST_UPLOAD });
+    s = wizardReducer(s, {
+      type: 'patch',
+      patch: { uploadCustodian: { email: 'alice@acme.example', displayName: 'Alice Doe' } },
+    });
+    s = wizardReducer(s, { type: 'next' });
+    const resumed = hydrateWizard(serializeWizard(s), 'other-key-abcdefgh');
+    expect(resumed).toEqual(s);
+    expect(resumed.uploads[0]?.sha256).toBe(PST_UPLOAD.sha256);
+  });
+});
+
+describe('v1 → v2 storage migration', () => {
+  it('migrates a v1 payload by adding an empty upload slice', () => {
+    const v2 = freshWizard(KEY);
+    const legacy: Record<string, unknown> = {
+      ...v2,
+      v: 1,
+      name: 'Resumed run',
+      step: 2,
+      maxStepReached: 3,
+    };
+    delete legacy['uploads'];
+    delete legacy['uploadCustodian'];
+    const resumed = hydrateWizard(JSON.stringify(legacy), 'other-key-abcdefgh');
+    expect(resumed.v).toBe(2);
+    expect(resumed.name).toBe('Resumed run');
+    expect(resumed.step).toBe(2);
+    expect(resumed.idempotencyKey).toBe(KEY);
+    expect(resumed.uploads).toEqual([]);
+    expect(resumed.uploadCustodian).toEqual({ email: '', displayName: '' });
+  });
+
+  it('discards unknown or future versions safely', () => {
+    expect(hydrateWizard(JSON.stringify({ v: 99 }), KEY).idempotencyKey).toBe(KEY);
+    expect(hydrateWizard(JSON.stringify({ v: 1, garbage: true }), KEY).step).toBe(0);
   });
 });
 

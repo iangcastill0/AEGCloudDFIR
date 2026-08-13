@@ -121,6 +121,7 @@ export function fakeConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     CDFIR_CLAMAV_ENABLED: true,
     CDFIR_OCR_LANGS: 'eng',
     CDFIR_MAX_OCR_PAGES: 2000,
+    CDFIR_PST_MAX_MESSAGES: 250_000,
     CDFIR_S3_BUCKET_EVIDENCE: 'evidence-test',
     CDFIR_S3_BUCKET_QUARANTINE: 'quarantine-test',
     CDFIR_MS_GRAPH_BASE_URL: 'http://graph.test',

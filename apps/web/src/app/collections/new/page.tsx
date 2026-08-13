@@ -6,6 +6,7 @@ import {
   Button,
   Checkbox,
   Notice,
+  ProgressBar,
   RadioGroup,
   Select,
   StatusLive,
@@ -13,26 +14,32 @@ import {
   Table,
   TextArea,
   TextInput,
+  VisuallyHidden,
 } from '@aeg-clouddfir/ui';
 import { QueryBoundary, TruthNotice } from '@/components/shared';
 import {
-  WIZARD_STEPS,
+  PST_EXTRACTION_NOTICE,
   STEP_START,
   buildCreateRequest,
   canAdvance,
   freshWizard,
   hydrateWizard,
   isAuditOnly,
+  isUploadCollection,
   serializeWizard,
   validateStep,
   wizardReducer,
+  wizardStepLabels,
   type WizardAction,
   type WizardState,
 } from '@/lib/collection-wizard';
-import { useConnectors, useCreateCollection, useCustodians } from '@/lib/hooks';
+import { useConnectors, useCreateCollection, useCustodians, useUpload } from '@/lib/hooks';
 import { errorMessage } from '@/lib/errors';
+import { formatBytes } from '@/lib/format';
 
-const STORAGE_KEY = 'cdfir-collection-wizard-v1';
+const STORAGE_KEY = 'cdfir-collection-wizard-v2';
+/** Pre-upload persisted payloads; migrated (or discarded) on first load. */
+const LEGACY_STORAGE_KEY = 'cdfir-collection-wizard-v1';
 
 const MS_CONTENT_TYPES = [
   { value: 'Audit.Exchange', label: 'Exchange' },
@@ -68,9 +75,14 @@ export default function NewCollectionPage() {
   const [showErrors, setShowErrors] = useState(false);
   const create = useCreateCollection();
 
-  // Resume from sessionStorage after mount (refresh-safe).
+  // Resume from sessionStorage after mount (refresh-safe). v1 payloads are
+  // migrated by hydrateWizard; the legacy key is cleaned up either way.
   useEffect(() => {
-    setState((s) => hydrateWizard(window.sessionStorage.getItem(STORAGE_KEY), s.idempotencyKey));
+    const raw =
+      window.sessionStorage.getItem(STORAGE_KEY) ??
+      window.sessionStorage.getItem(LEGACY_STORAGE_KEY);
+    window.sessionStorage.removeItem(LEGACY_STORAGE_KEY);
+    setState((s) => hydrateWizard(raw, s.idempotencyKey));
     setHydrated(true);
   }, []);
 
@@ -129,7 +141,7 @@ export default function NewCollectionPage() {
 
       <Stepper
         label="Collection wizard progress"
-        steps={[...WIZARD_STEPS]}
+        steps={wizardStepLabels(state)}
         current={state.step}
         onStepSelect={(step) => dispatch({ type: 'goto', step })}
       />
@@ -173,15 +185,24 @@ function StepBody({
   state: WizardState;
   dispatch: (a: WizardAction) => void;
 }) {
+  const upload = isUploadCollection(state);
   switch (state.step) {
     case 0:
       return <ProviderStep state={state} dispatch={dispatch} />;
     case 1:
-      return <AccountStep state={state} dispatch={dispatch} />;
+      return upload ? (
+        <UploadStep state={state} dispatch={dispatch} />
+      ) : (
+        <AccountStep state={state} dispatch={dispatch} />
+      );
     case 2:
       return <SourcesStep state={state} dispatch={dispatch} />;
     case 3:
-      return <CustodiansStep state={state} dispatch={dispatch} />;
+      return upload ? (
+        <UploadCustodianStep state={state} dispatch={dispatch} />
+      ) : (
+        <CustodiansStep state={state} dispatch={dispatch} />
+      );
     case 4:
       return <ScopeStep state={state} dispatch={dispatch} />;
     case 5:
@@ -210,17 +231,25 @@ function ProviderStep({ state, dispatch }: StepProps) {
         legend="Provider"
         name="provider"
         value={state.provider}
-        onChange={(value) =>
+        onChange={(value) => {
+          const provider = value as WizardState['provider'];
           dispatch({
             type: 'patch',
             patch: {
-              provider: value as WizardState['provider'],
+              provider,
               connectorAccountId: '',
               connectorMode: '',
               custodians: [],
+              // Uploads are always snapshot email collections.
+              ...(provider === 'upload'
+                ? {
+                    sources: { email: true, drive: false, audit: false },
+                    kind: 'snapshot' as const,
+                  }
+                : {}),
             },
-          })
-        }
+          });
+        }}
         options={[
           {
             value: 'microsoft',
@@ -228,6 +257,11 @@ function ProviderStep({ state, dispatch }: StepProps) {
             description: 'Exchange Online mail, OneDrive',
           },
           { value: 'google', label: 'Google Workspace', description: 'Gmail, Google Drive' },
+          {
+            value: 'upload',
+            label: 'PST / mailbox file upload',
+            description: 'Preserve and review Outlook data files (.pst, .ost)',
+          },
         ]}
       />
     </section>
@@ -272,11 +306,13 @@ function AccountStep({ state, dispatch }: StepProps) {
               }}
               options={usable.map((c) => ({
                 value: c.id,
-                label: `${c.externalIdentity ?? c.label ?? c.id} (${c.mode})`,
+                label: `${c.externalIdentity || c.label || c.id} ${
+                  c.mode === 'organization' ? '(organization)' : '(personal/delegated)'
+                }`,
                 description:
-                  c.mode === 'delegated'
-                    ? 'Personal connection — collects only what this identity can access.'
-                    : 'Organization-wide connection.',
+                  c.mode === 'organization'
+                    ? 'Corporate account — collects any permitted user in the tenant via admin-consented app access.'
+                    : 'Personal connection — collects only what this identity can access.',
               }))}
             />
           );
@@ -286,7 +322,192 @@ function AccountStep({ state, dispatch }: StepProps) {
   );
 }
 
+// --- Upload path (provider 'upload') ---
+
+interface ActiveUpload {
+  filename: string;
+  size: number;
+  /** 0..1 */
+  progress: number;
+}
+
+interface UploadFailure {
+  filename: string;
+  message: string;
+}
+
+function UploadStep({ state, dispatch }: StepProps) {
+  const upload = useUpload();
+  const [active, setActive] = useState<ActiveUpload | null>(null);
+  const [failures, setFailures] = useState<UploadFailure[]>([]);
+  const [statusText, setStatusText] = useState('');
+
+  async function uploadSequentially(files: File[]) {
+    setFailures([]);
+    for (const file of files) {
+      if (!/\.(pst|ost)$/i.test(file.name)) {
+        setFailures((prev) => [
+          ...prev,
+          { filename: file.name, message: 'Only .pst and .ost files are accepted.' },
+        ]);
+        continue;
+      }
+      setActive({ filename: file.name, size: file.size, progress: 0 });
+      setStatusText(`Uploading ${file.name}…`);
+      try {
+        const result = await upload.mutateAsync({
+          file,
+          onProgress: (fraction) =>
+            setActive((a) => (a === null ? a : { ...a, progress: fraction })),
+        });
+        dispatch({ type: 'addUpload', upload: result });
+        setStatusText(`${file.name} uploaded and preserved.`);
+      } catch (err) {
+        const message = errorMessage(err);
+        setFailures((prev) => [...prev, { filename: file.name, message }]);
+        setStatusText(`Upload of ${file.name} failed: ${message}`);
+      }
+    }
+    setActive(null);
+  }
+
+  return (
+    <section aria-label="Step 2: upload mailbox files">
+      <Notice variant="info">{PST_EXTRACTION_NOTICE}</Notice>
+
+      <TextInput
+        label="Mailbox files (.pst, .ost)"
+        hint="Files upload one at a time and are hashed and preserved on receipt. You can add more files afterwards."
+        type="file"
+        accept=".pst,.ost"
+        multiple
+        disabled={active !== null}
+        onChange={(e) => {
+          const files = Array.from(e.currentTarget.files ?? []);
+          e.currentTarget.value = '';
+          void uploadSequentially(files);
+        }}
+      />
+
+      {active !== null ? (
+        <ProgressBar
+          label={`Uploading ${active.filename}`}
+          value={Math.round(active.progress * 100)}
+          max={100}
+          detail={`${active.filename} · ${formatBytes(active.size)}`}
+        />
+      ) : null}
+      <StatusLive>{statusText}</StatusLive>
+
+      {failures.length > 0 ? (
+        <div role="alert" className="cdfir-notice cdfir-notice--warning">
+          <ul style={{ margin: 0, paddingInlineStart: '1.2em' }}>
+            {failures.map((f, i) => (
+              <li key={`${f.filename}-${i}`}>
+                {f.filename}: {f.message}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {state.uploads.length > 0 ? (
+        <>
+          <Table caption={`Uploaded files (${state.uploads.length})`}>
+            <thead>
+              <tr>
+                <th scope="col">File</th>
+                <th scope="col">Size</th>
+                <th scope="col">SHA-256</th>
+                <th scope="col">
+                  <VisuallyHidden>Actions</VisuallyHidden>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {state.uploads.map((u) => (
+                <tr key={u.uploadId}>
+                  <td style={{ overflowWrap: 'anywhere' }}>{u.filename}</td>
+                  <td>{formatBytes(u.size)}</td>
+                  <td>
+                    <span className="mono" title={u.sha256}>
+                      {u.sha256.slice(0, 16)}…
+                    </span>
+                  </td>
+                  <td>
+                    <Button
+                      small
+                      variant="secondary"
+                      aria-label={`Remove ${u.filename} from this collection`}
+                      onClick={() => dispatch({ type: 'removeUpload', uploadId: u.uploadId })}
+                    >
+                      Remove
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+          <p className="cdfir-field__hint">
+            Removing a file here only excludes it from this collection. The preserved upload itself
+            remains in the evidence store.
+          </p>
+        </>
+      ) : (
+        <p>No files uploaded yet.</p>
+      )}
+    </section>
+  );
+}
+
+function UploadCustodianStep({ state, dispatch }: StepProps) {
+  return (
+    <section aria-label="Step 4: custodians">
+      <p>
+        Uploaded mailbox files carry no connected account, so name the custodian yourself: all
+        messages extracted from the container(s) will be attributed to this custodian in search,
+        review, exports, and reports.
+      </p>
+      <TextInput
+        label="Custodian email"
+        hint="The mailbox owner’s address, e.g. alice@acme.example."
+        type="email"
+        autoComplete="off"
+        value={state.uploadCustodian.email}
+        onChange={(e) =>
+          dispatch({
+            type: 'patch',
+            patch: { uploadCustodian: { ...state.uploadCustodian, email: e.target.value } },
+          })
+        }
+      />
+      <TextInput
+        label="Display name (optional)"
+        hint="Shown alongside the email where custodians are listed."
+        autoComplete="off"
+        value={state.uploadCustodian.displayName}
+        onChange={(e) =>
+          dispatch({
+            type: 'patch',
+            patch: { uploadCustodian: { ...state.uploadCustodian, displayName: e.target.value } },
+          })
+        }
+      />
+    </section>
+  );
+}
+
 function SourcesStep({ state, dispatch }: StepProps) {
+  if (isUploadCollection(state)) {
+    return (
+      <section aria-label="Step 3: sources">
+        <Notice variant="info">
+          Uploaded mailbox files contain email only, so the email source is selected automatically.
+          Drive and audit-log sources do not apply to uploads.
+        </Notice>
+      </section>
+    );
+  }
   const auditNeedsOrg = state.sources.audit && state.connectorMode !== 'organization';
   return (
     <section aria-label="Step 3: sources">
@@ -341,12 +562,29 @@ function SourcesStep({ state, dispatch }: StepProps) {
 }
 
 function CustodiansStep({ state, dispatch }: StepProps) {
+  const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
+
+  // Debounce directory searches (live-directory lookups are rate-limited).
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSearch(searchInput.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [searchInput]);
+
   const custodians = useCustodians(state.connectorAccountId, search);
   const delegated = state.connectorMode === 'delegated';
+  const auditOnly = isAuditOnly(state);
+
+  // Delegated connections collect for the signed-in identity only.
+  useEffect(() => {
+    const self = custodians.data?.pages[0]?.items[0];
+    if (!auditOnly && delegated && state.custodians.length === 0 && self) {
+      dispatch({ type: 'patch', patch: { custodians: [{ id: self.id, email: self.email }] } });
+    }
+  }, [auditOnly, delegated, custodians.data, state.custodians.length, dispatch]);
 
   // Audit-only collections are organization-scoped: no custodian to choose.
-  if (isAuditOnly(state)) {
+  if (auditOnly) {
     return (
       <section aria-label="Step 4: custodians">
         <Notice variant="info">
@@ -356,14 +594,6 @@ function CustodiansStep({ state, dispatch }: StepProps) {
       </section>
     );
   }
-
-  // Delegated connections collect for the signed-in identity only.
-  useEffect(() => {
-    if (delegated && state.custodians.length === 0 && custodians.data?.items[0]) {
-      const self = custodians.data.items[0];
-      dispatch({ type: 'patch', patch: { custodians: [{ id: self.id, email: self.email }] } });
-    }
-  }, [delegated, custodians.data, state.custodians.length, dispatch]);
 
   if (delegated) {
     return (
@@ -389,9 +619,9 @@ function CustodiansStep({ state, dispatch }: StepProps) {
     <section aria-label="Step 4: custodians">
       <TextInput
         label="Search custodians"
-        hint="Search the organization directory by name or email."
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
+        hint="Live directory search by name or email — any permitted user in the tenant can be selected."
+        value={searchInput}
+        onChange={(e) => setSearchInput(e.target.value)}
       />
       <QueryBoundary
         isPending={custodians.isPending}
@@ -399,25 +629,40 @@ function CustodiansStep({ state, dispatch }: StepProps) {
         data={custodians.data}
         onRetry={() => void custodians.refetch()}
       >
-        {(data) => (
-          <fieldset className="cdfir-fieldset">
-            <legend>Directory results</legend>
-            {data.items.length === 0 ? <p>No matches.</p> : null}
-            {data.items.map((c) => (
-              <Checkbox
-                key={c.id}
-                label={`${c.displayName ? `${c.displayName} — ` : ''}${c.email}`}
-                checked={selectedIds.has(c.id)}
-                onChange={(e) => {
-                  const next = e.target.checked
-                    ? [...state.custodians, { id: c.id, email: c.email }]
-                    : state.custodians.filter((x) => x.id !== c.id);
-                  dispatch({ type: 'patch', patch: { custodians: next } });
-                }}
-              />
-            ))}
-          </fieldset>
-        )}
+        {(data) => {
+          const results = data.pages.flatMap((page) => page.items);
+          return (
+            <>
+              <fieldset className="cdfir-fieldset">
+                <legend>Directory results</legend>
+                {results.length === 0 ? <p>No matches.</p> : null}
+                {results.map((c) => (
+                  <Checkbox
+                    key={c.id}
+                    label={`${c.displayName ? `${c.displayName} — ` : ''}${c.email}`}
+                    checked={selectedIds.has(c.id)}
+                    onChange={(e) => {
+                      const next = e.target.checked
+                        ? [...state.custodians, { id: c.id, email: c.email }]
+                        : state.custodians.filter((x) => x.id !== c.id);
+                      dispatch({ type: 'patch', patch: { custodians: next } });
+                    }}
+                  />
+                ))}
+              </fieldset>
+              {custodians.hasNextPage ? (
+                <Button
+                  small
+                  variant="secondary"
+                  busy={custodians.isFetchingNextPage}
+                  onClick={() => void custodians.fetchNextPage()}
+                >
+                  Load more results
+                </Button>
+              ) : null}
+            </>
+          );
+        }}
       </QueryBoundary>
       <p aria-live="polite">
         Selected ({state.custodians.length}):{' '}
@@ -433,6 +678,17 @@ function ScopeStep({ state, dispatch }: StepProps) {
     return list.includes('UTC') ? list : ['UTC', ...list];
   }, []);
   const s = state.scope;
+
+  if (isUploadCollection(state)) {
+    return (
+      <section aria-label="Step 5: scope">
+        <Notice variant="info">
+          Scope is fixed for uploaded mailbox files: every item in each container is extracted — all
+          folders, all dates. Date-range filtering for uploads is not available in this version.
+        </Notice>
+      </section>
+    );
+  }
 
   return (
     <section aria-label="Step 5: scope">
@@ -663,6 +919,7 @@ function AuditScopeFields({ state, dispatch }: StepProps) {
 }
 
 function TypeStep({ state, dispatch }: StepProps) {
+  const upload = isUploadCollection(state);
   return (
     <section aria-label="Step 6: collection type">
       <RadioGroup
@@ -681,7 +938,10 @@ function TypeStep({ state, dispatch }: StepProps) {
           {
             value: 'continuous',
             label: 'Continuous',
-            description: 'Snapshot first, then ongoing incremental preservation.',
+            description: upload
+              ? 'Not available for uploaded mailbox files — a container is a fixed point-in-time file.'
+              : 'Snapshot first, then ongoing incremental preservation.',
+            disabled: upload,
           },
         ]}
       />
@@ -691,6 +951,7 @@ function TypeStep({ state, dispatch }: StepProps) {
 
 function ReviewStep({ state }: { state: WizardState }) {
   const s = state.scope;
+  const upload = isUploadCollection(state);
   return (
     <section aria-label="Step 7: review">
       <Table caption="Collection summary">
@@ -702,31 +963,59 @@ function ReviewStep({ state }: { state: WizardState }) {
           <tr>
             <th scope="row">Provider / mode</th>
             <td>
-              {state.provider || '—'} ({state.connectorMode || '—'})
+              {upload
+                ? 'PST / mailbox file upload'
+                : `${state.provider || '—'} (${state.connectorMode || '—'})`}
             </td>
           </tr>
+          {upload ? (
+            <tr>
+              <th scope="row">Uploaded files</th>
+              <td>
+                {state.uploads.length === 0
+                  ? '—'
+                  : `${state.uploads.length} file(s): ${state.uploads
+                      .map((u) => u.filename)
+                      .join(', ')}`}
+              </td>
+            </tr>
+          ) : null}
           <tr>
             <th scope="row">Sources</th>
             <td>
-              {[
-                state.sources.email ? 'email' : null,
-                state.sources.drive ? 'drive' : null,
-                state.sources.audit ? 'audit logs' : null,
-              ]
-                .filter(Boolean)
-                .join(', ') || '—'}
+              {upload
+                ? 'email (extracted from the uploaded containers)'
+                : [
+                    state.sources.email ? 'email' : null,
+                    state.sources.drive ? 'drive' : null,
+                    state.sources.audit ? 'audit logs' : null,
+                  ]
+                    .filter(Boolean)
+                    .join(', ') || '—'}
             </td>
           </tr>
           <tr>
             <th scope="row">Custodians</th>
-            <td>{state.custodians.map((c) => c.email).join(', ') || '—'}</td>
+            <td>
+              {upload
+                ? state.uploadCustodian.email
+                  ? `${
+                      state.uploadCustodian.displayName
+                        ? `${state.uploadCustodian.displayName} — `
+                        : ''
+                    }${state.uploadCustodian.email}`
+                  : '—'
+                : state.custodians.map((c) => c.email).join(', ') || '—'}
+            </td>
           </tr>
           <tr>
             <th scope="row">Date scope</th>
             <td>
-              {s.dateKind === 'all_time'
-                ? 'All time (within account, permission, and API-visible scope)'
-                : `${s.startDate} to ${s.endDate} (${s.timezone})`}
+              {upload
+                ? 'All items in the uploaded container(s) — extraction covers the whole file'
+                : s.dateKind === 'all_time'
+                  ? 'All time (within account, permission, and API-visible scope)'
+                  : `${s.startDate} to ${s.endDate} (${s.timezone})`}
             </td>
           </tr>
           <tr>
@@ -741,12 +1030,15 @@ function ReviewStep({ state }: { state: WizardState }) {
       </Table>
 
       <h2>Permissions, retention, and limitations</h2>
-      {state.connectorMode === 'delegated' ? <TruthNotice kind="delegatedAccess" /> : null}
-      {s.dateKind === 'all_time' ? <TruthNotice kind="allTimeScope" /> : null}
+      {upload ? <Notice variant="info">{PST_EXTRACTION_NOTICE}</Notice> : null}
+      {!upload && state.connectorMode === 'delegated' ? (
+        <TruthNotice kind="delegatedAccess" />
+      ) : null}
+      {!upload && s.dateKind === 'all_time' ? <TruthNotice kind="allTimeScope" /> : null}
       {state.provider === 'google' && state.sources.drive ? (
         <TruthNotice kind="googleNativeExports" />
       ) : null}
-      {state.sources.audit ? <TruthNotice kind="auditScope" /> : null}
+      {!upload && state.sources.audit ? <TruthNotice kind="auditScope" /> : null}
       <TruthNotice kind="exceptions" variant="warning" />
     </section>
   );
@@ -756,7 +1048,14 @@ function StartStep({ state }: { state: WizardState }) {
   return (
     <section aria-label="Step 8: start">
       <p>
-        {isAuditOnly(state) ? (
+        {isUploadCollection(state) ? (
+          <>
+            Starting will queue verification and message extraction for{' '}
+            <strong>{state.uploads.length}</strong> uploaded container(s), attributed to{' '}
+            <strong>{state.uploadCustodian.email}</strong>. Progress is visible on the collection
+            status page.
+          </>
+        ) : isAuditOnly(state) ? (
           <>
             Starting will queue organization-wide audit-log discovery and preservation. Progress is
             visible on the collection status page.

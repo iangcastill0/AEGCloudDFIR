@@ -15,7 +15,7 @@ import { parseCollectionScope } from '../scope.js';
 import type { FinalizePayload } from './payloads.js';
 
 /** Static per-provider API surface documented in manifests. */
-const API_ENDPOINTS: Record<'microsoft' | 'google', string[]> = {
+const API_ENDPOINTS: Record<'microsoft' | 'google' | 'upload', string[]> = {
   microsoft: [
     'GET /v1.0/{user}/mailFolders',
     'GET /v1.0/{user}/mailFolders/{id}/messages',
@@ -36,6 +36,8 @@ const API_ENDPOINTS: Record<'microsoft' | 'google', string[]> = {
     'GET drive/v3/files/{id}/export',
     'GET drive/v3/changes',
   ],
+  // Uploaded container files: no provider API is involved.
+  upload: ['upload'],
 };
 
 interface StateCounts {
@@ -73,10 +75,19 @@ export function buildCompletenessNarrative(input: {
   allTimeScope: boolean;
 }): string {
   const parts: string[] = [];
-  parts.push(
-    `Preserved ${input.preserved} of ${input.discovered} discovered item(s) via the ` +
-      `${input.provider} API using ${input.mode} permissions.`,
-  );
+  if (input.provider === 'upload') {
+    parts.push(
+      `Preserved ${input.preserved} of ${input.discovered} discovered item(s) from uploaded ` +
+        `container files. Messages extracted from containers are reconstructions built from ` +
+        `each container's stored properties, not provider-native items; the uploaded ` +
+        `containers remain the authoritative originals.`,
+    );
+  } else {
+    parts.push(
+      `Preserved ${input.preserved} of ${input.discovered} discovered item(s) via the ` +
+        `${input.provider} API using ${input.mode} permissions.`,
+    );
+  }
   if (input.errors > 0) {
     parts.push(`${input.errors} item(s) could not be preserved and are recorded as failures.`);
   }
@@ -86,11 +97,15 @@ export function buildCompletenessNarrative(input: {
   if (input.exceptionCount > 0) {
     parts.push(`${input.exceptionCount} exception(s) were recorded during collection.`);
   }
-  parts.push(
-    'Completeness is always relative to the connected account, its permissions, and the API-visible scope.',
-  );
-  if (input.allTimeScope) {
-    parts.push(TRUTHFULNESS_NOTICES.allTimeScope);
+  if (input.provider === 'upload') {
+    parts.push(TRUTHFULNESS_NOTICES.pstExtraction);
+  } else {
+    parts.push(
+      'Completeness is always relative to the connected account, its permissions, and the API-visible scope.',
+    );
+    if (input.allTimeScope) {
+      parts.push(TRUTHFULNESS_NOTICES.allTimeScope);
+    }
   }
   return parts.join(' ');
 }
@@ -173,7 +188,7 @@ export async function processCollectionFinalize(
   });
 
   const scope = parseCollectionScope(collection.scope);
-  const provider = collection.connectorAccount.provider as 'microsoft' | 'google';
+  const provider = collection.connectorAccount.provider as 'microsoft' | 'google' | 'upload';
   const mode = collection.connectorAccount.mode as 'delegated' | 'organization';
 
   const narrative = buildCompletenessNarrative({
@@ -228,7 +243,9 @@ export async function processCollectionFinalize(
       name: collection.name,
       kind: collection.kind,
       permissionMode: mode,
-      provider,
+      // The evidence manifest schema predates the synthetic 'upload'
+      // provider; the value passes through verbatim into the manifest JSON.
+      provider: provider as 'microsoft' | 'google',
       connectorLabel: collection.connectorAccount.label,
       connectorExternalIdentity: collection.connectorAccount.externalIdentity,
       custodians: collection.custodians.map((cc) => ({

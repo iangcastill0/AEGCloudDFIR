@@ -21,6 +21,7 @@ function armAuditOnlyCollection(f: FakeCtx): void {
     startedAt: null,
     sources: ['audit'],
     connectorAccountId: ACCOUNT,
+    connectorAccount: { provider: 'microsoft' },
     scope: {
       dateRange: { kind: 'all_time' },
       audit: {
