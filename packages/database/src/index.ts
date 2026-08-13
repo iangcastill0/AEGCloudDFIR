@@ -1,6 +1,10 @@
 export * from '@prisma/client';
 export { createPrismaClient, withTenantContext, TenantContextError } from './client.js';
 export type { TenantScopedTx } from './client.js';
+export { withPlatformContext } from './platform.js';
+export type { PlatformScopedTx } from './platform.js';
+export { bootstrapOrgAdmin, BootstrapError, DEFAULT_BOOTSTRAP_ROLES } from './bootstrap.js';
+export type { BootstrapOrgAdminInput, BootstrapOrgAdminResult } from './bootstrap.js';
 export {
   canonicalJson,
   computeEventHash,
