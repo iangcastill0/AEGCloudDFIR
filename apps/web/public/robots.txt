@@ -1,0 +1,4 @@
+# AEG-CloudDFIR is a private evidence-review application, not public content.
+# Keep it out of search indexes regardless of who can reach the hostname.
+User-agent: *
+Disallow: /
