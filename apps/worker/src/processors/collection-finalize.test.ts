@@ -42,7 +42,7 @@ function arm(
     },
   });
   f.tx.collectionItem.groupBy.mockResolvedValue(
-    opts.grouped ?? [{ state: 'preserved', _count: { _all: 2 } }],
+    opts.grouped ?? [{ state: 'indexed', _count: { _all: 2 } }],
   );
   f.tx.collectionCheckpoint.count.mockResolvedValue(opts.pageCheckpoints ?? 0);
   f.tx.collectionException.findMany.mockResolvedValue(opts.exceptions ?? []);
@@ -133,6 +133,15 @@ describe('processCollectionFinalize', () => {
         }),
       }),
     );
+  });
+
+  it('waits while items are still preserved so the manifest cannot miss children', async () => {
+    const f = fakeCtx();
+    // 'preserved' = bytes stored, pipeline not settled: parse still creates
+    // attachment children, so sealing here would omit them.
+    arm(f, { grouped: [{ state: 'preserved', _count: { _all: 2 } }] });
+    await processCollectionFinalize(f.ctx, { tenantId: TENANT, collectionId: COLLECTION });
+    expect(f.store.putManifest).not.toHaveBeenCalled();
   });
 
   it('zero preserved with errors finalizes as failed', async () => {

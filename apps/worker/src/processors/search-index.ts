@@ -17,7 +17,7 @@ import {
 type EvidenceAuditFields = NonNullable<EvidenceSearchDoc['audit']>;
 import { sanitizeError, type WorkerContext } from '../context.js';
 import { incrementProgress } from '../progress.js';
-import { QUEUES } from '../queues.js';
+import { QUEUES, dedupKeys } from '../queues.js';
 import { readAllCapped } from '../streams.js';
 import type { EvidenceStagePayload } from './payloads.js';
 
@@ -452,6 +452,39 @@ export async function processSearchIndex(
         skipDuplicates: true,
       }),
     );
+    // A permanently un-indexable item must not hold the collection open: mark
+    // it terminally failed and nudge finalize (the manifest records it as an
+    // error rather than waiting forever on a dead-lettered job).
+    await withTenantContext(ctx.prisma, tenantId, async (tx) => {
+      const failed = await tx.collectionItem.updateMany({
+        where: { evidenceItemId, state: 'preserved' },
+        data: { state: 'failed', lastError: 'search indexing failed; see dead-letter queue' },
+      });
+      if (failed.count > 0 && item.collectionId !== null) {
+        if (item.custodianId !== null) {
+          await incrementProgress(
+            tx,
+            item.collectionId,
+            item.custodianId,
+            progressSourceFor(item),
+            {
+              failures: failed.count,
+            },
+          );
+        }
+        await tx.outboxEvent.createMany({
+          data: [
+            {
+              tenantId,
+              topic: QUEUES.collectionFinalize,
+              dedupKey: `${dedupKeys.collectionFinalize(item.collectionId)}:chk:index-failed:${evidenceItemId}`,
+              payload: { tenantId, collectionId: item.collectionId },
+            },
+          ],
+          skipDuplicates: true,
+        });
+      }
+    });
     return;
   }
 
@@ -485,10 +518,31 @@ export async function processSearchIndex(
       where: { evidenceItemId, state: 'preserved' },
       data: { state: 'indexed' },
     });
-    if (updated.count > 0 && item.collectionId !== null && item.custodianId !== null) {
-      await incrementProgress(tx, item.collectionId, item.custodianId, progressSource, {
-        indexed: updated.count,
+    if (updated.count > 0 && item.collectionId !== null) {
+      if (item.custodianId !== null) {
+        await incrementProgress(tx, item.collectionId, item.custodianId, progressSource, {
+          indexed: updated.count,
+        });
+      }
+      // Indexing is the last pipeline stage; this is the signal that lets
+      // finalize seal a manifest that includes every child item.
+      await tx.outboxEvent.createMany({
+        data: [
+          {
+            tenantId,
+            topic: QUEUES.collectionFinalize,
+            dedupKey: `${dedupKeys.collectionFinalize(item.collectionId)}:chk:indexed:${evidenceItemId}`,
+            payload: { tenantId, collectionId: item.collectionId },
+          },
+        ],
+        skipDuplicates: true,
       });
     }
   });
+}
+
+/** Progress bucket an item's counters belong to. */
+function progressSourceFor(item: { kind: string }): 'email' | 'drive' | 'audit' {
+  if (item.kind === 'audit_batch') return 'audit';
+  return item.kind === 'email' || item.kind === 'attachment' ? 'email' : 'drive';
 }

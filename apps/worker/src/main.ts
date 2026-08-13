@@ -4,6 +4,7 @@ import { Redis } from 'ioredis';
 import { pino } from 'pino';
 import { BullMqEnqueuer } from './bullmq-enqueuer.js';
 import { buildWorkerContext } from './context.js';
+import { FinalizeSweeper } from './finalize-sweeper.js';
 import { startHealthServer } from './health.js';
 import { WorkerMetrics } from './metrics.js';
 import { OutboxDispatcher } from './outbox/dispatcher.js';
@@ -42,6 +43,10 @@ async function main(): Promise<void> {
   outboxSampler.unref();
 
   const abort = new AbortController();
+  // Self-healing finalization: recovers collections whose last settling stage
+  // did not emit a finalize check (finalize is idempotent and re-gates).
+  const sweeper = new FinalizeSweeper(prisma, log);
+  void sweeper.run(abort.signal);
   const health = startHealthServer(config.CDFIR_WORKER_HEALTH_PORT, {
     ready: async () => {
       const checks: Record<string, boolean> = {};

@@ -9,7 +9,12 @@ import {
   type ManifestItem,
 } from '@aeg-clouddfir/evidence';
 import { TRUTHFULNESS_NOTICES } from '@aeg-clouddfir/contracts';
-import { appendAuditEvent, withTenantContext } from '@aeg-clouddfir/database';
+import {
+  EvidenceKind,
+  ProcessingStatus,
+  appendAuditEvent,
+  withTenantContext,
+} from '@aeg-clouddfir/database';
 import type { WorkerContext } from '../context.js';
 import { parseCollectionScope } from '../scope.js';
 import type { FinalizePayload } from './payloads.js';
@@ -138,19 +143,36 @@ export async function processCollectionFinalize(
     const pageCheckpoints = await tx.collectionCheckpoint.count({
       where: { collectionId, cursorKind: 'page' },
     });
+    // process.parse and search.index are enqueued in PARALLEL, so an item
+    // reaching CollectionItem state 'indexed' does NOT imply its parse ran —
+    // and parse is what creates attachment children. Sealing before every
+    // parent is parsed omits those children (observed: 126 of 142 items).
+    //
+    // Gate on exactly that condition — parents still awaiting parse — and NOT
+    // on full pipeline settlement: children are written with their hash at
+    // creation, so once parents are parsed the manifest is complete, and
+    // waiting on downstream stages (extract/OCR/index) would stall on paths
+    // that end in an exception status instead of 'indexed'.
+    const unparsedParents = await tx.evidenceItem.count({
+      where: {
+        collectionId,
+        kind: { in: [EvidenceKind.email, EvidenceKind.container] },
+        processingStatus: ProcessingStatus.pending,
+      },
+    });
     const exceptions = await tx.collectionException.findMany({
       where: { collectionId },
       orderBy: { occurredAt: 'asc' },
       take: 5000,
     });
-    return { collection, grouped, pageCheckpoints, exceptions };
+    return { collection, grouped, pageCheckpoints, exceptions, unparsedParents };
   });
 
   if (snapshot === null) {
     ctx.log.warn({ collectionId }, 'finalize: collection not found; dropping');
     return;
   }
-  const { collection, grouped, pageCheckpoints, exceptions } = snapshot;
+  const { collection, grouped, pageCheckpoints, exceptions, unparsedParents } = snapshot;
   if (!['fetching', 'cancelling', 'finalizing'].includes(collection.status)) {
     return; // already finalized, paused, or failed elsewhere
   }
@@ -167,8 +189,17 @@ export async function processCollectionFinalize(
   for (const row of grouped) {
     counts[row.state as keyof StateCounts] = row._count._all;
   }
-  const inFlight = counts.discovered + counts.fetching;
-  if (collection.status === 'fetching' && (inFlight > 0 || pageCheckpoints > 0)) {
+  // 'preserved' means the bytes are stored but the processing pipeline has not
+  // settled: parse creates attachment children AFTER an item is preserved, so
+  // sealing the manifest here would omit them (observed: 123 of 142 items).
+  // Wait for every item to reach a terminal state — indexed/processed/failed/
+  // skipped — which is also when all child items exist. search-index (the last
+  // stage) and the permanent-failure paths enqueue the check that gets us here.
+  const inFlight = counts.discovered + counts.fetching + counts.preserved;
+  if (
+    collection.status === 'fetching' &&
+    (inFlight > 0 || pageCheckpoints > 0 || unparsedParents > 0)
+  ) {
     return; // not done yet; another check will arrive
   }
 

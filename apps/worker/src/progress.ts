@@ -3,8 +3,13 @@ import type { Prisma, TenantScopedTx } from '@aeg-clouddfir/database';
 /**
  * Per-custodian, per-source progress counters kept in
  * CollectionCustodian.progress (JSONB): { [source]: { discovered, ... } }.
- * Always mutated read-modify-write INSIDE the caller's tenant transaction so
- * counter updates commit atomically with the durable results they describe.
+ *
+ * Incremented by a SINGLE atomic UPDATE whose SET expression reads the current
+ * value in SQL. A read-modify-write in application code loses updates when
+ * concurrent item transactions touch the same custodian row (observed: 54
+ * counted of 71 actually preserved). Under READ COMMITTED, an UPDATE that
+ * blocks on the row lock re-evaluates its SET expression against the winner's
+ * committed row, so increments serialize instead of clobbering each other.
  */
 export const PROGRESS_COUNTERS = [
   'discovered',
@@ -24,10 +29,6 @@ export type ProgressDeltas = Partial<Record<ProgressCounter, number>>;
 
 type CollectionSourceValue = 'email' | 'drive' | 'audit';
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 export async function incrementProgress(
   tx: TenantScopedTx,
   collectionId: string,
@@ -35,33 +36,32 @@ export async function incrementProgress(
   source: CollectionSourceValue,
   deltas: ProgressDeltas,
 ): Promise<void> {
-  const row = await tx.collectionCustodian.findUnique({
-    where: { collectionId_custodianId: { collectionId, custodianId } },
-    select: { id: true, progress: true },
-  });
-  if (row === null) return;
-
-  const progress: Record<string, unknown> = isRecord(row.progress) ? { ...row.progress } : {};
-  const existing = progress[source];
-  const bucket: Record<string, number> = {};
-  if (isRecord(existing)) {
-    for (const counter of PROGRESS_COUNTERS) {
-      const value = existing[counter];
-      if (typeof value === 'number' && Number.isFinite(value)) bucket[counter] = value;
-    }
-  }
-  for (const counter of PROGRESS_COUNTERS) {
-    const delta = deltas[counter];
-    if (delta !== undefined && delta !== 0) {
-      bucket[counter] = (bucket[counter] ?? 0) + delta;
-    }
-  }
-  progress[source] = bucket;
-
-  await tx.collectionCustodian.update({
-    where: { id: row.id },
-    data: { progress: progress as Prisma.InputJsonValue },
-  });
+  const d = (counter: ProgressCounter): number => {
+    const value = deltas[counter];
+    return value !== undefined && Number.isFinite(value) ? value : 0;
+  };
+  // Every counter is written as (current + delta); absent deltas add 0, which
+  // also normalizes the bucket so the status API never sees missing keys.
+  await tx.$executeRaw`
+    UPDATE collection_custodians AS cc
+    SET progress = jsonb_set(
+          COALESCE(cc.progress, '{}'::jsonb),
+          ARRAY[${source}::text],
+          COALESCE(cc.progress -> ${source}::text, '{}'::jsonb) || jsonb_build_object(
+            'discovered',    COALESCE((cc.progress -> ${source}::text ->> 'discovered')::bigint, 0)    + ${d('discovered')}::bigint,
+            'fetched',       COALESCE((cc.progress -> ${source}::text ->> 'fetched')::bigint, 0)       + ${d('fetched')}::bigint,
+            'preserved',     COALESCE((cc.progress -> ${source}::text ->> 'preserved')::bigint, 0)     + ${d('preserved')}::bigint,
+            'parsed',        COALESCE((cc.progress -> ${source}::text ->> 'parsed')::bigint, 0)        + ${d('parsed')}::bigint,
+            'ocrExtracted',  COALESCE((cc.progress -> ${source}::text ->> 'ocrExtracted')::bigint, 0)  + ${d('ocrExtracted')}::bigint,
+            'indexed',       COALESCE((cc.progress -> ${source}::text ->> 'indexed')::bigint, 0)       + ${d('indexed')}::bigint,
+            'warnings',      COALESCE((cc.progress -> ${source}::text ->> 'warnings')::bigint, 0)      + ${d('warnings')}::bigint,
+            'failures',      COALESCE((cc.progress -> ${source}::text ->> 'failures')::bigint, 0)      + ${d('failures')}::bigint,
+            'retries',       COALESCE((cc.progress -> ${source}::text ->> 'retries')::bigint, 0)       + ${d('retries')}::bigint,
+            'rateLimitWaitMs', COALESCE((cc.progress -> ${source}::text ->> 'rateLimitWaitMs')::bigint, 0) + ${d('rateLimitWaitMs')}::bigint
+          ),
+          true)
+    WHERE cc."collectionId" = ${collectionId}::uuid
+      AND cc."custodianId" = ${custodianId}::uuid`;
 }
 
 /** Prisma ExceptionKind values (mirrored as literals to stay import-light in tests). */

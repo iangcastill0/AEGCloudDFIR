@@ -277,3 +277,65 @@ fixture's text. A repo-wide grep for the old tokens returns zero matches
 
 The former `evidencevault` database, roles, and OpenSearch indices were
 dropped.
+
+## Addendum — PST/OST uploads, and two defects found and fixed by live testing
+
+Live-tested with `enron.pst` (13,984,768 bytes) from pst-extractor's own test
+data — an independent `PSTFile` walk counts 71 messages, which is the number
+the pipeline must reproduce.
+
+**Upload → preservation:** the container is preserved byte-for-byte. The stored
+object's SHA-256 equals the uploaded file's:
+`6152489de3472be6f1f840935d34b6dbf5f62b025dd015929ea9cf66eb5a5b46`, addressed at
+`originals/sha256/61/6152489d…`. Extraction produced **71/71 messages** plus 70
+attachments (142 evidence items), each extracted message carrying
+`processingDetail: extracted-from-pst` and a `container_member` relationship to
+the PST with its real folder path
+(`Top of Personal Folders/lokay-m/MLOKAY (Non-Privileged)/Personal`).
+Custody: `evidence.extracted_from_container` → `evidence.parsed`. Search over
+the extracted corpus: `from:enron.com` 49 hits, `attachment:agreement` 12.
+
+### Defect 1 — progress counters lost updates (FIXED)
+
+Symptom: status showed `preserved: 54` while 71 messages were actually
+preserved. Cause: `incrementProgress` did a read-modify-write on the
+`CollectionCustodian.progress` JSONB, so concurrent per-message transactions
+clobbered each other. Fix: a single atomic `UPDATE` whose `SET` expression
+computes `current + delta` in SQL — under READ COMMITTED an update that blocks
+on the row lock re-evaluates against the winner's committed row, so increments
+serialize. Verified: counter now reads **72 = 72** collection items exactly.
+
+### Defect 2 — manifest sealed before all children existed (FIXED)
+
+Symptom: the signed manifest listed 123 (then 126) of 142 acquired items.
+Cause: `process.parse` and `search.index` are enqueued **in parallel**, so an
+item reaching CollectionItem state `indexed` did not imply its parse had run —
+and parse is what creates attachment children. Finalize's gate only excluded
+`discovered`/`fetching`, so it sealed while 16 attachments were milliseconds
+from being written.
+
+Fix: the gate additionally waits while any _parent_ (email/container) is still
+`pending` (awaiting parse). It deliberately does **not** wait for full pipeline
+settlement — children are written with their hash at creation, and waiting on
+downstream stages stalls on paths that terminate in `exception` rather than
+`indexed` (a first attempt at that broader gate stranded a collection in
+`fetching` with all work complete).
+
+Because relying on "the last stage remembers to nudge finalize" proved fragile,
+finalization is now **self-healing**: `FinalizeSweeper` re-enqueues a finalize
+check every 30 s for collections still in `fetching`/`cancelling`/`finalizing`.
+It iterates tenants under tenant context rather than reading `collections`
+cross-tenant — row-level security gives the worker no policy on
+evidence-bearing tables (fail closed), and this sweep was not a reason to widen
+that. The stranded collection recovered within one sweep interval once enabled.
+
+Verified after both fixes: **manifest items 142 = 142 evidence items (100 %
+coverage)**, progress counters exact, completeness `complete_with_exceptions`
+(the exceptions are the host's missing Tesseract plus one attachment type Tika
+does not support — both honestly recorded, not silent gaps).
+
+| Gate                                | Result           |
+| ----------------------------------- | ---------------- |
+| `pnpm build` / `lint` / `typecheck` | PASS (all tasks) |
+| Unit tests                          | **902 passing**  |
+| Playwright E2E                      | **25 passing**   |
