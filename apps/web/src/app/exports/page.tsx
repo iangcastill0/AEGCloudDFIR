@@ -285,29 +285,27 @@ function ExportDownload({
   const links = download.data;
 
   if (links) {
+    const parts = links.archiveUrls;
+    const multi = parts.length > 1;
     return (
-      <div className="cdfir-fieldset">
-        {/* No `download` attribute: browsers ignore it cross-origin, and these
-            URLs point at the storage host. The attachment disposition is signed
-            into the URL by the API instead. */}
-        <a href={links.manifestUrl}>manifest.json</a>
-        {links.archiveUrls.map((url, i) => (
+      <div className="cdfir-downloads">
+        {parts.map((url, i) => (
           <a key={url} href={url}>
-            {`part ${String(i + 1).padStart(3, '0')} of ${links.archiveUrls.length}`}
+            {multi ? `Download part ${String(i + 1)} of ${String(parts.length)}` : 'Download'}
           </a>
         ))}
+        <a href={links.manifestUrl}>Download manifest</a>
+        <span className="cdfir-field__hint">manifest sha256, to verify the archive:</span>
+        <span className="cdfir-downloads__hash">{links.manifestSha256}</span>
         <span className="cdfir-field__hint">
-          manifest sha256 {links.manifestSha256}
-        </span>
-        <span className="cdfir-field__hint">
-          {`links expire in ${String(links.expiresInSeconds)}s — reopen this to get fresh ones`}
+          {`Links expire in ${String(Math.round(links.expiresInSeconds / 60))} min. Reopen for fresh ones.`}
         </span>
       </div>
     );
   }
 
   return (
-    <div className="cdfir-fieldset">
+    <div className="cdfir-downloads">
       <Button
         type="button"
         variant="secondary"
@@ -316,13 +314,13 @@ function ExportDownload({
         }}
         disabled={download.isPending}
       >
-        {download.isPending ? 'Preparing…' : 'Download'}
+        {download.isPending ? 'Preparing\u2026' : 'Download'}
       </Button>
       {expiresAt ? (
-        <span className="cdfir-field__hint">{`expires ${formatDateTime(expiresAt)}`}</span>
+        <span className="cdfir-field__hint">{`Available until ${formatDateTime(expiresAt)}`}</span>
       ) : null}
       {download.isError ? (
-        <span className="cdfir-field__hint">{errorMessage(download.error)}</span>
+        <span className="cdfir-field__error">{errorMessage(download.error)}</span>
       ) : null}
     </div>
   );

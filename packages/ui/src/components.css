@@ -389,3 +389,19 @@ mark {
   background: var(--color-mark-bg);
   color: var(--color-mark-text);
 }
+
+/* Download group: a vertical stack for a primary download plus its manifest and
+   verification details. A plain container lets inline links run together on one
+   line, which reads as a single garbled string. */
+.cdfir-downloads {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+}
+.cdfir-downloads__hash {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.75rem;
+  word-break: break-all;
+  color: var(--color-text-muted);
+}
