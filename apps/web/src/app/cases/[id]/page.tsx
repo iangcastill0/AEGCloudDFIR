@@ -170,7 +170,25 @@ function AddItemsCard({ caseId, onStatus }: { caseId: string; onStatus: (t: stri
               includeFamilies,
             },
             {
-              onSuccess: () => onStatus('Items queued to be added to the case.'),
+              // Report the counts the API returns. "Queued" was both vague and
+              // wrong — the add is synchronous and already done — and it read the
+              // same whether 500 items were added or none.
+              onSuccess: (result) => {
+                if (result.added === 0) {
+                  onStatus(
+                    result.requested === 0
+                      ? 'Nothing matched that selection, so no items were added.'
+                      : `No new items added \u2014 all ${String(result.requested)} were already in the case.`,
+                  );
+                  return;
+                }
+                const already = result.requested - result.added;
+                onStatus(
+                  already > 0
+                    ? `Added ${String(result.added)} item(s). ${String(already)} were already in the case.`
+                    : `Added ${String(result.added)} item(s) to the case.`,
+                );
+              },
               onError: (err) => onStatus(errorMessage(err)),
             },
           )

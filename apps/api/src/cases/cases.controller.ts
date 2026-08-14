@@ -124,6 +124,25 @@ export class CasesController {
     return this.cases.members(requireAuth(request), id, parseCursorQuery(query));
   }
 
+  /**
+   * Tags present on this case's items — used by the production wizard so a
+   * reviewer can only select tags that actually appear in the matter.
+   */
+  @Get(':id/tags')
+  @RequireRoles(
+    TenantRole.case_manager,
+    TenantRole.org_admin,
+    TenantRole.reviewer,
+    TenantRole.read_only,
+    TenantRole.production_manager,
+  )
+  async tags(
+    @Param('id') id: string,
+    @Req() request: FastifyRequest,
+  ): Promise<{ items: { id: string; name: string; color: string; itemCount: number }[] }> {
+    return this.cases.tags(requireAuth(request), id);
+  }
+
   @Get(':id/notes')
   @RequireRoles(
     TenantRole.case_manager,

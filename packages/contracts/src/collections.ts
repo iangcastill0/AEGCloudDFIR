@@ -300,3 +300,18 @@ export const caseNote = z.object({
   createdAt: z.string(),
 });
 export const caseNoteListResponse = paginated(caseNote);
+
+/** A tag as it appears within a case, with how many of the case's items carry it. */
+export const caseTag = z.object({
+  id: z.string(),
+  name: z.string(),
+  color: z.string().default(''),
+  itemCount: z.number().int(),
+});
+export const caseTagListResponse = z.object({ items: z.array(caseTag) });
+
+/** What adding items to a case actually did. */
+export const addCaseItemsResponse = z.object({
+  requested: z.number().int(),
+  added: z.number().int(),
+});

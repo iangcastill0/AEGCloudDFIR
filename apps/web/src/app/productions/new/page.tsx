@@ -31,6 +31,7 @@ import {
   type ProductionWizardState,
 } from '@/lib/production-wizard';
 import {
+  useCaseTags,
   useCases,
   useCreateProduction,
   useMe,
@@ -240,7 +241,17 @@ function SelectionStep({
   state: ProductionWizardState;
   dispatch: (a: ProductionWizardAction) => void;
 }) {
-  const tags = useTags();
+  // Scope the tag list to the case chosen in step 1. Offering every tenant
+  // tag invites selecting one that matches nothing in the matter, which
+  // produces an empty set — or worse, silently narrows a production the
+  // reviewer believed was complete.
+  const caseTags = useCaseTags(state.caseId);
+  const allTags = useTags();
+  const scopedToCase = state.caseId !== '';
+  const tagOptions: { id: string; name: string; itemCount: number | null }[] = scopedToCase
+    ? (caseTags.data?.items ?? [])
+    : (allTags.data?.items ?? []).map((t) => ({ id: t.id, name: t.name, itemCount: null }));
+  const tagsLoading = scopedToCase ? caseTags.isPending : allTags.isPending;
   const savedSearches = useSavedSearches();
   const p = state.parameters;
   const sel = p.selection;
@@ -251,10 +262,19 @@ function SelectionStep({
     <section aria-label="Step 2: selection">
       <fieldset className="cdfir-fieldset">
         <legend>Tags to produce</legend>
-        {(tags.data?.items ?? []).map((t) => (
+        <p className="cdfir-field__hint">
+          {scopedToCase
+            ? "Showing only tags that appear on this case's items."
+            : 'No case selected, so every tag in the tenant is listed. Choose a case in step 1 to narrow this to the matter.'}
+        </p>
+        {tagOptions.map((t) => (
           <Checkbox
             key={t.id}
-            label={t.name}
+            label={
+              t.itemCount === null
+                ? t.name
+                : `${t.name} (${String(t.itemCount)} item(s) in this case)`
+            }
             checked={sel.tagIds.includes(t.id)}
             onChange={(e) =>
               patchSelection({
@@ -265,7 +285,13 @@ function SelectionStep({
             }
           />
         ))}
-        {tags.data && tags.data.items.length === 0 ? <p>No tags exist yet.</p> : null}
+        {!tagsLoading && tagOptions.length === 0 ? (
+          <p>
+            {scopedToCase
+              ? 'No tagged items in this case yet. Tag items in review, or add tagged items to the case first.'
+              : 'No tags exist yet.'}
+          </p>
+        ) : null}
       </fieldset>
       <fieldset className="cdfir-fieldset">
         <legend>Saved searches to produce</legend>

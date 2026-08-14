@@ -3,6 +3,7 @@ import { NotFoundException } from '@nestjs/common';
 import { CaseStatus, TenantRole } from '@aeg-clouddfir/database';
 import {
   caseMemberListResponse,
+  caseTagListResponse,
   caseNoteListResponse,
   caseNote,
 } from '@aeg-clouddfir/contracts';
@@ -286,5 +287,71 @@ describe('CasesService notes — matches the client contract', () => {
       NotFoundException,
     );
     expect(create).not.toHaveBeenCalled();
+  });
+});
+
+describe('CasesService.tags — only tags present in the matter', () => {
+  function tagService(caseItems: { evidenceItemId: string }[], assignments: unknown[]) {
+    return makeService({
+      case: { findFirst: vi.fn(async () => ({ id: CASE_ID })) },
+      caseMember: { count: vi.fn(async () => 1) },
+      caseItem: { findMany: vi.fn(async () => caseItems) },
+      tagAssignment: { findMany: vi.fn(async () => assignments) },
+    }).service;
+  }
+  const hot = { id: 't-hot', name: 'Hot', color: '#f00' };
+  const priv = { id: 't-priv', name: 'Privileged', color: '#00f' };
+
+  it('parses against the contract and counts items per tag', async () => {
+    const page = await tagService(
+      [{ evidenceItemId: ITEM_A }, { evidenceItemId: 'i-2' }],
+      [
+        { tagId: 't-hot', tag: hot },
+        { tagId: 't-hot', tag: hot },
+        { tagId: 't-priv', tag: priv },
+      ],
+    ).tags(auth, CASE_ID);
+
+    expect(caseTagListResponse.safeParse(page).success).toBe(true);
+    // The count matters: a tag on one document is a very different production
+    // from the same tag on five hundred.
+    expect(page.items).toEqual([
+      { id: 't-hot', name: 'Hot', color: '#f00', itemCount: 2 },
+      { id: 't-priv', name: 'Privileged', color: '#00f', itemCount: 1 },
+    ]);
+  });
+
+  it('sorts by name so the list is stable between requests', async () => {
+    const page = await tagService(
+      [{ evidenceItemId: ITEM_A }],
+      [
+        { tagId: 't-priv', tag: priv },
+        { tagId: 't-hot', tag: hot },
+      ],
+    ).tags(auth, CASE_ID);
+    expect(page.items.map((t) => t.name)).toEqual(['Hot', 'Privileged']);
+  });
+
+  it('returns nothing for a case with no items, without querying assignments', async () => {
+    const assignmentQuery = vi.fn(async () => []);
+    const service = makeService({
+      case: { findFirst: vi.fn(async () => ({ id: CASE_ID })) },
+      caseMember: { count: vi.fn(async () => 1) },
+      caseItem: { findMany: vi.fn(async () => []) },
+      tagAssignment: { findMany: assignmentQuery },
+    }).service;
+    expect(await service.tags(auth, CASE_ID)).toEqual({ items: [] });
+    // An IN () against an empty list is a pointless round trip.
+    expect(assignmentQuery).not.toHaveBeenCalled();
+  });
+
+  it('returns nothing when the case has items but none are tagged', async () => {
+    const page = await tagService([{ evidenceItemId: ITEM_A }], []).tags(auth, CASE_ID);
+    expect(page.items).toEqual([]);
+  });
+
+  it('404s for a case in another tenant', async () => {
+    const service = makeService({ case: { findFirst: vi.fn(async () => null) } }).service;
+    await expect(service.tags(auth, CASE_ID)).rejects.toThrow(NotFoundException);
   });
 });

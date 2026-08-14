@@ -397,6 +397,55 @@ export class CasesService {
     };
   }
 
+  /**
+   * Tags actually present on this case's items.
+   *
+   * Distinct from the tenant's full tag list. A production is built from a
+   * case, so offering every tag in the tenant invites selecting one that
+   * matches nothing in the matter — producing an empty set, or worse, silently
+   * narrowing a production the reviewer believed was complete.
+   */
+  async tags(
+    auth: AuthContext,
+    id: string,
+  ): Promise<{ items: { id: string; name: string; color: string; itemCount: number }[] }> {
+    return withTenantContext(this.prisma, auth.tenantId, async (tx) => {
+      await this.requireCase(tx, auth, id);
+      const caseItems = await tx.caseItem.findMany({
+        where: { tenantId: auth.tenantId, caseId: id },
+        select: { evidenceItemId: true },
+      });
+      if (caseItems.length === 0) return { items: [] };
+
+      const assignments = await tx.tagAssignment.findMany({
+        where: {
+          tenantId: auth.tenantId,
+          evidenceItemId: { in: caseItems.map((c) => c.evidenceItemId) },
+        },
+        include: { tag: true },
+      });
+
+      // Count per tag so a reviewer can see how much of the matter each covers;
+      // a tag on one document is a very different production from one on 500.
+      const byTag = new Map<string, { id: string; name: string; color: string; itemCount: number }>();
+      for (const a of assignments) {
+        const existing = byTag.get(a.tagId);
+        if (existing) existing.itemCount += 1;
+        else {
+          byTag.set(a.tagId, {
+            id: a.tag.id,
+            name: a.tag.name,
+            color: a.tag.color,
+            itemCount: 1,
+          });
+        }
+      }
+      return {
+        items: [...byTag.values()].sort((x, y) => x.name.localeCompare(y.name)),
+      };
+    });
+  }
+
   /** Display names for note authors, by user id. Empty when unknown. */
   private async resolveAuthors(ids: (string | null)[]): Promise<Map<string, string>> {
     const unique = [...new Set(ids.filter((i): i is string => i !== null))];

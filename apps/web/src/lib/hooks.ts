@@ -8,6 +8,8 @@ import {
   keepPreviousData,
 } from '@tanstack/react-query';
 import {
+  addCaseItemsResponse,
+  caseTagListResponse,
   collectionStatusResponse,
   validateProductionResponse,
   createExportResponse,
@@ -596,8 +598,33 @@ export function useAddCaseNote(id: string) {
 }
 
 export function useAddCaseItems(id: string) {
+  const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: unknown) => apiFetch(`/api/v1/cases/${id}/items`, { method: 'POST', body }),
+    mutationFn: (body: unknown) =>
+      apiFetch(`/api/v1/cases/${id}/items`, {
+        method: 'POST',
+        body,
+        schema: addCaseItemsResponse,
+      }),
+    onSuccess: () => {
+      // The item list and the case's tag set both change; without this the page
+      // shows the old counts and the addition looks like it did nothing.
+      void qc.invalidateQueries({ queryKey: ['case-items', id] });
+      void qc.invalidateQueries({ queryKey: ['case-tags', id] });
+      void qc.invalidateQueries({ queryKey: ['case', id] });
+    },
+  });
+}
+
+/**
+ * Tags present on a case's items, for scoping a production to the matter.
+ * Disabled until a case is chosen, so no request fires on an empty selection.
+ */
+export function useCaseTags(caseId: string) {
+  return useQuery({
+    queryKey: ['case-tags', caseId],
+    enabled: caseId !== '',
+    queryFn: () => apiFetch(`/api/v1/cases/${caseId}/tags`, { schema: caseTagListResponse }),
   });
 }
 
