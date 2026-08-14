@@ -3,9 +3,9 @@ import { use } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Button, EmptyState, Table } from '@aeg-clouddfir/ui';
+import { errorMessage } from '@/lib/errors';
 import { QueryBoundary, StatusPill, TruthNotice } from '@/components/shared';
-import { useProduction, useProductionExceptions } from '@/lib/hooks';
-import { apiDownloadUrl } from '@/lib/api';
+import { useProduction, useProductionExceptions, useProductionRunDownload } from '@/lib/hooks';
 import { formatBates } from '@/lib/production-wizard';
 import { humanizeToken } from '@/lib/format';
 
@@ -131,13 +131,7 @@ export default function ProductionDetailPage({ params }: { params: Promise<{ id:
                         </td>
                         <td>
                           {run.status === 'ready' || run.status === 'released' ? (
-                            <a
-                              href={apiDownloadUrl(
-                                `/api/v1/productions/${data.id}/runs/${run.id}/download`,
-                              )}
-                            >
-                              Download
-                            </a>
+                            <RunDownload productionId={data.id} runId={run.id} />
                           ) : (
                             '—'
                           )}
@@ -185,5 +179,52 @@ export default function ProductionDetailPage({ params }: { params: Promise<{ id:
         )}
       </QueryBoundary>
     </>
+  );
+}
+
+/**
+ * Resolves every file a production run produced.
+ *
+ * A run writes volumes, images, load files and manifests whose names depend on
+ * the profile, so the list comes from the API rather than being assumed here.
+ * This is the disclosure artifact, so the manifest hash is shown alongside it —
+ * it is what the receiving party verifies the set against.
+ */
+function RunDownload({ productionId, runId }: { productionId: string; runId: string }) {
+  const download = useProductionRunDownload();
+  const result = download.data;
+
+  if (result) {
+    return (
+      <div className="cdfir-downloads">
+        {result.files.map((f) => (
+          <a key={f.path} href={f.url}>
+            {f.path}
+          </a>
+        ))}
+        <span className="cdfir-field__hint">
+          {`${String(result.files.length)} file(s); manifest sha256:`}
+        </span>
+        <span className="cdfir-downloads__hash">{result.manifestSha256}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="cdfir-downloads">
+      <Button
+        type="button"
+        variant="secondary"
+        onClick={() => {
+          download.mutate({ productionId, runId });
+        }}
+        disabled={download.isPending}
+      >
+        {download.isPending ? 'Preparing\u2026' : 'Download'}
+      </Button>
+      {download.isError ? (
+        <span className="cdfir-field__error">{errorMessage(download.error)}</span>
+      ) : null}
+    </div>
   );
 }

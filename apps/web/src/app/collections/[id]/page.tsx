@@ -1,16 +1,16 @@
 'use client';
 import { use, useState } from 'react';
 import Link from 'next/link';
-import { Notice, ProgressBar, StatusLive, Table } from '@aeg-clouddfir/ui';
+import { Button, Notice, ProgressBar, StatusLive, Table } from '@aeg-clouddfir/ui';
 import type { CollectionStatusResponse } from '@aeg-clouddfir/contracts';
 import { ConfirmDialog, QueryBoundary, StatusPill, TruthNotice } from '@/components/shared';
 import {
+  useCollectionManifest,
   isCollectionActive,
   useCollectionAction,
   useCollectionExceptions,
   useCollectionStatus,
 } from '@/lib/hooks';
-import { apiDownloadUrl } from '@/lib/api';
 import { errorMessage } from '@/lib/errors';
 import { formatDateTime, humanizeToken } from '@/lib/format';
 
@@ -106,12 +106,7 @@ export default function CollectionDetailPage({ params }: { params: Promise<{ id:
                   );
                 })}
                 {data.manifest?.downloadAvailable ? (
-                  <a
-                    className="cdfir-button cdfir-button--secondary"
-                    href={apiDownloadUrl(`/api/v1/collections/${data.id}/manifest`)}
-                  >
-                    Download manifest (sha256 {data.manifest.sha256.slice(0, 12)}…)
-                  </a>
+                  <ManifestDownload collectionId={data.id} sha256={data.manifest.sha256} />
                 ) : null}
               </div>
 
@@ -298,5 +293,50 @@ function ExceptionsLedger({
         }
       </QueryBoundary>
     </>
+  );
+}
+
+/**
+ * Resolves the collection's manifest URLs on demand.
+ *
+ * The endpoint returns presigned URLs rather than the file itself, so a plain
+ * link would render JSON in the browser. The manifest sha256 is shown in full
+ * because it is the value a recipient checks the downloaded bytes against.
+ */
+function ManifestDownload({ collectionId, sha256 }: { collectionId: string; sha256: string }) {
+  const manifest = useCollectionManifest();
+  const links = manifest.data;
+
+  if (links) {
+    return (
+      <div className="cdfir-downloads">
+        <a href={links.manifestUrl}>Download manifest</a>
+        {links.completenessReportUrl ? (
+          <a href={links.completenessReportUrl}>Download completeness report</a>
+        ) : null}
+        <span className="cdfir-field__hint">manifest sha256:</span>
+        <span className="cdfir-downloads__hash">{links.manifestSha256}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="cdfir-downloads">
+      <Button
+        type="button"
+        variant="secondary"
+        onClick={() => {
+          manifest.mutate(collectionId);
+        }}
+        disabled={manifest.isPending}
+      >
+        {manifest.isPending
+          ? 'Preparing\u2026'
+          : `Download manifest (sha256 ${sha256.slice(0, 12)}\u2026)`}
+      </Button>
+      {manifest.isError ? (
+        <span className="cdfir-field__error">{errorMessage(manifest.error)}</span>
+      ) : null}
+    </div>
   );
 }

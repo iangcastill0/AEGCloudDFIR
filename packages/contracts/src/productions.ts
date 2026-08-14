@@ -172,3 +172,22 @@ export const productionRunStatusResponse = z.object({
   exceptionCounts: z.record(z.string(), z.number()),
   manifestSha256: z.string(),
 });
+
+/**
+ * GET /productions/:id/runs/:runId/download returns presigned URLs for every
+ * file the run produced — volumes, images, load files and manifests. The set is
+ * enumerated from storage rather than assumed, because the file layout depends
+ * on the production profile.
+ */
+export const productionRunDownloadResponse = z.object({
+  files: z.array(
+    z.object({
+      /** Path relative to the run's output prefix, e.g. "manifests/exceptions.json". */
+      path: z.string(),
+      url: z.string(),
+      sizeBytes: z.number().int(),
+    }),
+  ),
+  manifestSha256: z.string(),
+  expiresInSeconds: z.number().int(),
+});

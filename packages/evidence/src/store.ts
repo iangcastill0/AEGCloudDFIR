@@ -388,6 +388,38 @@ export class EvidenceObjectStore {
   }
 
   /**
+   * List objects under a prefix, paginating to completion.
+   *
+   * A production run writes an unknown number of files (volumes, images, load
+   * files, manifests), so a download endpoint cannot hardcode their names — it
+   * has to enumerate what the worker actually produced. Returns keys sorted so
+   * output ordering is stable between calls.
+   */
+  async listUnder(
+    bucketClass: BucketClass,
+    prefix: string,
+  ): Promise<{ key: string; size: number }[]> {
+    const bucket = this.bucketFor(bucketClass);
+    const out: { key: string; size: number }[] = [];
+    let token: string | undefined;
+    do {
+      const page = await this.s3.send(
+        new ListObjectsV2Command({
+          Bucket: bucket,
+          Prefix: prefix,
+          ...(token !== undefined ? { ContinuationToken: token } : {}),
+        }),
+      );
+      for (const o of page.Contents ?? []) {
+        if (o.Key !== undefined) out.push({ key: o.Key, size: o.Size ?? 0 });
+      }
+      token = page.IsTruncated === true ? page.NextContinuationToken : undefined;
+    } while (token !== undefined);
+    out.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+    return out;
+  }
+
+  /**
    * Cheap reachability + credential probe for readiness checks.
    *
    * Uses ListObjectsV2 with MaxKeys=1 rather than a HEAD on a known key: it

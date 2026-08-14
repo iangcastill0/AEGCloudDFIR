@@ -86,6 +86,30 @@ export class CollectionsController {
     return this.collections.status(requireAuth(request), id);
   }
 
+  /**
+   * Manifest download. Read-only roles included: fetching the custody artifact
+   * is a read, and an auditor or reviewer needs it to verify a collection.
+   */
+  @Get(':id/manifest')
+  @RequireRoles(
+    TenantRole.org_admin,
+    TenantRole.case_manager,
+    TenantRole.reviewer,
+    TenantRole.read_only,
+    TenantRole.auditor,
+  )
+  async manifest(
+    @Param('id') id: string,
+    @Req() request: FastifyRequest,
+  ): Promise<{
+    manifestUrl: string;
+    manifestSha256: string;
+    completenessReportUrl: string | null;
+    expiresInSeconds: number;
+  }> {
+    return this.collections.manifestDownload(requireAuth(request), id, request);
+  }
+
   @Post(':id/:action')
   @RequireRoles(TenantRole.org_admin, TenantRole.case_manager)
   @HttpCode(200)

@@ -124,6 +124,25 @@ export class ProductionsController {
     return this.productions.getRun(requireAuth(request), id, runId);
   }
 
+  /**
+   * Download a completed production run. Restricted to the roles that own
+   * production work — this is the disclosure artifact leaving the platform, and
+   * the request is audited as production.run_downloaded.
+   */
+  @Get(':id/runs/:runId/download')
+  @RequireRoles(TenantRole.production_manager, TenantRole.case_manager)
+  async downloadRun(
+    @Param('id') id: string,
+    @Param('runId') runId: string,
+    @Req() request: FastifyRequest,
+  ): Promise<{
+    files: { path: string; url: string; sizeBytes: number }[];
+    manifestSha256: string;
+    expiresInSeconds: number;
+  }> {
+    return this.productions.downloadRun(requireAuth(request), id, runId, request);
+  }
+
   @Post(':id/runs/:runId/clone')
   @RequireRoles(TenantRole.production_manager, TenantRole.case_manager)
   @HttpCode(200)

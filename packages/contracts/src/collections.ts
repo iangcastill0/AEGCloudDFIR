@@ -231,3 +231,16 @@ export const collectionStatusResponse = z.object({
 export type CollectionStatusResponse = z.infer<typeof collectionStatusResponse>;
 
 export const collectionAction = z.enum(['pause', 'resume', 'cancel', 'retry']);
+
+/**
+ * GET /collections/:id/manifest returns presigned URLs, not a file — the same
+ * envelope shape exports uses. The manifest is the collection's custody
+ * artifact; its SHA-256 is returned so a recipient can verify what they fetched.
+ */
+export const collectionManifestDownloadResponse = z.object({
+  manifestUrl: z.string(),
+  manifestSha256: z.string(),
+  /** Human-readable completeness report, when the finalizer produced one. */
+  completenessReportUrl: z.string().nullable(),
+  expiresInSeconds: z.number().int(),
+});

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
-import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ProductionStatus, TenantRole } from '@aeg-clouddfir/database';
 import { ProductionsService } from './productions.service.js';
 import { validateProductionSet, type ProductionValidationItem } from './production.validator.js';
@@ -14,6 +14,7 @@ import {
   fakePrisma,
   fakeRequest,
   makeAuth,
+  testConfig,
 } from '../testing/mocks.js';
 
 const auth = makeAuth([TenantRole.production_manager]);
@@ -161,7 +162,7 @@ function productionRow(validation: Record<string, unknown> | null) {
   };
 }
 
-function makeService(models: Record<string, unknown>) {
+function makeService(models: Record<string, unknown>, opts?: { store?: unknown }) {
   const audit = fakeAudit();
   const selection = { collectIdsForSavedSearch: vi.fn(async () => []) };
   const prisma = fakePrisma({
@@ -172,6 +173,11 @@ function makeService(models: Record<string, unknown>) {
     prisma,
     audit.service,
     selection as unknown as SelectionService,
+    (opts?.store ?? {
+      listUnder: vi.fn(async () => []),
+      presignGet: vi.fn(async (_t: string, key: string) => `https://signed/${key}`),
+    }) as never,
+    testConfig(),
   );
   return { service, audit };
 }
@@ -366,5 +372,104 @@ describe('ProductionsService.cloneRun', () => {
       expect.anything(),
       expect.objectContaining({ action: 'production.cloned' }),
     );
+  });
+});
+
+describe('ProductionsService.downloadRun', () => {
+  const PREFIX = `tenants/${TENANT_ID}/productions/${PRODUCTION_ID}/${RUN_ID}`;
+
+  function withRun(run: Record<string, unknown> | null, store?: unknown) {
+    return makeService(
+      { productionRun: { findFirst: vi.fn(async () => run) } },
+      store ? { store } : undefined,
+    );
+  }
+
+  const readyRun = {
+    id: RUN_ID,
+    status: 'ready',
+    outputPrefix: PREFIX,
+    manifestSha256: 'd'.repeat(64),
+    runNumber: 2,
+  };
+
+  it('lists every produced file with a presigned URL, path and size', async () => {
+    const store = {
+      listUnder: vi.fn(async () => [
+        { key: `${PREFIX}/manifests/exceptions.json`, size: 120 },
+        { key: `${PREFIX}/VOL001/IMAGES/0001.tif`, size: 4096 },
+      ]),
+      presignGet: vi.fn(async (_t: string, key: string) => `https://signed/${key}`),
+    };
+    const { service, audit } = withRun(readyRun, store);
+
+    const result = await service.downloadRun(auth, PRODUCTION_ID, RUN_ID, fakeRequest());
+
+    // Paths are relative to the run prefix, so a recipient sees the volume
+    // layout rather than tenant-scoped storage keys.
+    expect(result.files.map((f) => f.path)).toEqual([
+      'manifests/exceptions.json',
+      'VOL001/IMAGES/0001.tif',
+    ]);
+    expect(result.files[1]?.sizeBytes).toBe(4096);
+    expect(result.manifestSha256).toBe('d'.repeat(64));
+    // A production set leaving the platform is a disclosure; it must be audited.
+    expect(audit.appendTx).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ action: 'production.run_downloaded' }),
+    );
+  });
+
+  it.each(['queued', 'rendering', 'stamping', 'verifying', 'failed', 'cancelled'])(
+    'refuses to hand out a run in %s state',
+    async (status) => {
+      // Half a production set is worse than none: the recipient cannot tell.
+      const { service } = withRun({ ...readyRun, status });
+      await expect(
+        service.downloadRun(auth, PRODUCTION_ID, RUN_ID, fakeRequest()),
+      ).rejects.toThrow(ConflictException);
+    },
+  );
+
+  it('allows a released run, not just a ready one', async () => {
+    const store = {
+      listUnder: vi.fn(async () => [{ key: `${PREFIX}/x.dat`, size: 1 }]),
+      presignGet: vi.fn(async () => 'https://signed/x'),
+    };
+    const { service } = withRun({ ...readyRun, status: 'released' }, store);
+    const result = await service.downloadRun(auth, PRODUCTION_ID, RUN_ID, fakeRequest());
+    expect(result.files).toHaveLength(1);
+  });
+
+  it('reports an empty output rather than returning a plausible-looking empty set', async () => {
+    // Ready in the database but nothing in storage means something is wrong;
+    // an empty file list would read as a legitimately empty production.
+    const store = { listUnder: vi.fn(async () => []), presignGet: vi.fn() };
+    const { service } = withRun(readyRun, store);
+    await expect(
+      service.downloadRun(auth, PRODUCTION_ID, RUN_ID, fakeRequest()),
+    ).rejects.toThrow(ConflictException);
+  });
+
+  it('404s for a run belonging to another production or tenant', async () => {
+    const { service } = withRun(null);
+    await expect(service.downloadRun(auth, PRODUCTION_ID, RUN_ID, fakeRequest())).rejects.toThrow(
+      NotFoundException,
+    );
+  });
+
+  it('signs a flattened attachment filename per file', async () => {
+    const presignGet = vi.fn(async () => 'https://signed/x');
+    const store = {
+      listUnder: vi.fn(async () => [{ key: `${PREFIX}/VOL001/IMAGES/0001.tif`, size: 1 }]),
+      presignGet,
+    };
+    const { service } = withRun(readyRun, store);
+    await service.downloadRun(auth, PRODUCTION_ID, RUN_ID, fakeRequest());
+    // Slashes flattened: a browser saves into one folder, so nested paths would
+    // collide or be dropped entirely.
+    expect(presignGet.mock.calls[0]?.[2]).toMatchObject({
+      downloadFilename: 'production-run2-VOL001-IMAGES-0001.tif',
+    });
   });
 });

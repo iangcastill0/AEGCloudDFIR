@@ -9,6 +9,7 @@ import {
   fakePrisma,
   fakeRequest,
   makeAuth,
+  testConfig,
 } from '../testing/mocks.js';
 
 const auth = makeAuth([TenantRole.case_manager]);
@@ -25,10 +26,17 @@ const createBody = {
   scope: { dateRange: { kind: 'all_time' } },
 };
 
-function makeService(models: Record<string, unknown>) {
+function makeService(models: Record<string, unknown>, opts?: { store?: unknown }) {
   const audit = fakeAudit();
   const prisma = fakePrisma(models);
-  const service = new CollectionsService(prisma, audit.service);
+  const service = new CollectionsService(
+    prisma,
+    audit.service,
+    (opts?.store ?? {
+      presignGet: vi.fn(async (_t: string, key: string) => `https://signed/${key}`),
+    }) as never,
+    testConfig(),
+  );
   return { service, prisma, audit };
 }
 
@@ -415,5 +423,88 @@ describe('CollectionsService.action', () => {
     expect(result.status).toBe(CollectionStatus.fetching);
     const args = outboxCreate.mock.calls[0]?.[0] as { data: Record<string, unknown> };
     expect(args.data.dedupKey).toBe(`discover:${COLLECTION_ID}:resume:2`);
+  });
+});
+
+describe('CollectionsService.manifestDownload', () => {
+  function withCollection(row: Record<string, unknown> | null, store?: unknown) {
+    return makeService(
+      { collection: { findFirst: vi.fn(async () => row) } },
+      store ? { store } : undefined,
+    );
+  }
+
+  it('returns presigned URLs and the manifest hash for verification', async () => {
+    const { service, audit } = withCollection({
+      id: COLLECTION_ID,
+      manifestKey: `tenants/${TENANT_ID}/manifests/${COLLECTION_ID}/manifest.json`,
+      manifestSha256: 'a'.repeat(64),
+      status: 'completed',
+    });
+
+    const result = await service.manifestDownload(auth, COLLECTION_ID, fakeRequest());
+
+    expect(result.manifestSha256).toBe('a'.repeat(64));
+    expect(result.manifestUrl).toContain('manifest.json');
+    expect(result.expiresInSeconds).toBeGreaterThan(0);
+    // Downloading the custody artifact is itself an audited act.
+    expect(audit.appendTx).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ action: 'collection.manifest_downloaded' }),
+    );
+  });
+
+  it('signs an attachment filename so the browser saves rather than renders it', async () => {
+    const presignGet = vi.fn(async () => 'https://signed/x');
+    const { service } = withCollection(
+      {
+        id: COLLECTION_ID,
+        manifestKey: 'k',
+        manifestSha256: 'b'.repeat(64),
+        status: 'completed',
+      },
+      { presignGet },
+    );
+
+    await service.manifestDownload(auth, COLLECTION_ID, fakeRequest());
+    expect(presignGet.mock.calls[0]?.[2]).toMatchObject({
+      downloadFilename: `collection-${COLLECTION_ID}-manifest.json`,
+    });
+  });
+
+  it('explains that an unfinalized collection has no manifest yet, rather than 404ing', async () => {
+    // A 404 here reads as "your collection is gone", which is alarming and wrong.
+    const { service } = withCollection({
+      id: COLLECTION_ID,
+      manifestKey: '',
+      manifestSha256: '',
+      status: 'fetching',
+    });
+    await expect(service.manifestDownload(auth, COLLECTION_ID, fakeRequest())).rejects.toThrow(
+      ConflictException,
+    );
+  });
+
+  it('404s for a collection in another tenant', async () => {
+    const { service } = withCollection(null);
+    await expect(
+      service.manifestDownload(auth, COLLECTION_ID, fakeRequest()),
+    ).rejects.toThrow();
+  });
+
+  it('still returns the manifest when the completeness report is missing', async () => {
+    // Older collections predate the report; its absence must not block custody.
+    const presignGet = vi
+      .fn()
+      .mockResolvedValueOnce('https://signed/manifest')
+      .mockRejectedValueOnce(new Error('NoSuchKey'));
+    const { service } = withCollection(
+      { id: COLLECTION_ID, manifestKey: 'k', manifestSha256: 'c'.repeat(64), status: 'completed' },
+      { presignGet },
+    );
+
+    const result = await service.manifestDownload(auth, COLLECTION_ID, fakeRequest());
+    expect(result.manifestUrl).toBe('https://signed/manifest');
+    expect(result.completenessReportUrl).toBeNull();
   });
 });

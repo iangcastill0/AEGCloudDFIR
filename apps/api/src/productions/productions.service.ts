@@ -27,12 +27,14 @@ import {
 import type { FastifyRequest } from 'fastify';
 import '../common/http.js';
 import type { AuthContext } from '../common/http.js';
-import { PRISMA } from '../common/tokens.js';
+import { APP_CONFIG, EVIDENCE_STORE, PRISMA } from '../common/tokens.js';
 import type { CursorQuery } from '../common/pagination.js';
 import { assertWithinQuota, readQuota } from '../common/quotas.js';
 import { zodValidate } from '../common/zod-validate.js';
 import { chunk, expandFamilies } from '../common/families.js';
 import { AuditService } from '../audit/audit.service.js';
+import type { AppConfig } from '@aeg-clouddfir/config';
+import type { EvidenceObjectStore } from '@aeg-clouddfir/evidence';
 import { SelectionService, SELECTION_ID_CAP } from '../search/selection.service.js';
 import {
   FLAG_DEFINITIONS,
@@ -147,7 +149,96 @@ export class ProductionsService {
     @Inject(PRISMA) private readonly prisma: PrismaClient,
     private readonly audit: AuditService,
     private readonly selection: SelectionService,
+    @Inject(EVIDENCE_STORE) private readonly store: EvidenceObjectStore,
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
+
+  /**
+   * Presigned URLs for everything a production run produced.
+   *
+   * This is how a production set reaches opposing counsel, so it is guarded and
+   * audited like the disclosure it is. The file list is enumerated from storage
+   * rather than assumed: a run writes volumes, images, load files and manifests
+   * whose names depend on the production profile, and inventing that list in the
+   * API would silently omit files when a profile changes.
+   */
+  async downloadRun(
+    auth: AuthContext,
+    productionId: string,
+    runId: string,
+    request: FastifyRequest,
+  ): Promise<{
+    files: { path: string; url: string; sizeBytes: number }[];
+    manifestSha256: string;
+    expiresInSeconds: number;
+  }> {
+    const run = await withTenantContext(this.prisma, auth.tenantId, (tx) =>
+      tx.productionRun.findFirst({
+        where: { id: runId, productionId, tenantId: auth.tenantId },
+        select: {
+          id: true,
+          status: true,
+          outputPrefix: true,
+          manifestSha256: true,
+          runNumber: true,
+        },
+      }),
+    );
+    if (!run) throw new NotFoundException();
+
+    // Only a finished run may be downloaded. Handing out a partially written
+    // set would be worse than refusing: the recipient cannot tell it is partial.
+    if (run.status !== 'ready' && run.status !== 'released') {
+      throw new ConflictException(`production run is not downloadable (status: ${run.status})`);
+    }
+    if (run.outputPrefix === '') {
+      throw new ConflictException('this run recorded no output location');
+    }
+
+    const objects = await this.store.listUnder('evidence', `${run.outputPrefix}/`);
+    if (objects.length === 0) {
+      // The row says ready but storage is empty — report it rather than hand
+      // back an empty set that looks like a legitimately empty production.
+      throw new ConflictException(
+        'no files were found for this run; its output may have been removed by retention',
+      );
+    }
+
+    const ttlSeconds = this.config.CDFIR_S3_PRESIGN_TTL_SECONDS;
+    const files = await Promise.all(
+      objects.map(async (o) => {
+        const path = o.key.slice(run.outputPrefix.length + 1);
+        return {
+          path,
+          sizeBytes: o.size,
+          url: await this.store.presignGet(auth.tenantId, o.key, {
+            ttlSeconds,
+            downloadFilename: `production-run${String(run.runNumber)}-${path.replace(/\//g, '-')}`,
+          }),
+        };
+      }),
+    );
+
+    await withTenantContext(this.prisma, auth.tenantId, (tx) =>
+      this.audit.appendTx(tx, {
+        tenantId: auth.tenantId,
+        actorUserId: auth.userId,
+        effectiveRoles: auth.roles,
+        action: 'production.run_downloaded',
+        targetType: 'production_run',
+        targetId: runId,
+        summary: {
+          productionId,
+          runNumber: run.runNumber,
+          fileCount: files.length,
+          manifestSha256: run.manifestSha256,
+        },
+        request,
+      }),
+    );
+
+    return { files, manifestSha256: run.manifestSha256, expiresInSeconds: ttlSeconds };
+  }
 
   // -------------------------------------------------------------------------
   // Draft lifecycle

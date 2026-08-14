@@ -23,12 +23,14 @@ import {
 import type { FastifyRequest } from 'fastify';
 import '../common/http.js';
 import type { AuthContext } from '../common/http.js';
-import { PRISMA } from '../common/tokens.js';
+import { APP_CONFIG, EVIDENCE_STORE, PRISMA } from '../common/tokens.js';
 import type { CursorQuery } from '../common/pagination.js';
 import { assertWithinQuota, readQuota } from '../common/quotas.js';
 import { zodValidate } from '../common/zod-validate.js';
 import { chunk } from '../common/families.js';
 import { AuditService } from '../audit/audit.service.js';
+import type { AppConfig } from '@aeg-clouddfir/config';
+import { derivativeKey, type EvidenceObjectStore } from '@aeg-clouddfir/evidence';
 
 /** Statuses that count against the concurrent-collections quota. */
 const ACTIVE_STATUSES: CollectionStatus[] = [
@@ -193,7 +195,82 @@ export class CollectionsService {
   constructor(
     @Inject(PRISMA) private readonly prisma: PrismaClient,
     private readonly audit: AuditService,
+    @Inject(EVIDENCE_STORE) private readonly store: EvidenceObjectStore,
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
+
+  /**
+   * Presigned URLs for a collection's manifest and completeness report.
+   *
+   * Returns an envelope rather than streaming the file: the response carries the
+   * manifest's SHA-256 so a recipient can verify the bytes they fetched, and the
+   * disposition is signed into the URL because a presigned URL points at the
+   * storage host, where the browser would otherwise render the JSON inline.
+   */
+  async manifestDownload(
+    auth: AuthContext,
+    id: string,
+    request: FastifyRequest,
+  ): Promise<{
+    manifestUrl: string;
+    manifestSha256: string;
+    completenessReportUrl: string | null;
+    expiresInSeconds: number;
+  }> {
+    const row = await withTenantContext(this.prisma, auth.tenantId, (tx) =>
+      tx.collection.findFirst({
+        where: { id, tenantId: auth.tenantId },
+        select: { id: true, manifestKey: true, manifestSha256: true, status: true },
+      }),
+    );
+    if (!row) throw new NotFoundException();
+    if (row.manifestKey === null || row.manifestKey === '') {
+      // The manifest is written by the finalizer, so it does not exist until the
+      // collection finishes. Saying so beats a 404 that looks like a lost record.
+      throw new ConflictException(
+        `this collection has no manifest yet (status: ${row.status}); it is written when the collection finalizes`,
+      );
+    }
+
+    const ttlSeconds = this.config.CDFIR_S3_PRESIGN_TTL_SECONDS;
+    const manifestUrl = await this.store.presignGet(auth.tenantId, row.manifestKey, {
+      ttlSeconds,
+      downloadFilename: `collection-${id}-manifest.json`,
+    });
+
+    // The completeness report is best-effort: older collections predate it, and
+    // its absence must not block access to the manifest itself.
+    let completenessReportUrl: string | null;
+    try {
+      completenessReportUrl = await this.store.presignGet(
+        auth.tenantId,
+        derivativeKey(auth.tenantId, id, 'completeness-report', 1, 'report.txt'),
+        { ttlSeconds, downloadFilename: `collection-${id}-completeness.txt` },
+      );
+    } catch {
+      completenessReportUrl = null;
+    }
+
+    await withTenantContext(this.prisma, auth.tenantId, (tx) =>
+      this.audit.appendTx(tx, {
+        tenantId: auth.tenantId,
+        actorUserId: auth.userId,
+        effectiveRoles: auth.roles,
+        action: 'collection.manifest_downloaded',
+        targetType: 'collection',
+        targetId: id,
+        summary: { manifestSha256: row.manifestSha256 },
+        request,
+      }),
+    );
+
+    return {
+      manifestUrl,
+      manifestSha256: row.manifestSha256 ?? '',
+      completenessReportUrl,
+      expiresInSeconds: ttlSeconds,
+    };
+  }
 
   async create(
     auth: AuthContext,

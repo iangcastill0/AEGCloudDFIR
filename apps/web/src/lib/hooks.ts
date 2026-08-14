@@ -11,7 +11,9 @@ import {
   collectionStatusResponse,
   validateProductionResponse,
   createExportResponse,
+  collectionManifestDownloadResponse,
   exportDownloadResponse,
+  productionRunDownloadResponse,
   tagResponse,
   savedSearchResponse,
   caseResponse,
@@ -612,6 +614,26 @@ export function useCreateExport() {
     mutationFn: (body: unknown) =>
       apiFetch('/api/v1/exports', { method: 'POST', body, schema: createExportResponse }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['exports'] }),
+  });
+}
+
+/** Presigned URLs for a collection's manifest and completeness report. */
+export function useCollectionManifest() {
+  return useMutation({
+    mutationFn: (collectionId: string) =>
+      apiFetch(`/api/v1/collections/${collectionId}/manifest`, {
+        schema: collectionManifestDownloadResponse,
+      }),
+  });
+}
+
+/** Presigned URLs for every file a production run produced. */
+export function useProductionRunDownload() {
+  return useMutation({
+    mutationFn: ({ productionId, runId }: { productionId: string; runId: string }) =>
+      apiFetch(`/api/v1/productions/${productionId}/runs/${runId}/download`, {
+        schema: productionRunDownloadResponse,
+      }),
   });
 }
 
