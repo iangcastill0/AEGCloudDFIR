@@ -149,3 +149,16 @@ export const exportStatusResponse = z.object({
 export const createExportResponse = exportStatusResponse.extend({
   replayed: z.boolean(),
 });
+
+/**
+ * GET /exports/:id/download does not stream a file — it returns short-lived
+ * presigned URLs. An export can be split into several archive parts, so a single
+ * redirect could never serve it, and the manifest hash must reach the user so
+ * they can verify what they downloaded.
+ */
+export const exportDownloadResponse = z.object({
+  manifestUrl: z.string(),
+  archiveUrls: z.array(z.string()),
+  manifestSha256: z.string(),
+  expiresInSeconds: z.number().int(),
+});

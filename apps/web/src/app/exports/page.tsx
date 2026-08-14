@@ -12,8 +12,14 @@ import {
   TextInput,
 } from '@aeg-clouddfir/ui';
 import { QueryBoundary, StatusPill, TruthNotice } from '@/components/shared';
-import { useCases, useCreateExport, useExports, useSavedSearches, useTags } from '@/lib/hooks';
-import { apiDownloadUrl } from '@/lib/api';
+import {
+  useCases,
+  useCreateExport,
+  useExportDownload,
+  useExports,
+  useSavedSearches,
+  useTags,
+} from '@/lib/hooks';
 import { errorMessage } from '@/lib/errors';
 import { formatBytes, formatDateTime } from '@/lib/format';
 
@@ -85,12 +91,10 @@ export default function ExportsPage() {
                     <td>{formatDateTime(e.verifiedAt)}</td>
                     <td>
                       {e.status === 'ready' ? (
-                        <a href={apiDownloadUrl(`/api/v1/exports/${e.id}/download`)}>
-                          Download
-                          {e.downloadExpiresAt
-                            ? ` (expires ${formatDateTime(e.downloadExpiresAt)})`
-                            : ''}
-                        </a>
+                        <ExportDownload
+                          exportId={e.id}
+                          expiresAt={e.downloadExpiresAt}
+                        />
                       ) : (
                         '—'
                       )}
@@ -257,5 +261,68 @@ function CreateExportDialog({
         </p>
       ) : null}
     </Dialog>
+  );
+}
+
+/**
+ * Resolves an export's presigned URLs, then shows them.
+ *
+ * The endpoint returns an envelope, not a file, so this cannot be a plain link.
+ * The parts are listed individually rather than auto-downloaded: an export can
+ * be split into several archives, browsers block multiple programmatic
+ * downloads, and — more importantly — the manifest and its SHA-256 are what
+ * make the download verifiable. Hiding them behind an automatic save would bury
+ * the one artifact a recipient needs to check the contents against.
+ */
+function ExportDownload({
+  exportId,
+  expiresAt,
+}: {
+  exportId: string;
+  expiresAt: string | null;
+}) {
+  const download = useExportDownload();
+  const links = download.data;
+
+  if (links) {
+    return (
+      <div className="cdfir-fieldset">
+        <a href={links.manifestUrl} download>
+          manifest.json
+        </a>
+        {links.archiveUrls.map((url, i) => (
+          <a key={url} href={url} download>
+            {`part ${String(i + 1).padStart(3, '0')} of ${links.archiveUrls.length}`}
+          </a>
+        ))}
+        <span className="cdfir-field__hint">
+          manifest sha256 {links.manifestSha256}
+        </span>
+        <span className="cdfir-field__hint">
+          {`links expire in ${String(links.expiresInSeconds)}s — reopen this to get fresh ones`}
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="cdfir-fieldset">
+      <Button
+        type="button"
+        variant="secondary"
+        onClick={() => {
+          download.mutate(exportId);
+        }}
+        disabled={download.isPending}
+      >
+        {download.isPending ? 'Preparing…' : 'Download'}
+      </Button>
+      {expiresAt ? (
+        <span className="cdfir-field__hint">{`expires ${formatDateTime(expiresAt)}`}</span>
+      ) : null}
+      {download.isError ? (
+        <span className="cdfir-field__hint">{errorMessage(download.error)}</span>
+      ) : null}
+    </div>
   );
 }

@@ -11,6 +11,7 @@ import {
   collectionStatusResponse,
   validateProductionResponse,
   createExportResponse,
+  exportDownloadResponse,
   tagResponse,
   savedSearchResponse,
   caseResponse,
@@ -611,6 +612,18 @@ export function useCreateExport() {
     mutationFn: (body: unknown) =>
       apiFetch('/api/v1/exports', { method: 'POST', body, schema: createExportResponse }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['exports'] }),
+  });
+}
+
+/**
+ * Fetches the export's presigned URLs. The endpoint returns an envelope rather
+ * than a file, so linking an <a> straight at it just renders JSON in the
+ * browser — which is exactly what it used to do.
+ */
+export function useExportDownload() {
+  return useMutation({
+    mutationFn: (exportId: string) =>
+      apiFetch(`/api/v1/exports/${exportId}/download`, { schema: exportDownloadResponse }),
   });
 }
 
