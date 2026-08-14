@@ -139,3 +139,13 @@ export const exportStatusResponse = z.object({
   verifiedAt: z.string().nullable(),
   downloadExpiresAt: z.string().nullable(),
 });
+
+/**
+ * POST /exports returns the full export plus an idempotency flag: `replayed`
+ * is true when the request matched an existing idempotencyKey and no new export
+ * was created. Kept as an extension of the status shape so the client can parse
+ * a create and a fetch with the same schema.
+ */
+export const createExportResponse = exportStatusResponse.extend({
+  replayed: z.boolean(),
+});

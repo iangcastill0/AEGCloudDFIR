@@ -10,7 +10,7 @@ import {
 import {
   collectionStatusResponse,
   validateProductionResponse,
-  exportStatusResponse,
+  createExportResponse,
   tagResponse,
   savedSearchResponse,
   caseResponse,
@@ -609,7 +609,7 @@ export function useCreateExport() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: unknown) =>
-      apiFetch('/api/v1/exports', { method: 'POST', body, schema: exportStatusResponse }),
+      apiFetch('/api/v1/exports', { method: 'POST', body, schema: createExportResponse }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['exports'] }),
   });
 }

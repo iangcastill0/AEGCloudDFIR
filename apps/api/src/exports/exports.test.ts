@@ -3,6 +3,7 @@ import { ConflictException, GoneException } from '@nestjs/common';
 import { ExportStatus, TenantRole } from '@aeg-clouddfir/database';
 import type { EvidenceObjectStore } from '@aeg-clouddfir/evidence';
 import { Readable } from 'node:stream';
+import { exportStatusResponse } from '@aeg-clouddfir/contracts';
 import { ExportsService } from './exports.service.js';
 import type { SelectionService } from '../search/selection.service.js';
 import {
@@ -62,7 +63,9 @@ function exportRow(overrides: Record<string, unknown> = {}) {
 
 describe('ExportsService.create', () => {
   it('freezes EXACTLY the worker-contract parameter subset and enqueues export.run', async () => {
-    const exportCreate = vi.fn(async () => ({ id: EXPORT_ID, status: ExportStatus.queued }));
+    // Returns a full row: create() maps it through toDto, because the client
+    // validates this response with the same schema it uses for GET.
+    const exportCreate = vi.fn(async () => exportRow({ status: ExportStatus.queued }));
     const outboxCreate = vi.fn(async () => ({}));
     const { store } = makeStore();
     const { service, audit } = makeService(
@@ -108,6 +111,75 @@ describe('ExportsService.create', () => {
       expect.anything(),
       expect.objectContaining({ action: 'export.created' }),
     );
+  });
+});
+
+/**
+ * The web client validates the POST /exports response with the SAME schema it
+ * uses for GET. When create() returned a narrower shape, Zod rejected it with
+ * six "expected string, received undefined" errors and the export never
+ * appeared in the UI — even though it had been created successfully. Asserting
+ * the response against the client's own contract is what catches that.
+ */
+describe('ExportsService.create — response satisfies the client contract', () => {
+  function serviceReturning(existing: unknown, created: unknown) {
+    const { store } = makeStore();
+    return makeService(
+      {
+        export: {
+          findFirst: vi.fn(async () => existing),
+          count: vi.fn(async () => 0),
+          create: vi.fn(async () => created),
+        },
+        evidenceItem: { count: vi.fn(async () => 1) },
+        tenant: { findUnique: vi.fn(async () => ({ id: TENANT_ID, planQuota: {} })) },
+        outboxEvent: { create: vi.fn(async () => ({})) },
+      },
+      store,
+    ).service;
+  }
+
+  const input = {
+    idempotencyKey: 'idem-contract-1',
+    kind: 'native' as const,
+    name: 'Export 1',
+    selection: { kind: 'items' as const, evidenceItemIds: [ITEM_A] },
+    includeFamilies: true,
+    archiveSplitMb: 2048,
+  };
+
+  it('a newly created export parses against exportStatusResponse', async () => {
+    const service = serviceReturning(null, exportRow({ status: ExportStatus.queued }));
+    const result = await service.create(auth, input, fakeRequest());
+
+    const parsed = exportStatusResponse.safeParse(result);
+    expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+    expect(result.replayed).toBe(false);
+  });
+
+  it('a replayed (idempotent) export also parses, and is flagged as replayed', async () => {
+    // The idempotency path previously returned only id/status/itemCount.
+    const service = serviceReturning(exportRow({ status: ExportStatus.running }), null);
+    const result = await service.create(auth, input, fakeRequest());
+
+    const parsed = exportStatusResponse.safeParse(result);
+    expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+    expect(result.replayed).toBe(true);
+  });
+
+  it('serialises bigint totalBytes as a string and dates as ISO or null', async () => {
+    const verifiedAt = new Date('2026-08-14T00:00:00.000Z');
+    const service = serviceReturning(
+      null,
+      exportRow({ totalBytes: 9007199254740993n, verifiedAt, expiresAt: null }),
+    );
+    const result = await service.create(auth, input, fakeRequest());
+
+    // Beyond Number.MAX_SAFE_INTEGER: a number here would silently lose precision.
+    expect(result.totalBytes).toBe('9007199254740993');
+    expect(result.verifiedAt).toBe('2026-08-14T00:00:00.000Z');
+    expect(result.downloadExpiresAt).toBeNull();
+    expect(exportStatusResponse.safeParse(result).success).toBe(true);
   });
 });
 

@@ -34,6 +34,9 @@ const ACTIVE_STATUSES: ExportStatus[] = [
   ExportStatus.verifying,
 ];
 
+/** create() returns the full export plus whether this replayed an existing one. */
+export type CreateExportResult = ExportDto & { replayed: boolean };
+
 export interface ExportDto {
   id: string;
   kind: string;
@@ -57,6 +60,19 @@ type ExportRow = {
   verifiedAt: Date | null;
   expiresAt: Date | null;
 };
+
+/** Single source of truth for the columns toDto needs. */
+const EXPORT_SELECT = {
+  id: true,
+  kind: true,
+  name: true,
+  status: true,
+  statusDetail: true,
+  itemCount: true,
+  totalBytes: true,
+  verifiedAt: true,
+  expiresAt: true,
+} as const;
 
 function toDto(row: ExportRow): ExportDto {
   return {
@@ -122,7 +138,11 @@ export class ExportsService {
     auth: AuthContext,
     body: unknown,
     request: FastifyRequest,
-  ): Promise<{ id: string; status: string; itemCount: number; replayed: boolean }> {
+    // Returns the FULL export, not a partial. The web client validates this
+    // response with the same schema it uses for GET, so a narrower shape fails
+    // Zod with six "expected string, received undefined" errors and the export
+    // never appears — even though it was created successfully.
+  ): Promise<CreateExportResult> {
     const input = zodValidate(createExportRequest, body);
 
     // The saved-search count above may hit the search engine; do it before
@@ -133,15 +153,10 @@ export class ExportsService {
       return await withTenantContext(this.prisma, auth.tenantId, async (tx) => {
         const existing = await tx.export.findFirst({
           where: { tenantId: auth.tenantId, idempotencyKey: input.idempotencyKey },
-          select: { id: true, status: true, itemCount: true },
+          select: EXPORT_SELECT,
         });
         if (existing) {
-          return {
-            id: existing.id,
-            status: existing.status,
-            itemCount: existing.itemCount,
-            replayed: true,
-          };
+          return { ...toDto(existing), replayed: true };
         }
 
         if (input.caseId !== undefined) {
@@ -208,23 +223,18 @@ export class ExportsService {
           },
           request,
         });
-        return { id: exportRow.id, status: exportRow.status, itemCount, replayed: false };
+        return { ...toDto(exportRow), replayed: false };
       });
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
         const existing = await withTenantContext(this.prisma, auth.tenantId, (tx) =>
           tx.export.findFirst({
             where: { tenantId: auth.tenantId, idempotencyKey: input.idempotencyKey },
-            select: { id: true, status: true, itemCount: true },
+            select: EXPORT_SELECT,
           }),
         );
         if (existing) {
-          return {
-            id: existing.id,
-            status: existing.status,
-            itemCount: existing.itemCount,
-            replayed: true,
-          };
+          return { ...toDto(existing), replayed: true };
         }
       }
       throw err;

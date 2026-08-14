@@ -19,7 +19,7 @@ import { SessionGuard } from '../auth/guards/session.guard.js';
 import { TenantGuard } from '../auth/guards/tenant.guard.js';
 import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { RequireRoles } from '../auth/guards/require-roles.decorator.js';
-import { ExportsService, type ExportDto } from './exports.service.js';
+import { ExportsService, type ExportDto, type CreateExportResult } from './exports.service.js';
 
 function requireAuth(request: FastifyRequest): AuthContext {
   const auth = request.cdfirAuth;
@@ -38,7 +38,7 @@ export class ExportsController {
   async create(
     @Body() body: unknown,
     @Req() request: FastifyRequest,
-  ): Promise<{ id: string; status: string; itemCount: number; replayed: boolean }> {
+  ): Promise<CreateExportResult> {
     return this.exports.create(requireAuth(request), body, request);
   }
 
