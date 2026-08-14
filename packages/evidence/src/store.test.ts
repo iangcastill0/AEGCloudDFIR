@@ -656,3 +656,39 @@ describe('promoteToOriginal — objects above the 5 GiB single-part copy limit',
     expect(part.CopySource).toBe(`${EVIDENCE_BUCKET}/${srcKey}`);
   });
 });
+
+describe('presignGet — download disposition', () => {
+  const key = originalKey(TENANT, HELLO_SHA);
+
+  it('omits ResponseContentDisposition when no filename is given', async () => {
+    const presignFn = vi.fn(async () => 'https://signed/x');
+    await makeStore(presignFn).presignGet(TENANT, key);
+    const input = (presignFn.mock.calls[0]![1] as { input: Record<string, unknown> }).input;
+    expect(input['ResponseContentDisposition']).toBeUndefined();
+  });
+
+  it('signs an attachment disposition so the browser saves rather than renders', async () => {
+    // The HTML download attribute is ignored cross-origin, and presigned URLs
+    // always point at the storage host — so this must be in the signature.
+    const presignFn = vi.fn(async () => 'https://signed/x');
+    await makeStore(presignFn).presignGet(TENANT, key, { downloadFilename: 'manifest.json' });
+    const input = (presignFn.mock.calls[0]![1] as { input: Record<string, unknown> }).input;
+    expect(input['ResponseContentDisposition']).toBe('attachment; filename="manifest.json"');
+  });
+
+  it('strips characters that could break out of the header', async () => {
+    const presignFn = vi.fn(async () => 'https://signed/x');
+    await makeStore(presignFn).presignGet(TENANT, key, {
+      downloadFilename: 'evil";\r\nX-Injected: 1;.json',
+    });
+    const value = String(
+      (presignFn.mock.calls[0]![1] as { input: Record<string, unknown> }).input[
+        'ResponseContentDisposition'
+      ],
+    );
+    // A filename that can close the quote is a header-injection primitive.
+    expect(value).not.toContain('"evil"');
+    expect(value).not.toMatch(/[\r\n]/);
+    expect(value.match(/"/g)?.length).toBe(2);
+  });
+});

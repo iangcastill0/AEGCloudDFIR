@@ -287,11 +287,12 @@ function ExportDownload({
   if (links) {
     return (
       <div className="cdfir-fieldset">
-        <a href={links.manifestUrl} download>
-          manifest.json
-        </a>
+        {/* No `download` attribute: browsers ignore it cross-origin, and these
+            URLs point at the storage host. The attachment disposition is signed
+            into the URL by the API instead. */}
+        <a href={links.manifestUrl}>manifest.json</a>
         {links.archiveUrls.map((url, i) => (
-          <a key={url} href={url} download>
+          <a key={url} href={url}>
             {`part ${String(i + 1).padStart(3, '0')} of ${links.archiveUrls.length}`}
           </a>
         ))}

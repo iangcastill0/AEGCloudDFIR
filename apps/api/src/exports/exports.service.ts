@@ -329,9 +329,20 @@ export class ExportsService {
     );
 
     const ttlSeconds = this.config.CDFIR_S3_PRESIGN_TTL_SECONDS;
-    const manifestUrl = await this.store.presignGet(auth.tenantId, manifestKey, { ttlSeconds });
+    // Sign the disposition in: without it the browser renders manifest.json as
+    // text instead of saving it, and the HTML download attribute is ignored
+    // cross-origin.
+    const manifestUrl = await this.store.presignGet(auth.tenantId, manifestKey, {
+      ttlSeconds,
+      downloadFilename: `export-${id}-manifest.json`,
+    });
     const archiveUrls = await Promise.all(
-      archiveKeys.map((key) => this.store.presignGet(auth.tenantId, key, { ttlSeconds })),
+      archiveKeys.map((key, i) =>
+        this.store.presignGet(auth.tenantId, key, {
+          ttlSeconds,
+          downloadFilename: `export-${id}-part${String(i + 1).padStart(3, '0')}.zip`,
+        }),
+      ),
     );
 
     // Audit the download; presigned URLs are never logged or audited.

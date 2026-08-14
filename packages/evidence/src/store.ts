@@ -101,6 +101,16 @@ function isNotFoundError(err: unknown): boolean {
   return e.$metadata?.httpStatusCode === 404;
 }
 
+/**
+ * Build a Content-Disposition value. Quotes and control characters are stripped
+ * rather than escaped: the filename ends up inside a signed URL, and a header
+ * that can be broken out of is a header-injection primitive.
+ */
+function contentDisposition(filename: string): string {
+  const safe = filename.replace(/[^\w.\- ]+/g, '_').slice(0, 200);
+  return `attachment; filename="${safe}"`;
+}
+
 function encodeCopySource(bucket: string, key: string): string {
   return `${bucket}/${key.split('/').map(encodeURIComponent).join('/')}`;
 }
@@ -324,7 +334,20 @@ export class EvidenceObjectStore {
    * Staging keys and keys outside the tenant are refused. The URL is returned
    * to the caller and is never logged.
    */
-  async presignGet(tenantId: string, key: string, opts?: { ttlSeconds?: number }): Promise<string> {
+  /**
+   * Presign a GET.
+   *
+   * `downloadFilename` sets ResponseContentDisposition so the browser saves the
+   * object instead of rendering it. The HTML `download` attribute cannot do this
+   * — browsers ignore it on cross-origin URLs, and presigned URLs always point
+   * at the storage host, so a manifest.json opened from the app renders as text
+   * unless the disposition is signed into the URL itself.
+   */
+  async presignGet(
+    tenantId: string,
+    key: string,
+    opts?: { ttlSeconds?: number; downloadFilename?: string },
+  ): Promise<string> {
     assertKeyInTenant(tenantId, key);
     const cls = keyClass(key);
     if (cls === 'staging') {
@@ -340,7 +363,13 @@ export class EvidenceObjectStore {
       }
       ttl = Math.min(opts.ttlSeconds, this.presignTtlSeconds);
     }
-    const command = new GetObjectCommand({ Bucket: this.evidenceBucket, Key: key });
+    const command = new GetObjectCommand({
+      Bucket: this.evidenceBucket,
+      Key: key,
+      ...(opts?.downloadFilename !== undefined
+        ? { ResponseContentDisposition: contentDisposition(opts.downloadFilename) }
+        : {}),
+    });
     return this.presignFn(this.s3, command, { expiresIn: ttl });
   }
 
