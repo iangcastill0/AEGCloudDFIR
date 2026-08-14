@@ -26,6 +26,22 @@ async function main(): Promise<void> {
   const enqueuer = new BullMqEnqueuer(redis);
   const dispatcher = new OutboxDispatcher(prisma, enqueuer, log);
   const ctx = buildWorkerContext(config, { prisma, redis, log, enqueuer });
+
+  // Create the search index with its explicit mapping BEFORE anything indexes.
+  // Without this, the first bulk write auto-creates a concrete index under the
+  // alias name using OpenSearch's dynamic mapping, which types every id field as
+  // `text`. Sorting or aggregating on a text field then fails at query time with
+  // "Text fields are not optimised for operations that require per-document
+  // field data" — so indexing appears to succeed and every search 400s.
+  // Non-fatal: a worker that cannot reach OpenSearch should still process and
+  // persist evidence, and indexing retries independently.
+  try {
+    const { created, indexName } = await ctx.search.ensureIndex();
+    log.info({ indexName, created }, created ? 'search index created' : 'search index present');
+  } catch (err) {
+    log.error({ err }, 'could not ensure the search index; searches may fail until it exists');
+  }
+
   const workers = createWorkers(ctx, redis);
   log.info({ workerCount: workers.length }, 'queue workers started');
 

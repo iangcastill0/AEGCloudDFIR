@@ -157,3 +157,41 @@ describe('FieldRegistry', () => {
     expect(() => registry.resolve('from')).toThrow(/Unknown field/);
   });
 });
+
+/**
+ * These pin the field types that a *dynamic* mapping would get wrong.
+ *
+ * The failure this guards against is silent at index time and only appears at
+ * query time: OpenSearch auto-created the index on first write, typed every id
+ * as `text`, and every search then 400'd with "Text fields are not optimised
+ * for operations that require per-document field data like aggregations and
+ * sorting". Indexing looked healthy throughout.
+ */
+describe('EVIDENCE_MAPPING — fields that must never be dynamically typed', () => {
+  const props = (EVIDENCE_MAPPING as unknown as {
+    mappings: { properties: Record<string, { type?: string }> };
+  }).mappings.properties;
+
+  it.each([
+    'evidenceItemId',
+    'tenantId',
+    'collectionId',
+    'custodianId',
+  ])('%s is a keyword, so it can be sorted and aggregated', (field) => {
+    expect(props[field]).toBeDefined();
+    expect(props[field]?.type).toBe('keyword');
+  });
+
+  it('the sort key compile() uses is sortable', () => {
+    // compile.ts sorts on evidenceItemId as its stable tiebreaker; a text field
+    // there makes every query fail.
+    expect(props['evidenceItemId']?.type).toBe('keyword');
+  });
+
+  it('disables dynamic mapping so an unexpected field cannot be auto-typed', () => {
+    const m = (EVIDENCE_MAPPING as unknown as { mappings: { dynamic?: unknown } }).mappings;
+    // If dynamic mapping stays on, a new field added by a future document gets
+    // guessed at — reintroducing exactly this class of bug.
+    expect(m.dynamic === false || m.dynamic === 'strict').toBe(true);
+  });
+});
