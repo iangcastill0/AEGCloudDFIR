@@ -39,7 +39,7 @@ function actionAvailability(
     retry:
       (status === 'completed' || status === 'failed' || status === 'paused') && failures > 0
         ? null
-        : 'Retry is available when a finished or paused collection has failed items.',
+        : 'Retry is available when a finished or paused collection has failed or excepted items.',
   };
 }
 
@@ -63,7 +63,17 @@ export default function CollectionDetailPage({ params }: { params: Promise<{ id:
         onRetry={() => void status.refetch()}
       >
         {(data) => {
-          const totalFailures = data.progress.reduce((n, p) => n + p.failures, 0);
+          // Fetch failures AND processing exceptions are both retryable, and
+          // they are counted separately: an item whose bytes arrived but whose
+          // text could not be extracted has zero fetch failures, so counting
+          // only those left the button permanently disabled for exactly the
+          // case a user wants to retry.
+          const fetchFailures = data.progress.reduce((n, p) => n + p.failures, 0);
+          const processingExceptions = Object.values(data.exceptionCounts ?? {}).reduce(
+            (n, c) => n + c,
+            0,
+          );
+          const totalFailures = fetchFailures + processingExceptions;
           const availability = actionAvailability(data.status, totalFailures);
           return (
             <>

@@ -8,6 +8,7 @@ import {
 import {
   CollectionItemState,
   CollectionStatus,
+  ProcessingStatus,
   ConnectorStatus,
   Prisma,
   withTenantContext,
@@ -650,7 +651,12 @@ export class CollectionsService {
     id: string,
     actionRaw: string,
     request: FastifyRequest,
-  ): Promise<{ id: string; status: string; retriedItems?: number }> {
+  ): Promise<{
+    id: string;
+    status: string;
+    retriedItems?: number;
+    retriedProcessing?: number;
+  }> {
     const parsed = collectionAction.safeParse(actionRaw);
     if (!parsed.success) throw new BadRequestException('unknown collection action');
     const action = parsed.data;
@@ -742,6 +748,64 @@ export class CollectionsService {
           skipDuplicates: true,
         });
       }
+      // Processing exceptions are a DIFFERENT failure from a failed fetch: the
+      // bytes were collected fine, but a later stage (text extraction, OCR)
+      // could not read them. Retrying only fetch failures left these stuck
+      // forever, which is what made the button appear to do nothing.
+      const stuckItems = await tx.evidenceItem.findMany({
+        where: {
+          tenantId: auth.tenantId,
+          collectionId: id,
+          processingStatus: ProcessingStatus.exception,
+        },
+        select: { id: true, version: true },
+        orderBy: { id: 'asc' },
+        take: RETRY_ITEM_CAP,
+      });
+
+      for (const batch of chunk(stuckItems, RETRY_BATCH_SIZE)) {
+        await tx.outboxEvent.createMany({
+          data: batch.map((item) => ({
+            tenantId: auth.tenantId,
+            topic: 'process.extract',
+            // A retry round needs a fresh dedup key, or the outbox would treat
+            // it as the already-dispatched original and drop it silently.
+            dedupKey: `extract:${item.id}:v${String(item.version)}:retry${String(Date.now())}`,
+            payload: { tenantId: auth.tenantId, evidenceItemId: item.id, version: item.version },
+          })),
+          skipDuplicates: true,
+        });
+      }
+
+      if (stuckItems.length > 0) {
+        // Move them off 'exception' so the UI reflects that work is queued.
+        // If extraction fails again the processor puts them straight back.
+        await tx.evidenceItem.updateMany({
+          where: { id: { in: stuckItems.map((i) => i.id) } },
+          data: { processingStatus: ProcessingStatus.pending },
+        });
+
+        // Clear the ledger rows for exactly these items. The exceptions list is
+        // the set of OUTSTANDING problems and feeds disclosure; leaving an entry
+        // for an item that has since been read would misstate the collection.
+        // The permanent record lives in the append-only audit chain below, which
+        // records the retry and its count.
+        const openRows = await tx.collectionException.findMany({
+          where: { tenantId: auth.tenantId, collectionId: id },
+          select: { id: true, detail: true },
+        });
+        const retried = new Set(stuckItems.map((i) => i.id));
+        const toClear = openRows
+          .filter((row) => {
+            const d = (row.detail ?? {}) as { evidenceItemId?: unknown };
+            return typeof d.evidenceItemId === 'string' && retried.has(d.evidenceItemId);
+          })
+          .map((row) => row.id);
+        if (toClear.length > 0) {
+          await tx.collectionException.deleteMany({ where: { id: { in: toClear } } });
+        }
+      }
+
       if (failedItems.length > 0) {
         await tx.collection.update({
           where: { id },
@@ -753,13 +817,14 @@ export class CollectionsService {
         auth,
         id,
         'collection.retried',
-        { retriedItems: failedItems.length },
+        { retriedItems: failedItems.length, retriedProcessing: stuckItems.length },
         request,
       );
       return {
         id,
         status: failedItems.length > 0 ? CollectionStatus.fetching : collection.status,
         retriedItems: failedItems.length,
+        retriedProcessing: stuckItems.length,
       };
     });
   }

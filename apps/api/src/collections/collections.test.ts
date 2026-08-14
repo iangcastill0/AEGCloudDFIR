@@ -384,6 +384,9 @@ describe('CollectionsService.action', () => {
         update: collectionUpdate,
       },
       collectionItem: { findMany: failedQuery },
+      // Retry now also sweeps processing exceptions, so these must exist.
+      evidenceItem: { findMany: vi.fn(async () => []), updateMany: vi.fn(async () => ({})) },
+      collectionException: { findMany: vi.fn(async () => []), deleteMany: vi.fn(async () => ({})) },
       outboxEvent: { createMany: outboxCreateMany },
     });
 
@@ -577,5 +580,106 @@ describe('CollectionsService.exceptions — the ledger must identify what failed
     ]);
     const page = await service.exceptions(auth, COLLECTION_ID, { limit: 10 });
     expect(page.items[0]).toMatchObject({ itemRef: null, sizeBytes: null, mimeType: null });
+  });
+});
+
+describe('CollectionsService.action — retry covers processing exceptions', () => {
+  const EXCEPTED_ID = '66666666-6666-4666-8666-666666666666';
+
+  function retryService(opts: {
+    failedFetches?: Record<string, unknown>[];
+    exceptedItems?: Record<string, unknown>[];
+    ledger?: Record<string, unknown>[];
+  }) {
+    const outboxCreateMany = vi.fn(async () => ({}));
+    const updateMany = vi.fn(async () => ({}));
+    const deleteMany = vi.fn(async () => ({}));
+    const { service, audit } = makeService({
+      collection: {
+        findFirst: vi.fn(async () => ({ id: COLLECTION_ID, status: CollectionStatus.completed })),
+        update: vi.fn(async () => ({})),
+      },
+      collectionItem: { findMany: vi.fn(async () => opts.failedFetches ?? []) },
+      evidenceItem: { findMany: vi.fn(async () => opts.exceptedItems ?? []), updateMany },
+      collectionException: { findMany: vi.fn(async () => opts.ledger ?? []), deleteMany },
+      outboxEvent: { createMany: outboxCreateMany },
+    });
+    return { service, audit, outboxCreateMany, updateMany, deleteMany };
+  }
+
+  it('re-enqueues extraction for items stuck in exception', async () => {
+    // The original complaint: bytes collected fine, extraction failed, and
+    // Retry did nothing because it only looked at failed fetches.
+    const { service, outboxCreateMany } = retryService({
+      exceptedItems: [{ id: EXCEPTED_ID, version: 1 }],
+    });
+
+    const result = await service.action(auth, COLLECTION_ID, 'retry', fakeRequest());
+
+    expect(result.retriedProcessing).toBe(1);
+    const topics = outboxCreateMany.mock.calls.flatMap((c) =>
+      ((c[0] as { data: { topic: string }[] }).data ?? []).map((d) => d.topic),
+    );
+    expect(topics).toContain('process.extract');
+  });
+
+  it('uses a fresh dedup key so the outbox does not drop the retry', async () => {
+    const { service, outboxCreateMany } = retryService({
+      exceptedItems: [{ id: EXCEPTED_ID, version: 2 }],
+    });
+    await service.action(auth, COLLECTION_ID, 'retry', fakeRequest());
+    const rows = (outboxCreateMany.mock.calls[0]![0] as { data: { dedupKey: string }[] }).data;
+    // Reusing the original key would look like an already-dispatched event and
+    // be skipped silently — the retry would appear to work and do nothing.
+    expect(rows[0]?.dedupKey).toContain(EXCEPTED_ID);
+    expect(rows[0]?.dedupKey).toMatch(/retry/);
+  });
+
+  it('moves retried items off exception so the UI shows queued work', async () => {
+    const { service, updateMany } = retryService({
+      exceptedItems: [{ id: EXCEPTED_ID, version: 1 }],
+    });
+    await service.action(auth, COLLECTION_ID, 'retry', fakeRequest());
+    expect(updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { processingStatus: 'pending' } }),
+    );
+  });
+
+  it('clears only the ledger rows belonging to the retried items', async () => {
+    const { service, deleteMany } = retryService({
+      exceptedItems: [{ id: EXCEPTED_ID, version: 1 }],
+      ledger: [
+        { id: 'exc-mine', detail: { evidenceItemId: EXCEPTED_ID } },
+        { id: 'exc-other', detail: { evidenceItemId: ITEM_A } },
+        { id: 'exc-legacy', detail: {} },
+      ],
+    });
+    await service.action(auth, COLLECTION_ID, 'retry', fakeRequest());
+    // An unrelated item's exception, and a legacy row that cannot be matched,
+    // must survive: silently dropping them would understate the exceptions.
+    expect(deleteMany).toHaveBeenCalledWith({ where: { id: { in: ['exc-mine'] } } });
+  });
+
+  it('does not touch the ledger when there is nothing to retry', async () => {
+    const { service, deleteMany, updateMany } = retryService({});
+    const result = await service.action(auth, COLLECTION_ID, 'retry', fakeRequest());
+    expect(result.retriedProcessing).toBe(0);
+    expect(deleteMany).not.toHaveBeenCalled();
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  it('records both counts in the audit chain', async () => {
+    const { service, audit } = retryService({
+      failedFetches: [{ id: 'ci-1', custodianId: 'c1', source: 'email', providerItemId: 'p1', attempts: 1 }],
+      exceptedItems: [{ id: EXCEPTED_ID, version: 1 }],
+    });
+    await service.action(auth, COLLECTION_ID, 'retry', fakeRequest());
+    expect(audit.appendTx).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: 'collection.retried',
+        summary: expect.objectContaining({ retriedItems: 1, retriedProcessing: 1 }),
+      }),
+    );
   });
 });
