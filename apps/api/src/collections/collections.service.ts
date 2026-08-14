@@ -537,6 +537,10 @@ export class CollectionsService {
       kind: string;
       message: string;
       itemRef: string | null;
+      /** Evidence item this exception is about, when it is known. */
+      evidenceItemId: string | null;
+      mimeType: string | null;
+      sizeBytes: number | null;
       occurredAt: string;
     }[];
     nextCursor: string | null;
@@ -560,13 +564,29 @@ export class CollectionsService {
       });
       const page = rows.slice(0, opts.limit);
       return {
-        items: page.map((row) => ({
-          id: row.id,
-          kind: row.kind,
-          message: row.message,
-          itemRef: row.providerItemId !== '' ? row.providerItemId : null,
-          occurredAt: row.occurredAt.toISOString(),
-        })),
+        items: page.map((row) => {
+          // providerItemId is empty for anything extracted from a container, so
+          // fall back to the detail the worker records. Older rows have neither,
+          // and honestly report null rather than inventing a reference.
+          const detail = (row.detail ?? {}) as {
+            evidenceItemId?: unknown;
+            name?: unknown;
+            mimeType?: unknown;
+            sizeBytes?: unknown;
+          };
+          const name = typeof detail.name === 'string' && detail.name !== '' ? detail.name : null;
+          return {
+            id: row.id,
+            kind: row.kind,
+            message: row.message,
+            itemRef: row.providerItemId !== '' ? row.providerItemId : name,
+            evidenceItemId:
+              typeof detail.evidenceItemId === 'string' ? detail.evidenceItemId : null,
+            mimeType: typeof detail.mimeType === 'string' && detail.mimeType !== '' ? detail.mimeType : null,
+            sizeBytes: typeof detail.sizeBytes === 'number' ? detail.sizeBytes : null,
+            occurredAt: row.occurredAt.toISOString(),
+          };
+        }),
         nextCursor: rows.length > opts.limit ? (page[page.length - 1]?.id ?? null) : null,
       };
     });

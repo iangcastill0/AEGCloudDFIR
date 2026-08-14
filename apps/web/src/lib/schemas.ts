@@ -117,6 +117,11 @@ export const exceptionEntry = z.object({
   kind: z.string(),
   message: z.string(),
   itemRef: z.string().nullable().default(null),
+  // Recorded by the worker so the ledger can name the file that failed;
+  // defaulted because rows written before this existed have none.
+  evidenceItemId: z.string().nullable().default(null),
+  mimeType: z.string().nullable().default(null),
+  sizeBytes: z.number().nullable().default(null),
   occurredAt: z.string().optional(),
 });
 export const exceptionListResponse = paginated(exceptionEntry);

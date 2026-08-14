@@ -4,6 +4,7 @@ import { CollectionStatus, ConnectorStatus, TenantRole } from '@aeg-clouddfir/da
 import { CollectionsService } from './collections.service.js';
 import {
   CONNECTOR_ID,
+  ITEM_A,
   TENANT_ID,
   fakeAudit,
   fakePrisma,
@@ -506,5 +507,75 @@ describe('CollectionsService.manifestDownload', () => {
     const result = await service.manifestDownload(auth, COLLECTION_ID, fakeRequest());
     expect(result.manifestUrl).toBe('https://signed/manifest');
     expect(result.completenessReportUrl).toBeNull();
+  });
+});
+
+describe('CollectionsService.exceptions — the ledger must identify what failed', () => {
+  function withExceptions(rows: Record<string, unknown>[]) {
+    return makeService({
+      collection: { findFirst: vi.fn(async () => ({ id: COLLECTION_ID })) },
+      collectionException: { findMany: vi.fn(async () => rows) },
+    });
+  }
+
+  const base = {
+    id: 'exc-1',
+    kind: 'unsupported_item',
+    message: 'document type is not supported by the text extractor',
+    occurredAt: new Date('2026-08-14T02:29:21.000Z'),
+  };
+
+  it('names the file from detail when providerItemId is empty', async () => {
+    // Anything extracted from a container has no id in the source system, so
+    // the ledger previously showed a bare dash and told a reviewer nothing.
+    const { service } = withExceptions([
+      {
+        ...base,
+        providerItemId: '',
+        detail: {
+          evidenceItemId: ITEM_A,
+          name: 'SWAP_Calendar.pub',
+          mimeType: 'application/x-mspublisher',
+          sizeBytes: 95232,
+        },
+      },
+    ]);
+
+    const page = await service.exceptions(auth, COLLECTION_ID, { limit: 10 });
+    expect(page.items[0]).toMatchObject({
+      itemRef: 'SWAP_Calendar.pub',
+      evidenceItemId: ITEM_A,
+      mimeType: 'application/x-mspublisher',
+      sizeBytes: 95232,
+    });
+  });
+
+  it('prefers a real providerItemId over the recorded name', async () => {
+    const { service } = withExceptions([
+      { ...base, providerItemId: 'AAMkAD…', detail: { name: 'ignored.pub' } },
+    ]);
+    const page = await service.exceptions(auth, COLLECTION_ID, { limit: 10 });
+    expect(page.items[0]?.itemRef).toBe('AAMkAD…');
+  });
+
+  it('reports null rather than inventing a reference for legacy rows', async () => {
+    // Rows written before detail existed carry {}; claiming an identity we do
+    // not have would be worse than admitting we cannot name the item.
+    const { service } = withExceptions([{ ...base, providerItemId: '', detail: {} }]);
+    const page = await service.exceptions(auth, COLLECTION_ID, { limit: 10 });
+    expect(page.items[0]).toMatchObject({
+      itemRef: null,
+      evidenceItemId: null,
+      mimeType: null,
+      sizeBytes: null,
+    });
+  });
+
+  it('tolerates a detail payload with unexpected types', async () => {
+    const { service } = withExceptions([
+      { ...base, providerItemId: '', detail: { name: 42, sizeBytes: 'big', mimeType: null } },
+    ]);
+    const page = await service.exceptions(auth, COLLECTION_ID, { limit: 10 });
+    expect(page.items[0]).toMatchObject({ itemRef: null, sizeBytes: null, mimeType: null });
   });
 });

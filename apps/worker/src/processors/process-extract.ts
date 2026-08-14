@@ -183,6 +183,9 @@ async function markExtractException(
     collectionId: string | null;
     custodianId: string | null;
     providerItemId: string;
+    name?: string;
+    mimeType?: string;
+    size?: number | bigint | null;
   },
   kind: 'encrypted_item' | 'unsupported_item',
   message: string,
@@ -196,6 +199,17 @@ async function markExtractException(
         providerItemId: item.providerItemId,
         kind,
         message,
+        // Identify the item in the ledger itself. providerItemId is empty for
+        // anything extracted from a container (a PST attachment has no id in the
+        // source system), so without this the exceptions report says only that
+        // something failed — which is not enough for a reviewer to judge
+        // materiality, or to disclose meaningfully.
+        detail: {
+          evidenceItemId: item.id,
+          name: item.name ?? '',
+          mimeType: item.mimeType ?? '',
+          sizeBytes: item.size === null || item.size === undefined ? 0 : Number(item.size),
+        },
       });
     }
     await tx.evidenceItem.update({

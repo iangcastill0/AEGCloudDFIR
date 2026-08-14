@@ -12,7 +12,7 @@ import {
   useCollectionStatus,
 } from '@/lib/hooks';
 import { errorMessage } from '@/lib/errors';
-import { formatDateTime, humanizeToken } from '@/lib/format';
+import { formatBytes, formatDateTime, humanizeToken } from '@/lib/format';
 
 type CollectionAction = 'pause' | 'resume' | 'cancel' | 'retry';
 
@@ -283,7 +283,14 @@ function ExceptionsLedger({
                   <tr key={e.id}>
                     <td>{humanizeToken(e.kind)}</td>
                     <td>{e.message}</td>
-                    <td className="mono">{e.itemRef ?? '—'}</td>
+                    <td className="mono">
+                      {e.itemRef ?? '\u2014'}
+                      {e.mimeType ? (
+                        <span className="cdfir-field__hint">
+                          {` ${e.mimeType}${e.sizeBytes !== null ? ` \u00b7 ${formatBytes(e.sizeBytes)}` : ''}`}
+                        </span>
+                      ) : null}
+                    </td>
                     <td>{formatDateTime(e.occurredAt)}</td>
                   </tr>
                 ))}
