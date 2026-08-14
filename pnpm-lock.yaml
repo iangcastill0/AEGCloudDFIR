@@ -71,6 +71,9 @@ importers:
       '@aeg-clouddfir/evidence':
         specifier: workspace:*
         version: link:../../packages/evidence
+      '@aeg-clouddfir/production':
+        specifier: workspace:*
+        version: link:../../packages/production
       '@aeg-clouddfir/search':
         specifier: workspace:*
         version: link:../../packages/search

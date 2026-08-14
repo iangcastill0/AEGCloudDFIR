@@ -1,4 +1,4 @@
-import type { Readable } from 'node:stream';
+import { Readable } from 'node:stream';
 import { ZipArchive } from 'archiver';
 import { ProductionError } from './errors.js';
 
@@ -19,6 +19,9 @@ export interface ArchiveFinalizeResult {
 export class ProductionArchiveWriter {
   private readonly archive: ZipArchive;
   private readonly outputDone: Promise<void>;
+  /** Rejects on the first error; never resolves. Raced against completion. */
+  private readonly failure: Promise<never>;
+  private failWith!: (err: Error) => void;
   private entryCount = 0;
   private finalized = false;
 
@@ -41,6 +44,15 @@ export class ProductionArchiveWriter {
       output.once('error', (err: Error) => settle(() => reject(err)));
       this.archive.once('error', (err: Error) => settle(() => reject(err)));
     });
+    this.failure = new Promise<never>((_resolve, reject) => {
+      this.failWith = reject;
+      output.once('error', reject);
+      this.archive.once('error', reject);
+    });
+    // Nothing awaits `failure` unless finalize() races it, and a successful
+    // archive never rejects it — but a rejection with no handler attached would
+    // still crash the process, so keep one attached from the start.
+    this.failure.catch(() => undefined);
     this.archive.pipe(output);
   }
 
@@ -52,6 +64,20 @@ export class ProductionArchiveWriter {
     if (path.length === 0 || path.startsWith('/') || path.includes('..')) {
       throw new ProductionError(`invalid archive entry path: "${path}"`);
     }
+    if (source instanceof Readable) {
+      source.once('error', (err: unknown) => {
+        // archiver does not surface an entry source's error — it emits neither
+        // 'error' nor 'warning' and simply stops, so the caller would wait
+        // forever. Record it and tear the archive down so no central directory
+        // is written for a set that is missing a document.
+        this.failWith(err instanceof Error ? err : new Error(String(err)));
+        try {
+          this.archive.abort();
+        } catch {
+          // abort() on an already-torn-down archive is not a further failure.
+        }
+      });
+    }
     this.archive.append(source, { name: path });
     this.entryCount += 1;
   }
@@ -62,8 +88,17 @@ export class ProductionArchiveWriter {
       throw new ProductionError('archive already finalized');
     }
     this.finalized = true;
-    await this.archive.finalize();
-    await this.outputDone;
+    // archiver's finalize() never settles once a queued entry stream has errored,
+    // so the error must be able to win: awaiting completion alone hangs the
+    // caller forever — an export job or a download that never finishes and never
+    // says why.
+    await Promise.race([
+      (async () => {
+        await this.archive.finalize();
+        await this.outputDone;
+      })(),
+      this.failure,
+    ]);
     return { entryCount: this.entryCount };
   }
 }

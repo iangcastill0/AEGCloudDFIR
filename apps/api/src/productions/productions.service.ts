@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { Readable } from 'node:stream';
 import {
   BadRequestException,
   ConflictException,
@@ -24,6 +25,7 @@ import {
   submitProductionRequest,
   type ProductionParameters,
 } from '@aeg-clouddfir/contracts';
+import { ProductionArchiveWriter } from '@aeg-clouddfir/production';
 import type { FastifyRequest } from 'fastify';
 import '../common/http.js';
 import type { AuthContext } from '../common/http.js';
@@ -152,6 +154,43 @@ function idsHash(ids: readonly string[]): string {
 
 function formatBates(prefix: string, num: bigint, digits: number, suffix: string): string {
   return `${prefix}${num.toString().padStart(digits, '0')}${suffix}`;
+}
+
+/** Everything the archive route needs, resolved before any bytes are written. */
+export interface RunArchivePlan {
+  runId: string;
+  runNumber: number;
+  prefix: string;
+  /** Single top-level folder inside the zip, so extracting yields a folder. */
+  rootFolder: string;
+  fileName: string;
+  manifestSha256: string;
+  objects: { key: string; size: number }[];
+  totalBytes: number;
+}
+
+/** The slice of ProductionArchiveWriter this service depends on. */
+interface ArchiveSink {
+  append: (path: string, source: Readable) => void;
+  finalize: () => Promise<{ entryCount: number }>;
+}
+
+/**
+ * Reduce a production name to something safe in a filename, a
+ * Content-Disposition header and a zip entry path.
+ *
+ * Diacritics are folded rather than dropped, so "Unicode" survives as itself
+ * instead of collapsing to "nc"; anything else becomes a single dash.
+ */
+function slugifyProductionName(name: string): string {
+  const slug = name
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  // A name of only punctuation would otherwise produce a nameless file.
+  return slug === '' ? 'production' : slug;
 }
 
 @Injectable()
@@ -317,6 +356,123 @@ export class ProductionsService {
     );
 
     return { files, manifestSha256: run.manifestSha256, expiresInSeconds: ttlSeconds };
+  }
+
+  /**
+   * Resolve a run into an archive plan without writing anything.
+   *
+   * Split from the streaming half deliberately: everything that can legitimately
+   * fail — wrong tenant, unfinished run, output swept by retention — must fail
+   * while a JSON error can still be returned. Once the zip body has started, the
+   * only way to signal a problem is to break the stream.
+   */
+  async prepareRunArchive(
+    auth: AuthContext,
+    productionId: string,
+    runId: string,
+  ): Promise<RunArchivePlan> {
+    const run = await withTenantContext(this.prisma, auth.tenantId, (tx) =>
+      tx.productionRun.findFirst({
+        where: { id: runId, productionId, tenantId: auth.tenantId },
+        select: {
+          id: true,
+          status: true,
+          outputPrefix: true,
+          manifestSha256: true,
+          runNumber: true,
+          production: { select: { name: true } },
+        },
+      }),
+    );
+    if (!run) throw new NotFoundException();
+
+    if (run.status !== 'ready' && run.status !== 'released') {
+      throw new ConflictException(`production run is not downloadable (status: ${run.status})`);
+    }
+    if (run.outputPrefix === '') {
+      throw new ConflictException('this run recorded no output location');
+    }
+
+    const objects = await this.store.listUnder('evidence', `${run.outputPrefix}/`);
+    if (objects.length === 0) {
+      throw new ConflictException(
+        'no files were found for this run; its output may have been removed by retention',
+      );
+    }
+
+    const rootFolder = `${slugifyProductionName(run.production.name)}-run${String(run.runNumber)}`;
+    return {
+      runId: run.id,
+      runNumber: run.runNumber,
+      prefix: run.outputPrefix,
+      rootFolder,
+      fileName: `${rootFolder}.zip`,
+      manifestSha256: run.manifestSha256,
+      objects: objects.map((o) => ({ key: o.key, size: o.size })),
+      totalBytes: objects.reduce((sum, o) => sum + o.size, 0),
+    };
+  }
+
+  /**
+   * Stream the run's output as one ZIP64 archive under a single folder.
+   *
+   * The per-file endpoint above returns a presigned URL per object, which meant
+   * downloading a production one click at a time and rebuilding DATA/IMAGES/
+   * NATIVES/TEXT by hand. Entries here keep their path relative to the run
+   * prefix beneath `rootFolder`, so extracting reproduces the volume layout.
+   *
+   * Sources open lazily: awaiting every GetObject up front would hold one
+   * connection per file open for the life of the archive — thousands on a real
+   * production, nearly all of them idle long enough to time out.
+   */
+  async streamRunArchive(
+    auth: AuthContext,
+    plan: RunArchivePlan,
+    output: NodeJS.WritableStream,
+    request: FastifyRequest,
+    deps: { createArchive?: (out: NodeJS.WritableStream) => ArchiveSink } = {},
+  ): Promise<{ entryCount: number }> {
+    const archive = (deps.createArchive ?? ((out) => new ProductionArchiveWriter(out)))(output);
+
+    for (const object of plan.objects) {
+      const relative = object.key.slice(plan.prefix.length + 1);
+      const key = object.key;
+      archive.append(
+        `${plan.rootFolder}/${relative}`,
+        Readable.from(
+          (async function* (store: EvidenceObjectStore) {
+            yield* await store.getStream('evidence', key);
+          })(this.store),
+        ),
+      );
+    }
+
+    // A read failure surfaces here and finalize rejects, so the central
+    // directory is never written: the recipient gets a file unzip refuses,
+    // not a valid archive quietly missing documents.
+    const { entryCount } = await archive.finalize();
+
+    await withTenantContext(this.prisma, auth.tenantId, (tx) =>
+      this.audit.appendTx(tx, {
+        tenantId: auth.tenantId,
+        actorUserId: auth.userId,
+        effectiveRoles: auth.roles,
+        action: 'production.run_downloaded',
+        targetType: 'production_run',
+        targetId: plan.runId,
+        summary: {
+          productionId: plan.runId,
+          runNumber: plan.runNumber,
+          fileCount: entryCount,
+          totalBytes: plan.totalBytes,
+          manifestSha256: plan.manifestSha256,
+          format: 'zip',
+        },
+        request,
+      }),
+    );
+
+    return { entryCount };
   }
 
   // -------------------------------------------------------------------------

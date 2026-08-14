@@ -9,10 +9,12 @@ import {
   Put,
   Query,
   Req,
+  Res,
   UseGuards,
 } from '@nestjs/common';
 import { TenantRole } from '@aeg-clouddfir/database';
-import type { FastifyRequest } from 'fastify';
+import { PassThrough } from 'node:stream';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import '../common/http.js';
 import type { AuthContext } from '../common/http.js';
 import { parseCursorQuery } from '../common/pagination.js';
@@ -154,6 +156,45 @@ export class ProductionsController {
     expiresInSeconds: number;
   }> {
     return this.productions.downloadRun(requireAuth(request), id, runId, request);
+  }
+
+  /**
+   * The whole run as one zip, extracting into a single folder.
+   *
+   * Streamed rather than assembled: a production can be tens of gigabytes, and
+   * neither this process nor storage should hold a copy to hand one out. The
+   * plan is resolved first so that every legitimate refusal — wrong tenant,
+   * unfinished run, output already swept by retention — is still a JSON error;
+   * after the first byte the only signal left is a broken stream.
+   */
+  @Get(':id/runs/:runId/archive')
+  @RequireRoles(TenantRole.production_manager, TenantRole.case_manager)
+  async archiveRun(
+    @Param('id') id: string,
+    @Param('runId') runId: string,
+    @Req() request: FastifyRequest,
+    @Res() reply: FastifyReply,
+  ): Promise<void> {
+    const auth = requireAuth(request);
+    const plan = await this.productions.prepareRunArchive(auth, id, runId);
+
+    const body = new PassThrough();
+    // Send before writing: the archive is produced as it is consumed, so
+    // filling the stream first would just stall on backpressure.
+    void reply
+      .header('content-type', 'application/zip')
+      .header('content-disposition', `attachment; filename="${plan.fileName}"`)
+      .header('cache-control', 'no-store')
+      .send(body);
+
+    try {
+      await this.productions.streamRunArchive(auth, plan, body, request);
+    } catch (err) {
+      // The status line is long gone, so destroy the body: the client sees a
+      // truncated transfer and a zip with no central directory, rather than a
+      // 200 with a set that is quietly missing documents.
+      body.destroy(err instanceof Error ? err : new Error(String(err)));
+    }
   }
 
   @Post(':id/runs/:runId/clone')

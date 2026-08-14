@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { PassThrough, Readable } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ProductionStatus, TenantRole } from '@aeg-clouddfir/database';
@@ -472,6 +473,218 @@ describe('ProductionsService.downloadRun', () => {
     // collide or be dropped entirely.
     expect(presignGet.mock.calls[0]?.[2]).toMatchObject({
       downloadFilename: 'production-run2-VOL001-IMAGES-0001.tif',
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Archive (single-file) download
+// ---------------------------------------------------------------------------
+
+/**
+ * The per-file endpoint above hands back one presigned URL per object, so
+ * downloading a production meant clicking every file and rebuilding the volume
+ * layout by hand. These cover the archive route: one request, one file, and
+ * extracting it reproduces the folder tree the run wrote.
+ */
+describe('ProductionsService run archive', () => {
+  const PREFIX = `tenants/${TENANT_ID}/productions/${PRODUCTION_ID}/${RUN_ID}`;
+
+  const readyRun = {
+    id: RUN_ID,
+    status: 'ready',
+    outputPrefix: PREFIX,
+    manifestSha256: 'd'.repeat(64),
+    runNumber: 2,
+    production: { name: 'Acme v Widgets' },
+  };
+
+  const OBJECTS = [
+    { key: `${PREFIX}/MANIFESTS/manifest.json`, size: 120 },
+    { key: `${PREFIX}/DATA/loadfile.dat`, size: 64 },
+    { key: `${PREFIX}/IMAGES/VOL001/PROD00000001.tif`, size: 4096 },
+  ];
+
+  function withRun(run: Record<string, unknown> | null, store?: Record<string, unknown>) {
+    return makeService(
+      { productionRun: { findFirst: vi.fn(async () => run) } },
+      {
+        store: {
+          listUnder: vi.fn(async () => OBJECTS),
+          getStream: vi.fn(async (_c: string, key: string) => Readable.from([`bytes:${key}`])),
+          ...store,
+        },
+      },
+    );
+  }
+
+  /** Records what would be written, so per-entry wiring can be asserted. */
+  function fakeArchive() {
+    const appended: string[] = [];
+    const state = { finalized: false };
+    return {
+      appended,
+      state,
+      create: () => ({
+        append: (path: string) => {
+          appended.push(path);
+        },
+        finalize: async () => {
+          state.finalized = true;
+          return { entryCount: appended.length };
+        },
+      }),
+    };
+  }
+
+  describe('prepareRunArchive', () => {
+    it('names the file and the folder inside it after the production and run', async () => {
+      const { service } = withRun(readyRun);
+      const plan = await service.prepareRunArchive(auth, PRODUCTION_ID, RUN_ID);
+      // A zip whose entries sit at the root scatters files into whatever
+      // directory the recipient extracted from; one top-level folder is what
+      // makes this "download the production into a folder".
+      expect(plan.rootFolder).toBe('acme-v-widgets-run2');
+      expect(plan.fileName).toBe('acme-v-widgets-run2.zip');
+      expect(plan.manifestSha256).toBe('d'.repeat(64));
+      expect(plan.objects).toHaveLength(3);
+      expect(plan.totalBytes).toBe(120 + 64 + 4096);
+    });
+
+    it.each([
+      ['../../etc', 'etc-run2'],
+      ['A/B\\C', 'a-b-c-run2'],
+      ['   ', 'production-run2'],
+      ['Ünïcodé name', 'unicode-name-run2'],
+    ])('sanitises the production name %s into %s', async (name, expected) => {
+      // The name reaches a Content-Disposition header and every entry path, so
+      // separators and traversal must not survive it.
+      const { service } = withRun({ ...readyRun, production: { name } });
+      const plan = await service.prepareRunArchive(auth, PRODUCTION_ID, RUN_ID);
+      expect(plan.rootFolder).toBe(expected);
+      expect(plan.rootFolder).not.toContain('/');
+      expect(plan.rootFolder).not.toContain('..');
+    });
+
+    it('404s for a run belonging to another production or tenant', async () => {
+      const { service } = withRun(null);
+      await expect(service.prepareRunArchive(auth, PRODUCTION_ID, RUN_ID)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it.each(['queued', 'rendering', 'failed', 'cancelled'])(
+      'refuses a run in %s state before a single byte is sent',
+      async (status) => {
+        // Validation must happen while a JSON error can still be returned: once
+        // the zip body starts, the client can only be told by a broken stream.
+        const { service } = withRun({ ...readyRun, status });
+        await expect(service.prepareRunArchive(auth, PRODUCTION_ID, RUN_ID)).rejects.toThrow(
+          ConflictException,
+        );
+      },
+    );
+
+    it('refuses when storage holds nothing for the run', async () => {
+      const { service } = withRun(readyRun, { listUnder: vi.fn(async () => []) });
+      await expect(service.prepareRunArchive(auth, PRODUCTION_ID, RUN_ID)).rejects.toThrow(
+        ConflictException,
+      );
+    });
+  });
+
+  describe('streamRunArchive', () => {
+    it('writes every object under the run folder, keeping the volume layout', async () => {
+      const { service } = withRun(readyRun);
+      const plan = await service.prepareRunArchive(auth, PRODUCTION_ID, RUN_ID);
+      const archive = fakeArchive();
+
+      const result = await service.streamRunArchive(auth, plan, new PassThrough(), fakeRequest(), {
+        createArchive: archive.create,
+      });
+
+      expect(archive.appended).toEqual([
+        'acme-v-widgets-run2/MANIFESTS/manifest.json',
+        'acme-v-widgets-run2/DATA/loadfile.dat',
+        'acme-v-widgets-run2/IMAGES/VOL001/PROD00000001.tif',
+      ]);
+      expect(result.entryCount).toBe(3);
+      expect(archive.state.finalized).toBe(true);
+    });
+
+    it('audits the download, because a production leaving the platform is a disclosure', async () => {
+      const { service, audit } = withRun(readyRun);
+      const plan = await service.prepareRunArchive(auth, PRODUCTION_ID, RUN_ID);
+      await service.streamRunArchive(auth, plan, new PassThrough(), fakeRequest(), {
+        createArchive: fakeArchive().create,
+      });
+      expect(audit.appendTx).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ action: 'production.run_downloaded' }),
+      );
+    });
+
+    it('cannot produce a valid archive when an object fails to read', async () => {
+      // A finalized zip is a VALID zip. If a read failed and the archive still
+      // finalized, the recipient would get a well-formed archive silently
+      // missing documents — the worst outcome for a disclosure. Uses the real
+      // writer, because "no end-of-central-directory record" is a fact about
+      // bytes that a fake archive cannot establish.
+      const { service } = withRun(readyRun, {
+        getStream: vi.fn(async (_c: string, key: string) => {
+          if (key.endsWith('.tif')) throw new Error('storage read failed');
+          return Readable.from(['ok']);
+        }),
+      });
+      const plan = await service.prepareRunArchive(auth, PRODUCTION_ID, RUN_ID);
+      const sink = new PassThrough();
+      const chunks: Buffer[] = [];
+      sink.on('data', (c: Buffer) => chunks.push(c));
+
+      await expect(
+        service.streamRunArchive(auth, plan, sink, fakeRequest()),
+      ).rejects.toThrow(/storage read failed/);
+      // No end-of-central-directory record: unzip refuses the file outright.
+      expect(Buffer.concat(chunks).includes(Buffer.from([0x50, 0x4b, 0x05, 0x06]))).toBe(false);
+    });
+
+    it('opens each object only when the archive reaches it', async () => {
+      // Awaiting every GetObject up front would hold one open connection per
+      // file for the whole archive — thousands, on a real production, most
+      // idling long enough to time out.
+      const getStream = vi.fn(async () => Readable.from(['ok']));
+      const { service } = withRun(readyRun, { getStream });
+      const plan = await service.prepareRunArchive(auth, PRODUCTION_ID, RUN_ID);
+
+      await service.streamRunArchive(auth, plan, new PassThrough(), fakeRequest(), {
+        createArchive: fakeArchive().create,
+      });
+
+      // The fake archive never reads its sources, so nothing should have opened.
+      expect(getStream).not.toHaveBeenCalled();
+    });
+
+    it('produces a real, structurally complete zip', async () => {
+      // The fake archive proves the wiring; only the real writer proves the
+      // bytes. Entry names must appear and the end-of-central-directory record
+      // must be present — a truncated stream has neither.
+      const getStream = vi.fn(async (_c: string, key: string) => Readable.from([`bytes:${key}`]));
+      const { service } = withRun(readyRun, { getStream });
+      const plan = await service.prepareRunArchive(auth, PRODUCTION_ID, RUN_ID);
+      const sink = new PassThrough();
+      const chunks: Buffer[] = [];
+      sink.on('data', (c: Buffer) => chunks.push(c));
+
+      await service.streamRunArchive(auth, plan, sink, fakeRequest());
+      const bytes = Buffer.concat(chunks);
+
+      // Read from the evidence bucket, by full storage key.
+      expect(getStream).toHaveBeenCalledWith('evidence', `${PREFIX}/DATA/loadfile.dat`);
+      expect(bytes.subarray(0, 4)).toEqual(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+      expect(bytes.includes('acme-v-widgets-run2/DATA/loadfile.dat')).toBe(true);
+      expect(bytes.includes('acme-v-widgets-run2/IMAGES/VOL001/PROD00000001.tif')).toBe(true);
+      // PK\x05\x06 is written only by a successful finalize.
+      expect(bytes.includes(Buffer.from([0x50, 0x4b, 0x05, 0x06]))).toBe(true);
     });
   });
 });

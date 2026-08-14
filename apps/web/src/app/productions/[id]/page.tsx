@@ -3,9 +3,9 @@ import { use } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Button, EmptyState, Table } from '@aeg-clouddfir/ui';
-import { errorMessage } from '@/lib/errors';
+import { API_URL } from '@/lib/api';
 import { QueryBoundary, StatusPill, TruthNotice } from '@/components/shared';
-import { useProduction, useProductionExceptions, useProductionRunDownload } from '@/lib/hooks';
+import { useProduction, useProductionExceptions } from '@/lib/hooks';
 import { formatBates } from '@/lib/production-wizard';
 import { humanizeToken } from '@/lib/format';
 
@@ -183,48 +183,24 @@ export default function ProductionDetailPage({ params }: { params: Promise<{ id:
 }
 
 /**
- * Resolves every file a production run produced.
+ * Downloads the run as one archive that extracts into a folder.
  *
- * A run writes volumes, images, load files and manifests whose names depend on
- * the profile, so the list comes from the API rather than being assumed here.
- * This is the disclosure artifact, so the manifest hash is shown alongside it —
- * it is what the receiving party verifies the set against.
+ * A plain link, not a fetch: the API streams the zip and the session is a
+ * cookie, so the browser writes it straight to disk instead of buffering a
+ * multi-gigabyte production through JavaScript. The per-file endpoint still
+ * exists for verifying individual objects, but a disclosure is handed over as a
+ * set — clicking through DATA/, IMAGES/, NATIVES/ and TEXT/ one object at a time
+ * and rebuilding the layout by hand is not that.
  */
 function RunDownload({ productionId, runId }: { productionId: string; runId: string }) {
-  const download = useProductionRunDownload();
-  const result = download.data;
-
-  if (result) {
-    return (
-      <div className="cdfir-downloads">
-        {result.files.map((f) => (
-          <a key={f.path} href={f.url}>
-            {f.path}
-          </a>
-        ))}
-        <span className="cdfir-field__hint">
-          {`${String(result.files.length)} file(s); manifest sha256:`}
-        </span>
-        <span className="cdfir-downloads__hash">{result.manifestSha256}</span>
-      </div>
-    );
-  }
-
+  const href = `${API_URL}/api/v1/productions/${productionId}/runs/${runId}/archive`;
   return (
     <div className="cdfir-downloads">
-      <Button
-        type="button"
-        variant="secondary"
-        onClick={() => {
-          download.mutate({ productionId, runId });
-        }}
-        disabled={download.isPending}
-      >
-        {download.isPending ? 'Preparing\u2026' : 'Download'}
-      </Button>
-      {download.isError ? (
-        <span className="cdfir-field__error">{errorMessage(download.error)}</span>
-      ) : null}
+      {/* Same host as every other API call, so the session cookie rides along. */}
+      <a className="cdfir-button cdfir-button--secondary" href={href}>
+        Download .zip
+      </a>
+      <span className="cdfir-field__hint">Extracts into one folder, volume layout intact</span>
     </div>
   );
 }

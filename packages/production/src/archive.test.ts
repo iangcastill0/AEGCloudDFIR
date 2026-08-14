@@ -87,6 +87,30 @@ describe('ProductionArchiveWriter', () => {
     await expect(writer.finalize()).rejects.toThrow(ProductionError);
   });
 
+  it('fails, rather than hanging, when an entry stream errors', async () => {
+    // archiver's finalize() never settles once a queued entry errors. Waiting on
+    // it alone hangs the caller forever — an export job or an HTTP download that
+    // never completes and never reports why.
+    const zipPath = join(dir, 'broken.zip');
+    const writer = new ProductionArchiveWriter(createWriteStream(zipPath));
+    writer.append('good.txt', Buffer.from('x'));
+    writer.append(
+      'bad.txt',
+      Readable.from(
+        (async function* () {
+          yield Buffer.from('partial');
+          throw new Error('source read failed');
+        })(),
+      ),
+    );
+
+    await expect(writer.finalize()).rejects.toThrow(/source read failed/);
+
+    // No end-of-central-directory record: the file is not a usable zip.
+    const bytes = await readFile(zipPath);
+    expect(bytes.includes(Buffer.from([0x50, 0x4b, 0x05, 0x06]))).toBe(false);
+  }, 15_000);
+
   it('validates zlib level', () => {
     expect(
       () => new ProductionArchiveWriter(createWriteStream(join(dir, 'x.zip')), { zlibLevel: 11 }),

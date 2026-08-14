@@ -17,6 +17,7 @@
     "@aeg-clouddfir/contracts": "workspace:*",
     "@aeg-clouddfir/database": "workspace:*",
     "@aeg-clouddfir/evidence": "workspace:*",
+    "@aeg-clouddfir/production": "workspace:*",
     "@aeg-clouddfir/search": "workspace:*",
     "@aws-sdk/client-s3": "3.1105.0",
     "@fastify/cookie": "^9.4.0",
