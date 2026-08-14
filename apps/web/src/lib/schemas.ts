@@ -5,8 +5,24 @@
  * envelopes, string BigInts, ISO dates).
  */
 import { z } from 'zod';
+// Re-exported so existing imports keep working; the definitions now live in
+// @aeg-clouddfir/contracts where the API can validate against them too.
+export {
+  caseMember,
+  caseMemberListResponse,
+  caseNote,
+  caseNoteListResponse,
+  exceptionEntry,
+  exceptionListResponse,
+};
 import {
+  caseMember,
+  caseMemberListResponse,
+  caseNote,
+  caseNoteListResponse,
   chainOfCustodyEntry,
+  exceptionEntry,
+  exceptionListResponse,
   evidenceSummary,
   exportStatusResponse,
   paginated,
@@ -112,19 +128,6 @@ export const collectionListResponse = paginated(collectionSummary);
 
 export const createdIdResponse = z.object({ id: z.string() });
 
-export const exceptionEntry = z.object({
-  id: z.string(),
-  kind: z.string(),
-  message: z.string(),
-  itemRef: z.string().nullable().default(null),
-  // Recorded by the worker so the ledger can name the file that failed;
-  // defaulted because rows written before this existed have none.
-  evidenceItemId: z.string().nullable().default(null),
-  mimeType: z.string().nullable().default(null),
-  sizeBytes: z.number().nullable().default(null),
-  occurredAt: z.string().optional(),
-});
-export const exceptionListResponse = paginated(exceptionEntry);
 
 // --- Search / evidence ---
 
@@ -262,21 +265,7 @@ export const tagListResponse = paginated(tagResponse);
 export const savedSearchListResponse = paginated(savedSearchResponse);
 export const caseListResponse = paginated(caseResponse);
 
-export const caseNote = z.object({
-  id: z.string(),
-  authorDisplay: z.string().default(''),
-  text: z.string(),
-  createdAt: z.string(),
-});
-export const caseNoteListResponse = paginated(caseNote);
 
-export const caseMember = z.object({
-  membershipId: z.string(),
-  email: z.string(),
-  displayName: z.string().default(''),
-  roles: z.array(z.string()).default([]),
-});
-export const caseMemberListResponse = paginated(caseMember);
 
 // --- Exports / productions ---
 

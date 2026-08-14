@@ -325,61 +325,87 @@ export class CasesService {
    *
    * The membership id alone is meaningless in a UI, so the user's email and
    * display name are joined in — otherwise a reviewer sees a list of UUIDs and
-   * cannot tell who has access to a matter.
+   * cannot tell who has access to a matter. Shape matches the client's
+   * caseMemberListResponse: `roles` is an array because a member may hold more
+   * than one case role in future, and paginated so a large matter cannot return
+   * an unbounded page.
    */
   async members(
     auth: AuthContext,
     id: string,
+    page: CursorQuery,
   ): Promise<{
-    items: {
-      membershipId: string;
-      role: string;
-      email: string;
-      displayName: string;
-      addedAt: string;
-    }[];
+    items: { membershipId: string; email: string; displayName: string; roles: string[] }[];
+    nextCursor: string | null;
   }> {
     return withTenantContext(this.prisma, auth.tenantId, async (tx) => {
       await this.requireCase(tx, auth, id);
       const rows = await tx.caseMember.findMany({
         where: { tenantId: auth.tenantId, caseId: id },
         include: { membership: { include: { user: true } } },
-        orderBy: { createdAt: 'asc' },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        take: page.limit + 1,
+        ...(page.cursor ? { skip: 1, cursor: { id: page.cursor } } : {}),
       });
+      const items = rows.slice(0, page.limit);
       return {
-        items: rows.map((row) => ({
+        items: items.map((row) => ({
           membershipId: row.membershipId,
-          role: row.role,
           email: row.membership.user.email,
           displayName: row.membership.user.displayName,
-          addedAt: row.createdAt.toISOString(),
+          roles: [row.role],
         })),
+        nextCursor: rows.length > page.limit ? (items[items.length - 1]?.id ?? null) : null,
       };
     });
   }
 
-  /** Case notes, oldest first: they read as a running commentary on the matter. */
+  /**
+   * Case notes, oldest first: they read as a running commentary on the matter.
+   *
+   * Returns authorDisplay rather than an author id — a note attributed to a UUID
+   * is useless when reading a matter's history. Users carry no RLS, so the
+   * lookup is a plain query outside the tenant-scoped models.
+   */
   async notes(
     auth: AuthContext,
     id: string,
+    page: CursorQuery,
   ): Promise<{
-    items: { id: string; text: string; authorId: string | null; createdAt: string }[];
+    items: { id: string; authorDisplay: string; text: string; createdAt: string }[];
+    nextCursor: string | null;
   }> {
-    return withTenantContext(this.prisma, auth.tenantId, async (tx) => {
+    const rows = await withTenantContext(this.prisma, auth.tenantId, async (tx) => {
       await this.requireCase(tx, auth, id);
-      const rows = await tx.caseNote.findMany({
+      return tx.caseNote.findMany({
         where: { tenantId: auth.tenantId, caseId: id },
-        orderBy: { createdAt: 'asc' },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        take: page.limit + 1,
+        ...(page.cursor ? { skip: 1, cursor: { id: page.cursor } } : {}),
       });
-      return {
-        items: rows.map((row) => ({
-          id: row.id,
-          text: row.text,
-          authorId: row.authorId,
-          createdAt: row.createdAt.toISOString(),
-        })),
-      };
     });
+    const items = rows.slice(0, page.limit);
+    const authors = await this.resolveAuthors(items.map((r) => r.authorId));
+    return {
+      items: items.map((row) => ({
+        id: row.id,
+        authorDisplay: row.authorId === null ? '' : (authors.get(row.authorId) ?? ''),
+        text: row.text,
+        createdAt: row.createdAt.toISOString(),
+      })),
+      nextCursor: rows.length > page.limit ? (items[items.length - 1]?.id ?? null) : null,
+    };
+  }
+
+  /** Display names for note authors, by user id. Empty when unknown. */
+  private async resolveAuthors(ids: (string | null)[]): Promise<Map<string, string>> {
+    const unique = [...new Set(ids.filter((i): i is string => i !== null))];
+    if (unique.length === 0) return new Map();
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: unique } },
+      select: { id: true, email: true, displayName: true },
+    });
+    return new Map(users.map((u) => [u.id, u.displayName !== '' ? u.displayName : u.email]));
   }
 
   /**
@@ -392,7 +418,7 @@ export class CasesService {
     id: string,
     body: unknown,
     request: FastifyRequest,
-  ): Promise<{ id: string; text: string; authorId: string | null; createdAt: string }> {
+  ): Promise<{ id: string; authorDisplay: string; text: string; createdAt: string }> {
     const input = zodValidate(noteSchema, body);
     return withTenantContext(this.prisma, auth.tenantId, async (tx) => {
       await this.requireCase(tx, auth, id);
@@ -417,8 +443,9 @@ export class CasesService {
       });
       return {
         id: note.id,
+        // The author is the caller, so no lookup is needed here.
+        authorDisplay: auth.actorDisplay,
         text: note.text,
-        authorId: note.authorId,
         createdAt: note.createdAt.toISOString(),
       };
     });

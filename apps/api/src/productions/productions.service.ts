@@ -177,13 +177,13 @@ export class ProductionsService {
   ): Promise<{
     items: {
       id: string;
-      runId: string;
-      code: string;
-      severity: string;
+      kind: string;
       message: string;
+      itemRef: string | null;
       evidenceItemId: string | null;
+      severity: string;
       overridden: boolean;
-      createdAt: string;
+      occurredAt: string;
     }[];
     nextCursor: string | null;
   }> {
@@ -211,17 +211,19 @@ export class ProductionsService {
       });
       const items = rows.slice(0, page.limit);
       return {
+        // Shape matches the shared exceptionEntry contract, because the client
+        // renders collection and production exceptions through the same table.
         items: items.map((row) => ({
           id: row.id,
-          runId: row.productionRunId,
-          code: row.code,
-          severity: row.severity,
+          kind: row.code,
           message: row.message,
+          itemRef: row.evidenceItemId,
           evidenceItemId: row.evidenceItemId,
+          severity: row.severity,
           // An overridden exception was consciously accepted; a reviewer needs to
           // see that it was waived rather than resolved.
           overridden: row.overriddenAt !== null,
-          createdAt: row.createdAt.toISOString(),
+          occurredAt: row.createdAt.toISOString(),
         })),
         nextCursor: rows.length > page.limit ? (items[items.length - 1]?.id ?? null) : null,
       };

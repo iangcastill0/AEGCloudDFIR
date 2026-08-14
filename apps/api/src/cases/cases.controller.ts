@@ -115,17 +115,13 @@ export class CasesController {
   )
   async members(
     @Param('id') id: string,
+    @Query() query: Record<string, unknown>,
     @Req() request: FastifyRequest,
   ): Promise<{
-    items: {
-      membershipId: string;
-      role: string;
-      email: string;
-      displayName: string;
-      addedAt: string;
-    }[];
+    items: { membershipId: string; email: string; displayName: string; roles: string[] }[];
+    nextCursor: string | null;
   }> {
-    return this.cases.members(requireAuth(request), id);
+    return this.cases.members(requireAuth(request), id, parseCursorQuery(query));
   }
 
   @Get(':id/notes')
@@ -137,11 +133,13 @@ export class CasesController {
   )
   async notes(
     @Param('id') id: string,
+    @Query() query: Record<string, unknown>,
     @Req() request: FastifyRequest,
   ): Promise<{
-    items: { id: string; text: string; authorId: string | null; createdAt: string }[];
+    items: { id: string; authorDisplay: string; text: string; createdAt: string }[];
+    nextCursor: string | null;
   }> {
-    return this.cases.notes(requireAuth(request), id);
+    return this.cases.notes(requireAuth(request), id, parseCursorQuery(query));
   }
 
   /** Writing a note is a review activity, so reviewers may do it. */
@@ -152,7 +150,7 @@ export class CasesController {
     @Param('id') id: string,
     @Body() body: unknown,
     @Req() request: FastifyRequest,
-  ): Promise<{ id: string; text: string; authorId: string | null; createdAt: string }> {
+  ): Promise<{ id: string; authorDisplay: string; text: string; createdAt: string }> {
     return this.cases.addNote(requireAuth(request), id, body, request);
   }
 

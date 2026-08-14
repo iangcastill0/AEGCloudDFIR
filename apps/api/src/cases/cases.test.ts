@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { NotFoundException } from '@nestjs/common';
 import { CaseStatus, TenantRole } from '@aeg-clouddfir/database';
+import {
+  caseMemberListResponse,
+  caseNoteListResponse,
+  caseNote,
+} from '@aeg-clouddfir/contracts';
 import { CasesService } from './cases.service.js';
 import type { SelectionService } from '../search/selection.service.js';
 import {
@@ -136,42 +141,68 @@ describe('CasesService case-restricted visibility', () => {
   });
 });
 
-describe('CasesService.members', () => {
-  it('joins the identity behind each membership, not just its id', async () => {
-    const { service } = makeService({
-      case: { findFirst: vi.fn(async () => ({ id: CASE_ID })) },
-      caseMember: {
-        count: vi.fn(async () => 1),
-        findMany: vi.fn(async () => [
-          {
-            membershipId: 'm-1',
-            role: 'reviewer',
-            createdAt: new Date('2026-08-14T11:58:00.000Z'),
-            membership: { user: { email: 'a@test.local', displayName: 'A Reviewer' } },
-          },
-        ]),
-      },
-    });
 
-    const result = await service.members(auth, CASE_ID);
-    // A UUID list tells a reviewer nothing about who can see a matter.
-    expect(result.items[0]).toEqual({
+
+/**
+ * These validate the service's responses against the SAME schemas the web
+ * client parses with. Without that, a shape mismatch compiles cleanly on both
+ * sides and only fails in the browser — which is exactly how members shipped
+ * returning `role` where the client wanted `roles`, and no `nextCursor` at all.
+ */
+describe('CasesService.members — matches the client contract', () => {
+  function membersService(rows: Record<string, unknown>[]) {
+    return makeService({
+      case: { findFirst: vi.fn(async () => ({ id: CASE_ID })) },
+      caseMember: { count: vi.fn(async () => 1), findMany: vi.fn(async () => rows) },
+    }).service;
+  }
+
+  const row = {
+    id: 'cm-1',
+    membershipId: 'm-1',
+    role: 'reviewer',
+    createdAt: new Date('2026-08-14T11:58:00.000Z'),
+    membership: { user: { email: 'a@test.local', displayName: 'A Reviewer' } },
+  };
+
+  it('parses against caseMemberListResponse', async () => {
+    const page = await membersService([row]).members(auth, CASE_ID, { limit: 10 });
+    const parsed = caseMemberListResponse.safeParse(page);
+    expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+  });
+
+  it('joins the identity behind the membership and exposes roles as an array', async () => {
+    const page = await membersService([row]).members(auth, CASE_ID, { limit: 10 });
+    expect(page.items[0]).toEqual({
       membershipId: 'm-1',
-      role: 'reviewer',
       email: 'a@test.local',
       displayName: 'A Reviewer',
-      addedAt: '2026-08-14T11:58:00.000Z',
+      roles: ['reviewer'],
     });
+  });
+
+  it('returns nextCursor null on the last page, never undefined', async () => {
+    // undefined here is what broke the client: the contract requires a string
+    // or null, and an absent key fails validation.
+    const page = await membersService([row]).members(auth, CASE_ID, { limit: 10 });
+    expect(page.nextCursor).toBeNull();
+  });
+
+  it('returns a cursor when more members remain', async () => {
+    const many = [row, { ...row, id: 'cm-2' }, { ...row, id: 'cm-3' }];
+    const page = await membersService(many).members(auth, CASE_ID, { limit: 2 });
+    expect(page.items).toHaveLength(2);
+    expect(page.nextCursor).toBe('cm-2');
   });
 
   it('404s for a case in another tenant', async () => {
-    const { service } = makeService({ case: { findFirst: vi.fn(async () => null) } });
-    await expect(service.members(auth, CASE_ID)).rejects.toThrow(NotFoundException);
+    const service = makeService({ case: { findFirst: vi.fn(async () => null) } }).service;
+    await expect(service.members(auth, CASE_ID, { limit: 10 })).rejects.toThrow(NotFoundException);
   });
 });
 
-describe('CasesService notes', () => {
-  function notesService(rows: Record<string, unknown>[] = []) {
+describe('CasesService notes — matches the client contract', () => {
+  function notesService(rows: Record<string, unknown>[], users: Record<string, unknown>[] = []) {
     const create = vi.fn(async (args: { data: Record<string, unknown> }) => ({
       id: 'note-1',
       text: args.data['text'],
@@ -182,42 +213,64 @@ describe('CasesService notes', () => {
       case: { findFirst: vi.fn(async () => ({ id: CASE_ID })) },
       caseMember: { count: vi.fn(async () => 1) },
       caseNote: { findMany: vi.fn(async () => rows), create },
+      user: { findMany: vi.fn(async () => users) },
     });
     return { service, audit, create };
   }
 
-  it('lists notes oldest first, so they read as a running commentary', async () => {
-    const { service } = notesService([
-      { id: 'n1', text: 'first', authorId: 'u1', createdAt: new Date('2026-08-14T10:00:00.000Z') },
+  const noteRow = {
+    id: 'n1',
+    text: 'reviewed for privilege',
+    authorId: 'u1',
+    createdAt: new Date('2026-08-14T10:00:00.000Z'),
+  };
+
+  it('parses against caseNoteListResponse', async () => {
+    const { service } = notesService([noteRow], [
+      { id: 'u1', email: 'a@test.local', displayName: 'A Reviewer' },
     ]);
-    const result = await service.notes(auth, CASE_ID);
-    expect(result.items[0]).toMatchObject({ id: 'n1', text: 'first' });
+    const page = await service.notes(auth, CASE_ID, { limit: 10 });
+    const parsed = caseNoteListResponse.safeParse(page);
+    expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+    expect(page.items[0]?.authorDisplay).toBe('A Reviewer');
   });
 
-  it('creates a note attributed to the author and audits it', async () => {
-    const { service, audit, create } = notesService();
-    const note = await service.addNote(auth, CASE_ID, { text: 'reviewed for privilege' }, fakeRequest());
+  it('falls back to the email when a user has no display name', async () => {
+    const { service } = notesService([noteRow], [
+      { id: 'u1', email: 'a@test.local', displayName: '' },
+    ]);
+    const page = await service.notes(auth, CASE_ID, { limit: 10 });
+    expect(page.items[0]?.authorDisplay).toBe('a@test.local');
+  });
 
-    expect(note.text).toBe('reviewed for privilege');
+  it('tolerates a note whose author no longer resolves', async () => {
+    // A deleted user must not break reading a matter's history.
+    const { service } = notesService([noteRow], []);
+    const page = await service.notes(auth, CASE_ID, { limit: 10 });
+    expect(page.items[0]?.authorDisplay).toBe('');
+    expect(caseNoteListResponse.safeParse(page).success).toBe(true);
+  });
+
+  it('a created note parses against the note schema and is audited', async () => {
+    const { service, audit, create } = notesService([]);
+    const note = await service.addNote(auth, CASE_ID, { text: 'privileged' }, fakeRequest());
+    expect(caseNote.safeParse(note).success).toBe(true);
     expect((create.mock.calls[0]![0] as { data: { authorId: unknown } }).data.authorId).toBe(
       auth.userId,
     );
-    // Commentary on a matter may later be read as part of the record, so who
-    // wrote it and when must be attributable rather than inferred from a row.
     expect(audit.appendTx).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ action: 'case.note_added' }),
     );
   });
 
-  it('rejects an empty or whitespace-only note', async () => {
-    const { service } = notesService();
-    await expect(service.addNote(auth, CASE_ID, { text: '   ' }, fakeRequest())).rejects.toThrow();
-    await expect(service.addNote(auth, CASE_ID, { text: '' }, fakeRequest())).rejects.toThrow();
+  it.each(['', '   '])('rejects a blank note (%j)', async (text) => {
+    const { service } = notesService([]);
+    await expect(service.addNote(auth, CASE_ID, { text }, fakeRequest())).rejects.toThrow();
   });
 
   it('rejects a note beyond the length bound', async () => {
-    const { service } = notesService();
+    const { service } = notesService([]);
     await expect(
       service.addNote(auth, CASE_ID, { text: 'x'.repeat(8001) }, fakeRequest()),
     ).rejects.toThrow();
@@ -225,10 +278,10 @@ describe('CasesService notes', () => {
 
   it('404s before writing when the case is not visible', async () => {
     const create = vi.fn();
-    const { service } = makeService({
+    const service = makeService({
       case: { findFirst: vi.fn(async () => null) },
       caseNote: { create },
-    });
+    }).service;
     await expect(service.addNote(auth, CASE_ID, { text: 'x' }, fakeRequest())).rejects.toThrow(
       NotFoundException,
     );

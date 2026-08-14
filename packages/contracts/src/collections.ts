@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { collectionSource, completeness, idempotencyKey, uuid } from './common.js';
+import { collectionSource, completeness, idempotencyKey, paginated, uuid } from './common.js';
 
 /**
  * Canonical IANA timezone id. Uses Intl.supportedValuesOf so legacy
@@ -257,3 +257,46 @@ export const collectionManifestDownloadResponse = z.object({
   completenessReportUrl: z.string().nullable(),
   expiresInSeconds: z.number().int(),
 });
+
+/**
+ * One entry in an exceptions ledger.
+ *
+ * Shared by collections and productions: the client renders both through the
+ * same table, so both endpoints must return this shape. It lives here rather
+ * than in the web app because a response schema the API cannot import is a
+ * contract nothing enforces — every field below was, at some point, returned
+ * under a different name by a server that compiled cleanly.
+ */
+export const exceptionEntry = z.object({
+  id: z.string(),
+  kind: z.string(),
+  message: z.string(),
+  itemRef: z.string().nullable().default(null),
+  /** Recorded so the ledger can name the item; absent on pre-existing rows. */
+  evidenceItemId: z.string().nullable().default(null),
+  mimeType: z.string().nullable().default(null),
+  sizeBytes: z.number().nullable().default(null),
+  /** Production exceptions carry these; collection exceptions do not. */
+  severity: z.string().nullable().default(null),
+  overridden: z.boolean().default(false),
+  occurredAt: z.string().optional(),
+});
+export const exceptionListResponse = paginated(exceptionEntry);
+
+/** A case member, with the identity behind the membership id. */
+export const caseMember = z.object({
+  membershipId: z.string(),
+  email: z.string(),
+  displayName: z.string().default(''),
+  roles: z.array(z.string()).default([]),
+});
+export const caseMemberListResponse = paginated(caseMember);
+
+/** A case note. authorDisplay, not an id: a UUID tells a reader nothing. */
+export const caseNote = z.object({
+  id: z.string(),
+  authorDisplay: z.string().default(''),
+  text: z.string(),
+  createdAt: z.string(),
+});
+export const caseNoteListResponse = paginated(caseNote);

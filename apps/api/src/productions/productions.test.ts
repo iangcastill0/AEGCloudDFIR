@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ProductionStatus, TenantRole } from '@aeg-clouddfir/database';
+import { exceptionListResponse } from '@aeg-clouddfir/contracts';
 import { ProductionsService } from './productions.service.js';
 import { validateProductionSet, type ProductionValidationItem } from './production.validator.js';
 import type { SelectionService } from '../search/selection.service.js';
@@ -474,7 +475,8 @@ describe('ProductionsService.downloadRun', () => {
   });
 });
 
-describe('ProductionsService.exceptions', () => {
+
+describe('ProductionsService.exceptions — matches the shared exception contract', () => {
   function excService(runs: { id: string }[], rows: Record<string, unknown>[]) {
     return makeService({
       production: { findFirst: vi.fn(async () => ({ id: PRODUCTION_ID })) },
@@ -494,48 +496,61 @@ describe('ProductionsService.exceptions', () => {
     createdAt: new Date('2026-08-14T12:00:00.000Z'),
   };
 
-  it('reports exceptions across every run of the production', async () => {
-    // Scoped to the production, not one run: an unresolved problem from an
-    // earlier attempt must not be hidden by looking only at the latest.
-    const service = excService([{ id: RUN_ID }, { id: 'run-2' }], [row]);
-    const page = await service.exceptions(auth, PRODUCTION_ID, { limit: 10 });
+  it('parses against exceptionListResponse, the same schema collections use', async () => {
+    // The client renders both ledgers through one table, so both endpoints must
+    // agree on the shape — this is the check that was missing.
+    const page = await excService([{ id: RUN_ID }], [row]).exceptions(auth, PRODUCTION_ID, {
+      limit: 10,
+    });
+    const parsed = exceptionListResponse.safeParse(page);
+    expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+  });
+
+  it('maps the production code to kind and the item to itemRef', async () => {
+    const page = await excService([{ id: RUN_ID }], [row]).exceptions(auth, PRODUCTION_ID, {
+      limit: 10,
+    });
     expect(page.items[0]).toMatchObject({
-      id: 'pe-1',
-      runId: RUN_ID,
-      code: 'redaction_overlap',
+      kind: 'redaction_overlap',
+      itemRef: ITEM_A,
       evidenceItemId: ITEM_A,
+      severity: 'warning',
       overridden: false,
+      occurredAt: '2026-08-14T12:00:00.000Z',
     });
   });
 
-  it('marks an overridden exception as waived rather than resolved', async () => {
-    const service = excService(
+  it('reports an overridden exception as waived rather than resolved', async () => {
+    const page = await excService(
       [{ id: RUN_ID }],
       [{ ...row, overriddenAt: new Date('2026-08-14T13:00:00.000Z') }],
-    );
-    const page = await service.exceptions(auth, PRODUCTION_ID, { limit: 10 });
-    // A reviewer must be able to tell "someone accepted this" from "this was fixed".
+    ).exceptions(auth, PRODUCTION_ID, { limit: 10 });
     expect(page.items[0]?.overridden).toBe(true);
   });
 
-  it('returns an empty page when the production has no runs yet', async () => {
-    const service = excService([], []);
+  it('covers every run, so an earlier unresolved problem is not hidden', async () => {
+    const service = excService([{ id: RUN_ID }, { id: 'run-2' }], [row]);
     const page = await service.exceptions(auth, PRODUCTION_ID, { limit: 10 });
+    expect(page.items).toHaveLength(1);
+  });
+
+  it('returns an empty page with a null cursor when there are no runs', async () => {
+    const page = await excService([], []).exceptions(auth, PRODUCTION_ID, { limit: 10 });
     expect(page).toEqual({ items: [], nextCursor: null });
+    expect(exceptionListResponse.safeParse(page).success).toBe(true);
   });
 
   it('paginates, returning a cursor only when more remain', async () => {
     const many = Array.from({ length: 3 }, (_, i) => ({ ...row, id: `pe-${String(i)}` }));
-    const service = excService([{ id: RUN_ID }], many);
-    const page = await service.exceptions(auth, PRODUCTION_ID, { limit: 2 });
+    const page = await excService([{ id: RUN_ID }], many).exceptions(auth, PRODUCTION_ID, {
+      limit: 2,
+    });
     expect(page.items).toHaveLength(2);
     expect(page.nextCursor).toBe('pe-1');
   });
 
   it('404s for a production in another tenant', async () => {
-    const service = makeService({
-      production: { findFirst: vi.fn(async () => null) },
-    }).service;
+    const service = makeService({ production: { findFirst: vi.fn(async () => null) } }).service;
     await expect(service.exceptions(auth, PRODUCTION_ID, { limit: 10 })).rejects.toThrow(
       NotFoundException,
     );

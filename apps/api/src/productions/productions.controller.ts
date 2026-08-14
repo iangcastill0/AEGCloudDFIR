@@ -138,13 +138,13 @@ export class ProductionsController {
   ): Promise<{
     items: {
       id: string;
-      runId: string;
-      code: string;
-      severity: string;
+      kind: string;
       message: string;
+      itemRef: string | null;
       evidenceItemId: string | null;
+      severity: string;
       overridden: boolean;
-      createdAt: string;
+      occurredAt: string;
     }[];
     nextCursor: string | null;
   }> {
