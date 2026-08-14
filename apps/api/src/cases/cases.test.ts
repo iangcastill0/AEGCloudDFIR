@@ -135,3 +135,103 @@ describe('CasesService case-restricted visibility', () => {
     );
   });
 });
+
+describe('CasesService.members', () => {
+  it('joins the identity behind each membership, not just its id', async () => {
+    const { service } = makeService({
+      case: { findFirst: vi.fn(async () => ({ id: CASE_ID })) },
+      caseMember: {
+        count: vi.fn(async () => 1),
+        findMany: vi.fn(async () => [
+          {
+            membershipId: 'm-1',
+            role: 'reviewer',
+            createdAt: new Date('2026-08-14T11:58:00.000Z'),
+            membership: { user: { email: 'a@test.local', displayName: 'A Reviewer' } },
+          },
+        ]),
+      },
+    });
+
+    const result = await service.members(auth, CASE_ID);
+    // A UUID list tells a reviewer nothing about who can see a matter.
+    expect(result.items[0]).toEqual({
+      membershipId: 'm-1',
+      role: 'reviewer',
+      email: 'a@test.local',
+      displayName: 'A Reviewer',
+      addedAt: '2026-08-14T11:58:00.000Z',
+    });
+  });
+
+  it('404s for a case in another tenant', async () => {
+    const { service } = makeService({ case: { findFirst: vi.fn(async () => null) } });
+    await expect(service.members(auth, CASE_ID)).rejects.toThrow(NotFoundException);
+  });
+});
+
+describe('CasesService notes', () => {
+  function notesService(rows: Record<string, unknown>[] = []) {
+    const create = vi.fn(async (args: { data: Record<string, unknown> }) => ({
+      id: 'note-1',
+      text: args.data['text'],
+      authorId: args.data['authorId'],
+      createdAt: new Date('2026-08-14T12:00:00.000Z'),
+    }));
+    const { service, audit } = makeService({
+      case: { findFirst: vi.fn(async () => ({ id: CASE_ID })) },
+      caseMember: { count: vi.fn(async () => 1) },
+      caseNote: { findMany: vi.fn(async () => rows), create },
+    });
+    return { service, audit, create };
+  }
+
+  it('lists notes oldest first, so they read as a running commentary', async () => {
+    const { service } = notesService([
+      { id: 'n1', text: 'first', authorId: 'u1', createdAt: new Date('2026-08-14T10:00:00.000Z') },
+    ]);
+    const result = await service.notes(auth, CASE_ID);
+    expect(result.items[0]).toMatchObject({ id: 'n1', text: 'first' });
+  });
+
+  it('creates a note attributed to the author and audits it', async () => {
+    const { service, audit, create } = notesService();
+    const note = await service.addNote(auth, CASE_ID, { text: 'reviewed for privilege' }, fakeRequest());
+
+    expect(note.text).toBe('reviewed for privilege');
+    expect((create.mock.calls[0]![0] as { data: { authorId: unknown } }).data.authorId).toBe(
+      auth.userId,
+    );
+    // Commentary on a matter may later be read as part of the record, so who
+    // wrote it and when must be attributable rather than inferred from a row.
+    expect(audit.appendTx).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ action: 'case.note_added' }),
+    );
+  });
+
+  it('rejects an empty or whitespace-only note', async () => {
+    const { service } = notesService();
+    await expect(service.addNote(auth, CASE_ID, { text: '   ' }, fakeRequest())).rejects.toThrow();
+    await expect(service.addNote(auth, CASE_ID, { text: '' }, fakeRequest())).rejects.toThrow();
+  });
+
+  it('rejects a note beyond the length bound', async () => {
+    const { service } = notesService();
+    await expect(
+      service.addNote(auth, CASE_ID, { text: 'x'.repeat(8001) }, fakeRequest()),
+    ).rejects.toThrow();
+  });
+
+  it('404s before writing when the case is not visible', async () => {
+    const create = vi.fn();
+    const { service } = makeService({
+      case: { findFirst: vi.fn(async () => null) },
+      caseNote: { create },
+    });
+    await expect(service.addNote(auth, CASE_ID, { text: 'x' }, fakeRequest())).rejects.toThrow(
+      NotFoundException,
+    );
+    expect(create).not.toHaveBeenCalled();
+  });
+});

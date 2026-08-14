@@ -162,6 +162,72 @@ export class ProductionsService {
    * whose names depend on the production profile, and inventing that list in the
    * API would silently omit files when a profile changes.
    */
+  /**
+   * Exceptions across every run of a production.
+   *
+   * Scoped to the production rather than a single run on purpose: a reviewer
+   * asking "what went wrong producing this set" does not care which attempt
+   * raised it, and scoping per-run would hide problems from an earlier run that
+   * were never resolved.
+   */
+  async exceptions(
+    auth: AuthContext,
+    productionId: string,
+    page: CursorQuery,
+  ): Promise<{
+    items: {
+      id: string;
+      runId: string;
+      code: string;
+      severity: string;
+      message: string;
+      evidenceItemId: string | null;
+      overridden: boolean;
+      createdAt: string;
+    }[];
+    nextCursor: string | null;
+  }> {
+    return withTenantContext(this.prisma, auth.tenantId, async (tx) => {
+      const production = await tx.production.findFirst({
+        where: { id: productionId, tenantId: auth.tenantId },
+        select: { id: true },
+      });
+      if (!production) throw new NotFoundException();
+
+      const runs = await tx.productionRun.findMany({
+        where: { tenantId: auth.tenantId, productionId },
+        select: { id: true },
+      });
+      if (runs.length === 0) return { items: [], nextCursor: null };
+
+      const rows = await tx.productionException.findMany({
+        where: {
+          tenantId: auth.tenantId,
+          productionRunId: { in: runs.map((r) => r.id) },
+        },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: page.limit + 1,
+        ...(page.cursor ? { skip: 1, cursor: { id: page.cursor } } : {}),
+      });
+      const items = rows.slice(0, page.limit);
+      return {
+        items: items.map((row) => ({
+          id: row.id,
+          runId: row.productionRunId,
+          code: row.code,
+          severity: row.severity,
+          message: row.message,
+          evidenceItemId: row.evidenceItemId,
+          // An overridden exception was consciously accepted; a reviewer needs to
+          // see that it was waived rather than resolved.
+          overridden: row.overriddenAt !== null,
+          createdAt: row.createdAt.toISOString(),
+        })),
+        nextCursor: rows.length > page.limit ? (items[items.length - 1]?.id ?? null) : null,
+      };
+    });
+  }
+
   async downloadRun(
     auth: AuthContext,
     productionId: string,

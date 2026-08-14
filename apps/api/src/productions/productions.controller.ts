@@ -129,6 +129,28 @@ export class ProductionsController {
    * production work — this is the disclosure artifact leaving the platform, and
    * the request is audited as production.run_downloaded.
    */
+  @Get(':id/exceptions')
+  @RequireRoles(TenantRole.production_manager, TenantRole.case_manager)
+  async exceptions(
+    @Param('id') id: string,
+    @Query() query: Record<string, unknown>,
+    @Req() request: FastifyRequest,
+  ): Promise<{
+    items: {
+      id: string;
+      runId: string;
+      code: string;
+      severity: string;
+      message: string;
+      evidenceItemId: string | null;
+      overridden: boolean;
+      createdAt: string;
+    }[];
+    nextCursor: string | null;
+  }> {
+    return this.productions.exceptions(requireAuth(request), id, parseCursorQuery(query));
+  }
+
   @Get(':id/runs/:runId/download')
   @RequireRoles(TenantRole.production_manager, TenantRole.case_manager)
   async downloadRun(

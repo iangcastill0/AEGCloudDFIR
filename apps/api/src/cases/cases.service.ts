@@ -36,6 +36,9 @@ const updateCaseSchema = z.object({
   version: z.number().int().min(1),
 });
 
+/** A note must say something; 8k is generous for commentary but bounded. */
+const noteSchema = z.object({ text: z.string().trim().min(1).max(8000) });
+
 const memberSchema = z.object({
   membershipId: z.string().uuid(),
   role: z.enum(['case_manager', 'reviewer', 'read_only', 'production_manager']),
@@ -313,6 +316,110 @@ export class CasesService {
           addedVia: row.addedVia,
         })),
         nextCursor: rows.length > page.limit && last ? last.id : null,
+      };
+    });
+  }
+
+  /**
+   * Members of a case, with the identity behind each membership.
+   *
+   * The membership id alone is meaningless in a UI, so the user's email and
+   * display name are joined in — otherwise a reviewer sees a list of UUIDs and
+   * cannot tell who has access to a matter.
+   */
+  async members(
+    auth: AuthContext,
+    id: string,
+  ): Promise<{
+    items: {
+      membershipId: string;
+      role: string;
+      email: string;
+      displayName: string;
+      addedAt: string;
+    }[];
+  }> {
+    return withTenantContext(this.prisma, auth.tenantId, async (tx) => {
+      await this.requireCase(tx, auth, id);
+      const rows = await tx.caseMember.findMany({
+        where: { tenantId: auth.tenantId, caseId: id },
+        include: { membership: { include: { user: true } } },
+        orderBy: { createdAt: 'asc' },
+      });
+      return {
+        items: rows.map((row) => ({
+          membershipId: row.membershipId,
+          role: row.role,
+          email: row.membership.user.email,
+          displayName: row.membership.user.displayName,
+          addedAt: row.createdAt.toISOString(),
+        })),
+      };
+    });
+  }
+
+  /** Case notes, oldest first: they read as a running commentary on the matter. */
+  async notes(
+    auth: AuthContext,
+    id: string,
+  ): Promise<{
+    items: { id: string; text: string; authorId: string | null; createdAt: string }[];
+  }> {
+    return withTenantContext(this.prisma, auth.tenantId, async (tx) => {
+      await this.requireCase(tx, auth, id);
+      const rows = await tx.caseNote.findMany({
+        where: { tenantId: auth.tenantId, caseId: id },
+        orderBy: { createdAt: 'asc' },
+      });
+      return {
+        items: rows.map((row) => ({
+          id: row.id,
+          text: row.text,
+          authorId: row.authorId,
+          createdAt: row.createdAt.toISOString(),
+        })),
+      };
+    });
+  }
+
+  /**
+   * Add a note. Audited, because a note is commentary on a matter that may later
+   * be read as part of the record — who wrote what, and when, has to be
+   * attributable rather than inferred from a mutable row.
+   */
+  async addNote(
+    auth: AuthContext,
+    id: string,
+    body: unknown,
+    request: FastifyRequest,
+  ): Promise<{ id: string; text: string; authorId: string | null; createdAt: string }> {
+    const input = zodValidate(noteSchema, body);
+    return withTenantContext(this.prisma, auth.tenantId, async (tx) => {
+      await this.requireCase(tx, auth, id);
+      const note = await tx.caseNote.create({
+        data: {
+          tenantId: auth.tenantId,
+          caseId: id,
+          authorId: auth.userId,
+          text: input.text,
+        },
+      });
+      await this.audit.appendTx(tx, {
+        tenantId: auth.tenantId,
+        actorUserId: auth.userId,
+        actorDisplay: auth.actorDisplay,
+        effectiveRoles: auth.roles,
+        action: 'case.note_added',
+        targetType: 'case',
+        targetId: id,
+        summary: { noteId: note.id, charCount: input.text.length },
+        request,
+      });
+      return {
+        id: note.id,
+        text: note.text,
+        authorId: note.authorId,
+        createdAt: note.createdAt.toISOString(),
       };
     });
   }

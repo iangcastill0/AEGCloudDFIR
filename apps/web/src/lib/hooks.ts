@@ -130,7 +130,7 @@ export function useTestConnector() {
 export function useRevokeConnector() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => apiFetch(`/api/v1/connectors/${id}/revoke`, { method: 'POST' }),
+    mutationFn: (id: string) => apiFetch(`/api/v1/connectors/${id}`, { method: 'DELETE' }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['connectors'] }),
   });
 }
@@ -562,7 +562,7 @@ export function useUpdateCase(id: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: Record<string, unknown>) =>
-      apiFetch(`/api/v1/cases/${id}`, { method: 'PATCH', body, schema: caseResponse }),
+      apiFetch(`/api/v1/cases/${id}`, { method: 'PUT', body, schema: caseResponse }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['case', id] });
       void qc.invalidateQueries({ queryKey: ['cases'] });

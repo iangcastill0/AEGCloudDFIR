@@ -105,6 +105,57 @@ export class CasesController {
     return this.cases.items(requireAuth(request), id, parseCursorQuery(query));
   }
 
+  /** Read-only roles included: seeing who has access to a matter is a read. */
+  @Get(':id/members')
+  @RequireRoles(
+    TenantRole.case_manager,
+    TenantRole.org_admin,
+    TenantRole.reviewer,
+    TenantRole.read_only,
+  )
+  async members(
+    @Param('id') id: string,
+    @Req() request: FastifyRequest,
+  ): Promise<{
+    items: {
+      membershipId: string;
+      role: string;
+      email: string;
+      displayName: string;
+      addedAt: string;
+    }[];
+  }> {
+    return this.cases.members(requireAuth(request), id);
+  }
+
+  @Get(':id/notes')
+  @RequireRoles(
+    TenantRole.case_manager,
+    TenantRole.org_admin,
+    TenantRole.reviewer,
+    TenantRole.read_only,
+  )
+  async notes(
+    @Param('id') id: string,
+    @Req() request: FastifyRequest,
+  ): Promise<{
+    items: { id: string; text: string; authorId: string | null; createdAt: string }[];
+  }> {
+    return this.cases.notes(requireAuth(request), id);
+  }
+
+  /** Writing a note is a review activity, so reviewers may do it. */
+  @Post(':id/notes')
+  @RequireRoles(TenantRole.case_manager, TenantRole.org_admin, TenantRole.reviewer)
+  @HttpCode(200)
+  async addNote(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Req() request: FastifyRequest,
+  ): Promise<{ id: string; text: string; authorId: string | null; createdAt: string }> {
+    return this.cases.addNote(requireAuth(request), id, body, request);
+  }
+
   @Post(':id/members')
   @RequireRoles(TenantRole.case_manager)
   @HttpCode(200)
