@@ -7,6 +7,14 @@
 # may already run something on the defaults. Containers always reach each other
 # on the compose network by service name, so these mappings exist only for
 # host-side tooling — on a shared host, move them to free high ports.
+#
+# ALWAYS run compose from the repo root (as in the command above) or pass
+# --env-file ../../.env. Compose interpolates ${...} from the .env in the
+# CURRENT directory, not from the service env_file below: run it from inside
+# this directory with no --env-file and every default here silently applies —
+# the host ports collide with whatever else the server runs, and the database
+# password becomes changeme-local-only. Deployments symlink .env into this
+# directory so either invocation works.
 
 name: cdfir
 
