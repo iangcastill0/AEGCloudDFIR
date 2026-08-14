@@ -5,24 +5,22 @@
  * envelopes, string BigInts, ISO dates).
  */
 import { z } from 'zod';
-// Re-exported so existing imports keep working; the definitions now live in
-// @aeg-clouddfir/contracts where the API can validate against them too.
+
+// A proper re-export, not `export { importedName }`. The latter type-checks but
+// webpack rejects it with "has no internal name", failing the production build
+// while tsc and the unit tests pass — so it only surfaces in `next build`.
 export {
   caseMember,
   caseMemberListResponse,
   caseNote,
   caseNoteListResponse,
+  caseTag,
+  caseTagListResponse,
   exceptionEntry,
   exceptionListResponse,
-};
+} from '@aeg-clouddfir/contracts';
 import {
-  caseMember,
-  caseMemberListResponse,
-  caseNote,
-  caseNoteListResponse,
   chainOfCustodyEntry,
-  exceptionEntry,
-  exceptionListResponse,
   evidenceSummary,
   exportStatusResponse,
   paginated,
