@@ -11,6 +11,7 @@ import {
   collectionStatusResponse,
   validateProductionResponse,
   createExportResponse,
+  collectionActionResponse,
   collectionManifestDownloadResponse,
   exportDownloadResponse,
   productionRunDownloadResponse,
@@ -215,8 +216,16 @@ export function useCollectionAction(id: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (action: 'pause' | 'resume' | 'cancel' | 'retry') =>
-      apiFetch(`/api/v1/collections/${id}/${action}`, { method: 'POST' }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['collection', id] }),
+      apiFetch(`/api/v1/collections/${id}/${action}`, {
+        method: 'POST',
+        schema: collectionActionResponse,
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['collection', id] });
+      // A retry clears ledger rows, so the exceptions list is stale too.
+      // Without this the entry stays on screen and the retry looks ineffective.
+      void qc.invalidateQueries({ queryKey: ['collection-exceptions', id] });
+    },
   });
 }
 

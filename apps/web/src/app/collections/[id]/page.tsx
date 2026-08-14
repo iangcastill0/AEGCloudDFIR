@@ -23,6 +23,29 @@ const ACTION_LABEL: Record<CollectionAction, string> = {
   retry: 'Retry failed items',
 };
 
+/**
+ * Say what an action DID, not that it was requested.
+ *
+ * "Retry failed items requested." was indistinguishable between a retry that
+ * re-queued work and one that matched nothing, which made a working retry look
+ * broken.
+ */
+function describeActionResult(
+  action: CollectionAction,
+  result: { retriedItems?: number; retriedProcessing?: number },
+): string {
+  if (action !== 'retry') return `${ACTION_LABEL[action]} requested.`;
+  const fetches = result.retriedItems ?? 0;
+  const processing = result.retriedProcessing ?? 0;
+  if (fetches === 0 && processing === 0) {
+    return 'Nothing to retry \u2014 no failed or excepted items remain.';
+  }
+  const parts: string[] = [];
+  if (fetches > 0) parts.push(`${String(fetches)} failed item(s) queued for re-collection`);
+  if (processing > 0) parts.push(`${String(processing)} item(s) queued for re-processing`);
+  return `Retry started: ${parts.join(' and ')}. Progress updates as the workers pick them up.`;
+}
+
 /** Which actions are legal for a status, with a reason when they are not. */
 function actionAvailability(
   status: string,
@@ -150,8 +173,8 @@ export default function CollectionDetailPage({ params }: { params: Promise<{ id:
                 onConfirm={() => {
                   if (!confirming) return;
                   action.mutate(confirming, {
-                    onSuccess: () => {
-                      setStatusText(`${ACTION_LABEL[confirming]} requested.`);
+                    onSuccess: (result) => {
+                      setStatusText(describeActionResult(confirming, result));
                       setConfirming(null);
                     },
                     onError: (err) => {

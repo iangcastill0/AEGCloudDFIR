@@ -233,6 +233,19 @@ export type CollectionStatusResponse = z.infer<typeof collectionStatusResponse>;
 export const collectionAction = z.enum(['pause', 'resume', 'cancel', 'retry']);
 
 /**
+ * What an action did, not merely that it was accepted. `retry` reports both
+ * kinds of retryable failure separately: items whose fetch failed, and items
+ * that were collected but could not be processed. Reporting only "requested"
+ * left a user unable to tell a successful retry from one that matched nothing.
+ */
+export const collectionActionResponse = z.object({
+  id: uuid,
+  status: z.string(),
+  retriedItems: z.number().int().optional(),
+  retriedProcessing: z.number().int().optional(),
+});
+
+/**
  * GET /collections/:id/manifest returns presigned URLs, not a file — the same
  * envelope shape exports uses. The manifest is the collection's custody
  * artifact; its SHA-256 is returned so a recipient can verify what they fetched.
