@@ -1,6 +1,7 @@
 import { appendAuditEvent, withTenantContext } from '@aeg-clouddfir/database';
 import { sanitizeError, type WorkerContext } from '../context.js';
 import { recordException } from '../progress.js';
+import { convertToPlainText, isConvertible } from './soffice.js';
 import { QUEUES, dedupKeys } from '../queues.js';
 import { PayloadTooLargeError, readAllCapped } from '../streams.js';
 import type { EvidenceStagePayload } from './payloads.js';
@@ -8,6 +9,8 @@ import type { EvidenceStagePayload } from './payloads.js';
 const MAX_INPUT_BYTES = 200 * 1024 * 1024;
 const MAX_TEXT_BYTES = 50 * 1024 * 1024;
 const TIKA_TIMEOUT_MS = 120_000;
+/** Recorded as the extractor when the LibreOffice fallback recovers text. */
+const SOFFICE_EXTRACTOR = 'libreoffice';
 
 export type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
 
@@ -81,6 +84,48 @@ export async function processExtract(
   if (response.status === 422) {
     const body = await response.text().catch(() => '');
     const encrypted = /encrypt/i.test(body) || /EncryptedDocument/i.test(body);
+
+    // Encrypted documents are not retried: LibreOffice cannot open them either
+    // without the password, so a second attempt only burns a process spawn and
+    // muddies the exception with a misleading second failure.
+    if (!encrypted && ctx.config.CDFIR_SOFFICE_FALLBACK && isConvertible(item.mimeType, item.name)) {
+      const converted = await convertToPlainText(input, item.mimeType, item.name, {
+        timeoutMs: ctx.config.CDFIR_SOFFICE_TIMEOUT_MS,
+        maxTextBytes: MAX_TEXT_BYTES,
+      });
+      if (converted.ok) {
+        ctx.log.info(
+          { evidenceItemId, mimeType: item.mimeType },
+          'extract: tika declined the format; libreoffice recovered the text',
+        );
+        await persistExtractedText(
+          ctx,
+          payload,
+          item,
+          version,
+          converted.text,
+          SOFFICE_EXTRACTOR,
+          'headless',
+        );
+        return;
+      }
+      ctx.log.info(
+        { evidenceItemId, mimeType: item.mimeType, reason: converted.reason },
+        'extract: libreoffice fallback did not recover text',
+      );
+      await markExtractException(
+        ctx,
+        payload,
+        item,
+        'unsupported_item',
+        // Say that the fallback ran. An exceptions report that reads "not
+        // supported" when a second extractor was also tried understates the
+        // effort made, which matters if the omission is ever challenged.
+        `document type is not supported by the text extractor; LibreOffice fallback also failed (${converted.reason})`,
+      );
+      return;
+    }
+
     await markExtractException(
       ctx,
       payload,
@@ -111,6 +156,27 @@ export async function processExtract(
   if (Buffer.byteLength(text, 'utf8') > MAX_TEXT_BYTES) {
     text = text.slice(0, MAX_TEXT_BYTES);
   }
+  await persistExtractedText(ctx, payload, item, version, text, 'apache-tika', 'server');
+}
+
+/**
+ * Store extracted text and fan out to OCR and indexing.
+ *
+ * `extractorName` is a parameter rather than a constant: text recovered by the
+ * LibreOffice fallback must be attributable to it, both on the row and in the
+ * audit event, so a reviewer can see how a document's text was obtained.
+ */
+async function persistExtractedText(
+  ctx: WorkerContext,
+  payload: EvidenceStagePayload,
+  item: { id: string; mimeType: string },
+  version: number,
+  text: string,
+  extractorName: string,
+  extractorVersion: string,
+): Promise<void> {
+  const { tenantId } = payload;
+  const evidenceItemId = item.id;
   const trimmed = text.trim();
 
   const put = await ctx.store.putDerivative(
@@ -133,8 +199,8 @@ export async function processExtract(
         objectKey: put.objectKey,
         sha256: put.sha256,
         charCount: trimmed.length,
-        extractorName: 'apache-tika',
-        extractorVersion: 'server',
+        extractorName,
+        extractorVersion,
         version,
       },
       update: { objectKey: put.objectKey, sha256: put.sha256, charCount: trimmed.length },
@@ -149,7 +215,7 @@ export async function processExtract(
       targetType: 'evidence_item',
       targetId: evidenceItemId,
       actorDisplay: 'worker',
-      summary: { extractor: 'apache-tika', charCount: trimmed.length },
+      summary: { extractor: extractorName, charCount: trimmed.length },
     });
     await tx.outboxEvent.createMany({
       data: [

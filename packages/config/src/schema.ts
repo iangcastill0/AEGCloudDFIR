@@ -97,6 +97,17 @@ export const configSchema = z.object({
 
   // --- Uploaded container files (PST/OST) ---
   /** Max accepted upload size in bytes (default 10 GiB; PSTs are big). */
+  // --- LibreOffice text-extraction fallback ---
+  // Tika declines some formats outright (Publisher, Visio, WordPerfect). The
+  // worker image already ships LibreOffice, which can often open them, so this
+  // is tried before recording an unsupported_item exception. Disable it if a
+  // conversion ever destabilises the worker; extraction then degrades to the
+  // honest exception rather than failing.
+  CDFIR_SOFFICE_FALLBACK: booleanString('true'),
+  // soffice can hang indefinitely on malformed input, so the process is killed
+  // at this bound. Deliberately shorter than the Tika timeout: this is a
+  // best-effort second attempt, not the main path.
+  CDFIR_SOFFICE_TIMEOUT_MS: z.coerce.number().int().min(5_000).max(600_000).default(60_000),
   CDFIR_UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(10_737_418_240),
   /** Cap on messages extracted from a single container before an honest stop. */
   CDFIR_PST_MAX_MESSAGES: z.coerce.number().int().min(1).default(250_000),
