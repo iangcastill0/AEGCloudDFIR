@@ -122,6 +122,17 @@ const validationSnapshotSchema = z.object({
   ),
 });
 
+export interface ProductionRunDto {
+  id: string;
+  runNumber: number;
+  status: string;
+  progress: Record<string, number>;
+  batesStart: string;
+  batesEnd: string;
+  exceptionCounts: Record<string, number>;
+  manifestSha256: string;
+}
+
 export interface ProductionDto {
   id: string;
   name: string;
@@ -429,6 +440,45 @@ export class ProductionsService {
     return this.toDto(row);
   }
 
+  /**
+   * Map a run row plus its exception tally to the client's run shape.
+   *
+   * Shared by get() and getRun(): the detail page validates both with the same
+   * productionRunStatusResponse, and get() previously returned only
+   * id/runNumber/status — six fields short — so the whole page failed to parse.
+   */
+  private static toRunDto(
+    run: {
+      id: string;
+      runNumber: number;
+      status: string;
+      progress: unknown;
+      batesStart: string;
+      batesEnd: string;
+      manifestSha256: string;
+    },
+    exceptionCounts: Record<string, number>,
+  ): ProductionRunDto {
+    const progress: Record<string, number> = {};
+    // progress is JSONB, so it may be any shape; keep only numeric entries
+    // rather than passing through something the contract would reject.
+    if (typeof run.progress === 'object' && run.progress !== null && !Array.isArray(run.progress)) {
+      for (const [key, value] of Object.entries(run.progress as Record<string, unknown>)) {
+        if (typeof value === 'number') progress[key] = value;
+      }
+    }
+    return {
+      id: run.id,
+      runNumber: run.runNumber,
+      status: run.status,
+      progress,
+      batesStart: run.batesStart,
+      batesEnd: run.batesEnd,
+      exceptionCounts,
+      manifestSha256: run.manifestSha256,
+    };
+  }
+
   private toDto(row: {
     id: string;
     name: string;
@@ -474,18 +524,43 @@ export class ProductionsService {
   async get(
     auth: AuthContext,
     id: string,
-  ): Promise<ProductionDto & { runs: { id: string; runNumber: number; status: string }[] }> {
-    const row = await withTenantContext(this.prisma, auth.tenantId, (tx) =>
-      tx.production.findFirst({
+  ): Promise<ProductionDto & { parameters: unknown; runs: ProductionRunDto[] }> {
+    return withTenantContext(this.prisma, auth.tenantId, async (tx) => {
+      const row = await tx.production.findFirst({
         where: { id, tenantId: auth.tenantId },
         include: { runs: { orderBy: { runNumber: 'asc' } } },
-      }),
-    );
-    if (!row) throw new NotFoundException();
-    return {
-      ...this.toDto(row),
-      runs: row.runs.map((run) => ({ id: run.id, runNumber: run.runNumber, status: run.status })),
-    };
+      });
+      if (!row) throw new NotFoundException();
+
+      // One grouped query for all runs rather than one per run: a production
+      // with many runs would otherwise fan out into N round trips.
+      const groups =
+        row.runs.length === 0
+          ? []
+          : await tx.productionException.groupBy({
+              by: ['productionRunId', 'code'],
+              where: {
+                tenantId: auth.tenantId,
+                productionRunId: { in: row.runs.map((r) => r.id) },
+              },
+              _count: { _all: true },
+            });
+      const countsByRun = new Map<string, Record<string, number>>();
+      for (const g of groups) {
+        const existing = countsByRun.get(g.productionRunId) ?? {};
+        existing[g.code] = g._count._all;
+        countsByRun.set(g.productionRunId, existing);
+      }
+
+      return {
+        ...this.toDto(row),
+        // The client reads `parameters`; the column is draftParameters.
+        parameters: row.draftParameters,
+        runs: row.runs.map((run) =>
+          ProductionsService.toRunDto(run, countsByRun.get(run.id) ?? {}),
+        ),
+      };
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -1031,27 +1106,8 @@ export class ProductionsService {
       const exceptionCounts: Record<string, number> = {};
       for (const group of exceptionGroups) exceptionCounts[group.code] = group._count._all;
 
-      const progress: Record<string, number> = {};
-      if (
-        typeof run.progress === 'object' &&
-        run.progress !== null &&
-        !Array.isArray(run.progress)
-      ) {
-        for (const [key, value] of Object.entries(run.progress as Record<string, unknown>)) {
-          if (typeof value === 'number') progress[key] = value;
-        }
-      }
 
-      return {
-        id: run.id,
-        runNumber: run.runNumber,
-        status: run.status,
-        progress,
-        batesStart: run.batesStart,
-        batesEnd: run.batesEnd,
-        exceptionCounts,
-        manifestSha256: run.manifestSha256,
-      };
+      return ProductionsService.toRunDto(run, exceptionCounts);
     });
   }
 

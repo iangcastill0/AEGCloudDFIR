@@ -11,6 +11,8 @@ import { z } from 'zod';
 // while tsc and the unit tests pass — so it only surfaces in `next build`.
 export {
   caseMember,
+  productionDetail,
+  type ProductionDetail,
   caseMemberListResponse,
   caseNote,
   caseNoteListResponse,
@@ -24,8 +26,6 @@ import {
   evidenceSummary,
   exportStatusResponse,
   paginated,
-  productionRunStatusResponse,
-  productionParameters,
   savedSearchResponse,
   tagResponse,
   caseResponse,
@@ -278,14 +278,6 @@ export const productionSummary = z.object({
 });
 export const productionListResponse = paginated(productionSummary);
 
-export const productionDetail = z.object({
-  id: z.string(),
-  name: z.string(),
-  description: z.string().default(''),
-  parameters: productionParameters,
-  runs: z.array(productionRunStatusResponse).default([]),
-});
-export type ProductionDetail = z.infer<typeof productionDetail>;
 
 export const submitProductionResponse = z.object({ runId: z.string() });
 

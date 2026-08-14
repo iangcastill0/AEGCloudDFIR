@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ProductionStatus, TenantRole } from '@aeg-clouddfir/database';
-import { exceptionListResponse } from '@aeg-clouddfir/contracts';
+import { exceptionListResponse, productionDetail, productionRunStatusResponse } from '@aeg-clouddfir/contracts';
 import { ProductionsService } from './productions.service.js';
 import { validateProductionSet, type ProductionValidationItem } from './production.validator.js';
 import type { SelectionService } from '../search/selection.service.js';
@@ -21,6 +21,7 @@ import {
 const auth = makeAuth([TenantRole.production_manager]);
 const PRODUCTION_ID = '12121212-1212-4121-8121-121212121212';
 const RUN_ID = '13131313-1313-4131-8131-131313131313';
+const RUN_ID_2 = '14141414-1414-4141-8141-141414141414';
 
 function item(overrides: Partial<ProductionValidationItem>): ProductionValidationItem {
   return {
@@ -554,5 +555,121 @@ describe('ProductionsService.exceptions — matches the shared exception contrac
     await expect(service.exceptions(auth, PRODUCTION_ID, { limit: 10 })).rejects.toThrow(
       NotFoundException,
     );
+  });
+});
+
+/**
+ * The detail page validates GET /productions/:id with productionDetail, whose
+ * runs use productionRunStatusResponse. get() returned only id/runNumber/status
+ * — three of nine fields — and omitted `parameters` entirely, so the page failed
+ * with six validation errors while both sides compiled.
+ */
+describe('ProductionsService.get — matches productionDetail', () => {
+  // Reuse the submit-path fixture rather than inventing a second shape: it is a
+  // complete productionParameters, which is what create/update store, so it is
+  // what a real draftParameters column holds.
+  const params = parameters;
+
+  function detailService(runs: Record<string, unknown>[], groups: unknown[] = []) {
+    return makeService({
+      production: {
+        findFirst: vi.fn(async () => ({
+          id: PRODUCTION_ID,
+          name: 'Production 1',
+          description: 'desc',
+          status: 'draft',
+          caseId: null,
+          createdAt: new Date('2026-08-14T12:00:00.000Z'),
+          version: 1,
+          draftParameters: params,
+          runs,
+        })),
+      },
+      productionException: { groupBy: vi.fn(async () => groups) },
+    }).service;
+  }
+
+  const runRow = {
+    id: RUN_ID,
+    runNumber: 1,
+    status: 'ready',
+    progress: { rendered: 5, stamped: 5 },
+    batesStart: 'ABC000001',
+    batesEnd: 'ABC000005',
+    manifestSha256: 'f'.repeat(64),
+  };
+
+  it('parses against productionDetail, runs included', async () => {
+    const detail = await detailService([runRow], [
+      { productionRunId: RUN_ID, code: 'redaction_overlap', _count: { _all: 2 } },
+    ]).get(auth, PRODUCTION_ID);
+
+    const parsed = productionDetail.safeParse(detail);
+    expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+  });
+
+  it('exposes parameters under the name the client reads', async () => {
+    const detail = await detailService([runRow]).get(auth, PRODUCTION_ID);
+    // The column is draftParameters; the contract field is parameters.
+    expect(detail.parameters).toEqual(params);
+  });
+
+  it('returns every run field, with exception counts attributed to the right run', async () => {
+    const second = { ...runRow, id: RUN_ID_2, runNumber: 2, status: 'queued' };
+    const detail = await detailService([runRow, second], [
+      { productionRunId: RUN_ID, code: 'redaction_overlap', _count: { _all: 2 } },
+      { productionRunId: RUN_ID_2, code: 'missing_native', _count: { _all: 1 } },
+    ]).get(auth, PRODUCTION_ID);
+
+    expect(detail.runs[0]).toMatchObject({
+      batesStart: 'ABC000001',
+      batesEnd: 'ABC000005',
+      manifestSha256: 'f'.repeat(64),
+      progress: { rendered: 5, stamped: 5 },
+      exceptionCounts: { redaction_overlap: 2 },
+    });
+    // Counts must not bleed between runs.
+    expect(detail.runs[1]?.exceptionCounts).toEqual({ missing_native: 1 });
+    expect(productionRunStatusResponse.safeParse(detail.runs[1]).success).toBe(true);
+  });
+
+  it('drops non-numeric progress entries rather than failing the contract', async () => {
+    // progress is JSONB and can hold anything a previous version wrote.
+    const detail = await detailService([
+      { ...runRow, progress: { rendered: 5, note: 'partial', nested: { a: 1 } } },
+    ]).get(auth, PRODUCTION_ID);
+    expect(detail.runs[0]?.progress).toEqual({ rendered: 5 });
+    expect(productionDetail.safeParse(detail).success).toBe(true);
+  });
+
+  it('handles a production with no runs, and skips the exception query', async () => {
+    const groupBy = vi.fn(async () => []);
+    const service = makeService({
+      production: {
+        findFirst: vi.fn(async () => ({
+          id: PRODUCTION_ID,
+          name: 'p',
+          description: '',
+          status: 'draft',
+          caseId: null,
+          createdAt: new Date('2026-08-14T12:00:00.000Z'),
+          version: 1,
+          draftParameters: params,
+          runs: [],
+        })),
+      },
+      productionException: { groupBy },
+    }).service;
+    const detail = await service.get(auth, PRODUCTION_ID);
+    expect(detail.runs).toEqual([]);
+    expect(groupBy).not.toHaveBeenCalled();
+    expect(productionDetail.safeParse(detail).success).toBe(true);
+  });
+
+  it('404s for a production in another tenant', async () => {
+    const service = makeService({
+      production: { findFirst: vi.fn(async () => null) },
+    }).service;
+    await expect(service.get(auth, PRODUCTION_ID)).rejects.toThrow(NotFoundException);
   });
 });

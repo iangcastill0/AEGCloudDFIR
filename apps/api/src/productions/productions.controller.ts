@@ -20,7 +20,7 @@ import { SessionGuard } from '../auth/guards/session.guard.js';
 import { TenantGuard } from '../auth/guards/tenant.guard.js';
 import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { RequireRoles } from '../auth/guards/require-roles.decorator.js';
-import { ProductionsService, type ProductionDto } from './productions.service.js';
+import { ProductionsService, type ProductionDto, type ProductionRunDto } from './productions.service.js';
 import type { ValidationFlag } from './production.validator.js';
 
 function requireAuth(request: FastifyRequest): AuthContext {
@@ -58,7 +58,7 @@ export class ProductionsController {
   async get(
     @Param('id') id: string,
     @Req() request: FastifyRequest,
-  ): Promise<ProductionDto & { runs: { id: string; runNumber: number; status: string }[] }> {
+  ): Promise<ProductionDto & { parameters: unknown; runs: ProductionRunDto[] }> {
     return this.productions.get(requireAuth(request), id);
   }
 
@@ -111,16 +111,7 @@ export class ProductionsController {
     @Param('id') id: string,
     @Param('runId') runId: string,
     @Req() request: FastifyRequest,
-  ): Promise<{
-    id: string;
-    runNumber: number;
-    status: string;
-    progress: Record<string, number>;
-    batesStart: string;
-    batesEnd: string;
-    exceptionCounts: Record<string, number>;
-    manifestSha256: string;
-  }> {
+  ): Promise<ProductionRunDto> {
     return this.productions.getRun(requireAuth(request), id, runId);
   }
 

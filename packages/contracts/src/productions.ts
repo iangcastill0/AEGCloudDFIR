@@ -191,3 +191,20 @@ export const productionRunDownloadResponse = z.object({
   manifestSha256: z.string(),
   expiresInSeconds: z.number().int(),
 });
+
+/**
+ * GET /productions/:id.
+ *
+ * Lives here so the API can be tested against the shape the client parses.
+ * When this was defined only in the web app, get() returned three of the nine
+ * run fields and the detail page failed to load with six validation errors —
+ * both sides compiled cleanly.
+ */
+export const productionDetail = z.object({
+  id: uuid,
+  name: z.string(),
+  description: z.string().default(''),
+  parameters: productionParameters,
+  runs: z.array(productionRunStatusResponse).default([]),
+});
+export type ProductionDetail = z.infer<typeof productionDetail>;
