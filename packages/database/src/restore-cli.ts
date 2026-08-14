@@ -110,7 +110,15 @@ async function fetchVerified(s3: S3Client, bucket: string, key: string): Promise
   }
 
   process.stderr.write(`verified OK (${String(bytes.length)} bytes). Writing dump to stdout.\n`);
-  process.stdout.write(bytes);
+  // Await the flush. process.exit() does NOT drain stdout, so writing and
+  // exiting truncates the dump at one pipe buffer (64 KiB) — producing a
+  // backup that verifies and then fails in pg_restore with "end of file".
+  await new Promise<void>((resolve, reject) => {
+    process.stdout.write(bytes, (err) => {
+      if (err) reject(err);
+      else resolve();
+    });
+  });
   return 0;
 }
 
@@ -118,7 +126,13 @@ async function main(): Promise<number> {
   const argv = process.argv.slice(2);
   const { s3, bucket } = makeClient();
 
-  if (argv.includes('--list')) return list(s3, bucket);
+  if (argv.includes('--list')) {
+    try {
+      return await list(s3, bucket);
+    } finally {
+      s3.destroy();
+    }
+  }
 
   const keyIdx = argv.indexOf('--key');
   const key = keyIdx >= 0 ? argv[keyIdx + 1] : undefined;
@@ -132,13 +146,21 @@ async function main(): Promise<number> {
     );
     return 2;
   }
-  return fetchVerified(s3, bucket, key);
+  try {
+    return await fetchVerified(s3, bucket, key);
+  } finally {
+    s3.destroy();
+  }
 }
 
 main().then(
-  (code) => process.exit(code),
+  (code) => {
+    // exitCode rather than exit(): the process ends once the event loop and
+    // stdout have drained, so nothing already written can be lost.
+    process.exitCode = code;
+  },
   (err: unknown) => {
     process.stderr.write(`restore failed: ${err instanceof Error ? err.message : String(err)}\n`);
-    process.exit(1);
+    process.exitCode = 1;
   },
 );
