@@ -13,17 +13,16 @@ replacing what is running is always a human decision.
 
 ## One-time setup
 
-### 1. Make the images pullable
+### 1. Images are already pullable
 
-After the first `release.yml` run, three packages appear at
-<https://github.com/iangcastill0?tab=packages>. Each is private by default — set
-`aegclouddfir/api`, `aegclouddfir/worker` and `aegclouddfir/web` to **public**
-(Package settings → Change visibility). The repository is already public and the
-images contain code, not secrets: every credential is read from `.env` on the
-server at runtime.
+Verified on 2026-08-18: `docker pull ghcr.io/iangcastill0/aegclouddfir/api:<tag>`
+succeeds from the server with no login, because the packages inherit this
+repository's public visibility. Nothing to do.
 
-Prefer to keep them private? Then run `docker login ghcr.io` on the server once
-with a read-only PAT (`read:packages`) instead.
+They contain code, not secrets — every credential is read from `.env` on the
+server at runtime. If you ever make the repository private, the packages follow,
+and the server will then need `docker login ghcr.io` once with a `read:packages`
+token.
 
 ### 2. Create the deploy key
 
