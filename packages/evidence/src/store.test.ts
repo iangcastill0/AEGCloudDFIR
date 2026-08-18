@@ -18,7 +18,7 @@ import { mockClient } from 'aws-sdk-client-mock';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { IntegrityError, KeyValidationError } from './errors.js';
 import { originalKey, quarantineKey, stagingKey } from './objectKeys.js';
-import { EvidenceObjectStore } from './store.js';
+import { EvidenceObjectStore, copyPartSize } from './store.js';
 
 const TENANT = '11111111-1111-4111-8111-111111111111';
 const OTHER_TENANT = '22222222-2222-4222-8222-222222222222';
@@ -554,16 +554,26 @@ describe('promoteToOriginal — objects above the 5 GiB single-part copy limit',
     });
   });
 
-  it('keeps the part count within the 10,000 limit by growing the part size', async () => {
-    // 8 TiB at a fixed 512 MiB part size would need 16,384 parts and be rejected.
-    const size = 8 * 1024 ** 4;
-    arrangeHeads(size);
-    arrangeMultipartOk();
-    await makeStore().promoteToOriginal(TENANT, srcKey, { sha256: HELLO_SHA, size });
+  // Asserted against the arithmetic, not through a mocked S3: an 8 TiB copy
+  // issues one mocked request per part — thousands of them — which passed
+  // locally and timed out at 5s on CI. The multipart wiring is covered by the
+  // 6 GiB cases above; this covers the sizing that keeps it legal.
+  it.each([
+    ['just over the single-part limit', 5 * 1024 ** 3 + 1],
+    ['6 GiB', 6 * 1024 ** 3],
+    ['8 TiB, which a fixed 512 MiB part could not do in 10,000 parts', 8 * 1024 ** 4],
+    ['5 TiB, the largest object S3 accepts', 5 * 1024 ** 4],
+  ])('keeps the part count within the 10,000 limit for %s', (_label, size) => {
+    const partSize = copyPartSize(size);
+    expect(Math.ceil(size / partSize)).toBeLessThanOrEqual(10_000);
+    // Never below the 5 MiB minimum S3 enforces for non-final parts.
+    expect(partSize).toBeGreaterThanOrEqual(5 * 1024 ** 2);
+  });
 
-    const calls = s3Mock.commandCalls(UploadPartCopyCommand);
-    expect(calls.length).toBeLessThanOrEqual(10_000);
-    expect(calls.length).toBeGreaterThan(0);
+  it('does not shrink the part size for objects that fit comfortably', () => {
+    // Growing only kicks in past 10,000 * 512 MiB; below that, keep the default
+    // so ordinary objects are not copied in needlessly large chunks.
+    expect(copyPartSize(6 * 1024 ** 3)).toBe(512 * 1024 ** 2);
   });
 
   it('aborts the upload when a part fails, so orphaned parts are not left billing', async () => {

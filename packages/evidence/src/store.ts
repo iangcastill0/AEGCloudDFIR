@@ -134,6 +134,18 @@ const MAX_COPY_PARTS = 10_000;
  * Originals are immutable: bytes are staged, verified, then promoted to a
  * content-addressed key; existing destination objects are never overwritten.
  */
+/**
+ * Part size for a server-side multipart copy.
+ *
+ * S3 allows at most 10,000 parts, so a fixed part size silently caps the object
+ * size it can copy; grow the part instead of failing partway through. Exported
+ * for testing: asserting this through a mocked S3 costs one mocked request per
+ * part, which for a multi-terabyte object is thousands of them.
+ */
+export function copyPartSize(size: number): number {
+  return Math.max(COPY_PART_BYTES, Math.ceil(size / MAX_COPY_PARTS));
+}
+
 export class EvidenceObjectStore {
   private readonly s3: S3Client;
   private readonly evidenceBucket: string;
@@ -532,9 +544,7 @@ export class EvidenceObjectStore {
       return;
     }
 
-    // Grow the part size for very large objects so the part count stays within
-    // the 10,000 limit instead of failing partway through.
-    const partSize = Math.max(COPY_PART_BYTES, Math.ceil(size / MAX_COPY_PARTS));
+    const partSize = copyPartSize(size);
 
     const created = await this.s3.send(
       new CreateMultipartUploadCommand({ Bucket: destBucket, Key: destKey }),
