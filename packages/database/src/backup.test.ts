@@ -82,9 +82,7 @@ describe('runBackup — success path', () => {
     );
 
     const puts = s3Mock.commandCalls(PutObjectCommand);
-    const manifestPut = puts.find((c) =>
-      String(c.args[0].input.Key).endsWith('.manifest.json'),
-    );
+    const manifestPut = puts.find((c) => String(c.args[0].input.Key).endsWith('.manifest.json'));
     expect(manifestPut).toBeDefined();
     expect(manifestPut!.args[0].input.ContentType).toBe('application/json');
 

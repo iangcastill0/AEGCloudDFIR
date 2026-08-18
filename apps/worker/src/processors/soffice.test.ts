@@ -110,10 +110,15 @@ describe('convertToPlainText', () => {
       writes: async (outdir) => writeFile(`${outdir}/input.pdf`, '%PDF-1.4'),
       pdfText: 'Board meeting agenda\nQ3 budget',
     });
-    const result = await convertToPlainText(Buffer.from('binary'), 'application/x-mspublisher', 'a.pub', {
-      ...OPTS,
-      spawnFn: spawn.fn,
-    });
+    const result = await convertToPlainText(
+      Buffer.from('binary'),
+      'application/x-mspublisher',
+      'a.pub',
+      {
+        ...OPTS,
+        spawnFn: spawn.fn,
+      },
+    );
     expect(result).toEqual({ ok: true, text: 'Board meeting agenda\nQ3 budget' });
   });
 
@@ -220,10 +225,15 @@ describe('convertToPlainText', () => {
 
   it('reports a missing binary rather than crashing the job', async () => {
     const spawn = fakeSpawn({ startError: new Error('spawn soffice ENOENT') });
-    const result = await convertToPlainText(Buffer.from('b'), 'application/x-mspublisher', 'a.pub', {
-      ...OPTS,
-      spawnFn: spawn.fn,
-    });
+    const result = await convertToPlainText(
+      Buffer.from('b'),
+      'application/x-mspublisher',
+      'a.pub',
+      {
+        ...OPTS,
+        spawnFn: spawn.fn,
+      },
+    );
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toMatch(/could not be started/);
   });
@@ -234,10 +244,15 @@ describe('convertToPlainText', () => {
       writes: async (o) => writeFile(`${o}/input.pdf`, '%PDF'),
       pdfText: '   \n\t ',
     });
-    const result = await convertToPlainText(Buffer.from('b'), 'application/x-mspublisher', 'a.pub', {
-      ...OPTS,
-      spawnFn: spawn.fn,
-    });
+    const result = await convertToPlainText(
+      Buffer.from('b'),
+      'application/x-mspublisher',
+      'a.pub',
+      {
+        ...OPTS,
+        spawnFn: spawn.fn,
+      },
+    );
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toMatch(/no extractable text/);
   });
@@ -247,11 +262,16 @@ describe('convertToPlainText', () => {
       writes: async (o) => writeFile(`${o}/input.pdf`, '%PDF'),
       pdfText: 'A'.repeat(5000),
     });
-    const result = await convertToPlainText(Buffer.from('b'), 'application/x-mspublisher', 'a.pub', {
-      ...OPTS,
-      maxTextBytes: 100,
-      spawnFn: spawn.fn,
-    });
+    const result = await convertToPlainText(
+      Buffer.from('b'),
+      'application/x-mspublisher',
+      'a.pub',
+      {
+        ...OPTS,
+        maxTextBytes: 100,
+        spawnFn: spawn.fn,
+      },
+    );
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.text.length).toBe(100);
   });

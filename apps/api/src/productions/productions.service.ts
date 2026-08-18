@@ -1262,7 +1262,6 @@ export class ProductionsService {
       const exceptionCounts: Record<string, number> = {};
       for (const group of exceptionGroups) exceptionCounts[group.code] = group._count._all;
 
-
       return ProductionsService.toRunDto(run, exceptionCounts);
     });
   }

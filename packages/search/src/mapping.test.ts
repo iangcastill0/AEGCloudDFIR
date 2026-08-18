@@ -168,19 +168,19 @@ describe('FieldRegistry', () => {
  * sorting". Indexing looked healthy throughout.
  */
 describe('EVIDENCE_MAPPING — fields that must never be dynamically typed', () => {
-  const props = (EVIDENCE_MAPPING as unknown as {
-    mappings: { properties: Record<string, { type?: string }> };
-  }).mappings.properties;
+  const props = (
+    EVIDENCE_MAPPING as unknown as {
+      mappings: { properties: Record<string, { type?: string }> };
+    }
+  ).mappings.properties;
 
-  it.each([
-    'evidenceItemId',
-    'tenantId',
-    'collectionId',
-    'custodianId',
-  ])('%s is a keyword, so it can be sorted and aggregated', (field) => {
-    expect(props[field]).toBeDefined();
-    expect(props[field]?.type).toBe('keyword');
-  });
+  it.each(['evidenceItemId', 'tenantId', 'collectionId', 'custodianId'])(
+    '%s is a keyword, so it can be sorted and aggregated',
+    (field) => {
+      expect(props[field]).toBeDefined();
+      expect(props[field]?.type).toBe('keyword');
+    },
+  );
 
   it('the sort key compile() uses is sortable', () => {
     // compile.ts sorts on evidenceItemId as its stable tiebreaker; a text field

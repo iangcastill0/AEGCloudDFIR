@@ -88,7 +88,11 @@ export async function processExtract(
     // Encrypted documents are not retried: LibreOffice cannot open them either
     // without the password, so a second attempt only burns a process spawn and
     // muddies the exception with a misleading second failure.
-    if (!encrypted && ctx.config.CDFIR_SOFFICE_FALLBACK && isConvertible(item.mimeType, item.name)) {
+    if (
+      !encrypted &&
+      ctx.config.CDFIR_SOFFICE_FALLBACK &&
+      isConvertible(item.mimeType, item.name)
+    ) {
       const converted = await convertToPlainText(input, item.mimeType, item.name, {
         timeoutMs: ctx.config.CDFIR_SOFFICE_TIMEOUT_MS,
         maxTextBytes: MAX_TEXT_BYTES,

@@ -35,10 +35,7 @@ export class ExportsController {
 
   @Post()
   @HttpCode(200)
-  async create(
-    @Body() body: unknown,
-    @Req() request: FastifyRequest,
-  ): Promise<CreateExportResult> {
+  async create(@Body() body: unknown, @Req() request: FastifyRequest): Promise<CreateExportResult> {
     return this.exports.create(requireAuth(request), body, request);
   }
 

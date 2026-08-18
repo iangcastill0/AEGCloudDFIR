@@ -1,9 +1,18 @@
 import { createHash } from 'node:crypto';
 import { PassThrough, Readable } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
-import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { ProductionStatus, TenantRole } from '@aeg-clouddfir/database';
-import { exceptionListResponse, productionDetail, productionRunStatusResponse } from '@aeg-clouddfir/contracts';
+import {
+  exceptionListResponse,
+  productionDetail,
+  productionRunStatusResponse,
+} from '@aeg-clouddfir/contracts';
 import { ProductionsService } from './productions.service.js';
 import { validateProductionSet, type ProductionValidationItem } from './production.validator.js';
 import type { SelectionService } from '../search/selection.service.js';
@@ -428,9 +437,9 @@ describe('ProductionsService.downloadRun', () => {
     async (status) => {
       // Half a production set is worse than none: the recipient cannot tell.
       const { service } = withRun({ ...readyRun, status });
-      await expect(
-        service.downloadRun(auth, PRODUCTION_ID, RUN_ID, fakeRequest()),
-      ).rejects.toThrow(ConflictException);
+      await expect(service.downloadRun(auth, PRODUCTION_ID, RUN_ID, fakeRequest())).rejects.toThrow(
+        ConflictException,
+      );
     },
   );
 
@@ -449,9 +458,9 @@ describe('ProductionsService.downloadRun', () => {
     // an empty file list would read as a legitimately empty production.
     const store = { listUnder: vi.fn(async () => []), presignGet: vi.fn() };
     const { service } = withRun(readyRun, store);
-    await expect(
-      service.downloadRun(auth, PRODUCTION_ID, RUN_ID, fakeRequest()),
-    ).rejects.toThrow(ConflictException);
+    await expect(service.downloadRun(auth, PRODUCTION_ID, RUN_ID, fakeRequest())).rejects.toThrow(
+      ConflictException,
+    );
   });
 
   it('404s for a run belonging to another production or tenant', async () => {
@@ -641,9 +650,9 @@ describe('ProductionsService run archive', () => {
       const chunks: Buffer[] = [];
       sink.on('data', (c: Buffer) => chunks.push(c));
 
-      await expect(
-        service.streamRunArchive(auth, plan, sink, fakeRequest()),
-      ).rejects.toThrow(/storage read failed/);
+      await expect(service.streamRunArchive(auth, plan, sink, fakeRequest())).rejects.toThrow(
+        /storage read failed/,
+      );
       // No end-of-central-directory record: unzip refuses the file outright.
       expect(Buffer.concat(chunks).includes(Buffer.from([0x50, 0x4b, 0x05, 0x06]))).toBe(false);
     });
@@ -688,7 +697,6 @@ describe('ProductionsService run archive', () => {
     });
   });
 });
-
 
 describe('ProductionsService.exceptions — matches the shared exception contract', () => {
   function excService(runs: { id: string }[], rows: Record<string, unknown>[]) {
@@ -813,9 +821,10 @@ describe('ProductionsService.get — matches productionDetail', () => {
   };
 
   it('parses against productionDetail, runs included', async () => {
-    const detail = await detailService([runRow], [
-      { productionRunId: RUN_ID, code: 'redaction_overlap', _count: { _all: 2 } },
-    ]).get(auth, PRODUCTION_ID);
+    const detail = await detailService(
+      [runRow],
+      [{ productionRunId: RUN_ID, code: 'redaction_overlap', _count: { _all: 2 } }],
+    ).get(auth, PRODUCTION_ID);
 
     const parsed = productionDetail.safeParse(detail);
     expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
@@ -829,10 +838,13 @@ describe('ProductionsService.get — matches productionDetail', () => {
 
   it('returns every run field, with exception counts attributed to the right run', async () => {
     const second = { ...runRow, id: RUN_ID_2, runNumber: 2, status: 'queued' };
-    const detail = await detailService([runRow, second], [
-      { productionRunId: RUN_ID, code: 'redaction_overlap', _count: { _all: 2 } },
-      { productionRunId: RUN_ID_2, code: 'missing_native', _count: { _all: 1 } },
-    ]).get(auth, PRODUCTION_ID);
+    const detail = await detailService(
+      [runRow, second],
+      [
+        { productionRunId: RUN_ID, code: 'redaction_overlap', _count: { _all: 2 } },
+        { productionRunId: RUN_ID_2, code: 'missing_native', _count: { _all: 1 } },
+      ],
+    ).get(auth, PRODUCTION_ID);
 
     expect(detail.runs[0]).toMatchObject({
       batesStart: 'ABC000001',

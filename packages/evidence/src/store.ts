@@ -238,13 +238,7 @@ export class EvidenceObjectStore {
       });
     }
 
-    await this.copySized(
-      this.evidenceBucket,
-      sourceStagingKey,
-      destBucket,
-      destKey,
-      expected.size,
-    );
+    await this.copySized(this.evidenceBucket, sourceStagingKey, destBucket, destKey, expected.size);
 
     // Verify the copy landed with the right size before deleting staging.
     const copied = await this.headOrNull(destBucket, destKey);
@@ -429,9 +423,7 @@ export class EvidenceObjectStore {
    * generic failure.
    */
   async checkReachable(): Promise<void> {
-    await this.s3.send(
-      new ListObjectsV2Command({ Bucket: this.evidenceBucket, MaxKeys: 1 }),
-    );
+    await this.s3.send(new ListObjectsV2Command({ Bucket: this.evidenceBucket, MaxKeys: 1 }));
   }
 
   /**

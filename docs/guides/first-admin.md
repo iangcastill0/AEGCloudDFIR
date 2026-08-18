@@ -78,8 +78,8 @@ and exits **3** with an explanation. That is the expected first result.
 
 Have them open `https://aegclouddfir.com` and complete the Authentik login.
 
-They will land on an error along the lines of *no active membership in this
-tenant*. **That is the account being created, not a failure** — the login
+They will land on an error along the lines of _no active membership in this
+tenant_. **That is the account being created, not a failure** — the login
 succeeded, and the app now has a user row with the right subject.
 
 ## 4. Re-run the same command
@@ -99,9 +99,9 @@ cleanup between passes.
 
 ## Options
 
-| Flag | Meaning |
-| --- | --- |
-| `--roles a,b` | Roles to grant. Default `org_admin`. One or more of `org_admin`, `case_manager`, `reviewer`, `read_only`, `production_manager`, `auditor`. |
+| Flag               | Meaning                                                                                                                                                     |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--roles a,b`      | Roles to grant. Default `org_admin`. One or more of `org_admin`, `case_manager`, `reviewer`, `read_only`, `production_manager`, `auditor`.                  |
 | `--platform-admin` | Also set `isPlatformAdmin`. Deployment-operator flag only: it grants **no** access to any tenant's evidence, by design. Keep it separate from tenant roles. |
 
 ## Roles it will not touch

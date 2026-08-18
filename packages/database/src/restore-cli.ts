@@ -83,9 +83,7 @@ async function list(s3: S3Client, bucket: string): Promise<number> {
 
 async function fetchVerified(s3: S3Client, bucket: string, key: string): Promise<number> {
   const manifestKey = `${key}.manifest.json`;
-  const manifestRes = await s3.send(
-    new GetObjectCommand({ Bucket: bucket, Key: manifestKey }),
-  );
+  const manifestRes = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: manifestKey }));
   const manifest = JSON.parse((await readAll(manifestRes.Body)).toString('utf8')) as BackupManifest;
 
   process.stderr.write(

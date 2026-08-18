@@ -491,9 +491,7 @@ describe('CollectionsService.manifestDownload', () => {
 
   it('404s for a collection in another tenant', async () => {
     const { service } = withCollection(null);
-    await expect(
-      service.manifestDownload(auth, COLLECTION_ID, fakeRequest()),
-    ).rejects.toThrow();
+    await expect(service.manifestDownload(auth, COLLECTION_ID, fakeRequest())).rejects.toThrow();
   });
 
   it('still returns the manifest when the completeness report is missing', async () => {
@@ -670,7 +668,9 @@ describe('CollectionsService.action — retry covers processing exceptions', () 
 
   it('records both counts in the audit chain', async () => {
     const { service, audit } = retryService({
-      failedFetches: [{ id: 'ci-1', custodianId: 'c1', source: 'email', providerItemId: 'p1', attempts: 1 }],
+      failedFetches: [
+        { id: 'ci-1', custodianId: 'c1', source: 'email', providerItemId: 'p1', attempts: 1 },
+      ],
       exceptedItems: [{ id: EXCEPTED_ID, version: 1 }],
     });
     await service.action(auth, COLLECTION_ID, 'retry', fakeRequest());

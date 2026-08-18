@@ -126,7 +126,6 @@ export const collectionListResponse = paginated(collectionSummary);
 
 export const createdIdResponse = z.object({ id: z.string() });
 
-
 // --- Search / evidence ---
 
 export const searchHit = evidenceSummary.extend({
@@ -263,8 +262,6 @@ export const tagListResponse = paginated(tagResponse);
 export const savedSearchListResponse = paginated(savedSearchResponse);
 export const caseListResponse = paginated(caseResponse);
 
-
-
 // --- Exports / productions ---
 
 export const exportListResponse = paginated(exportStatusResponse);
@@ -277,7 +274,6 @@ export const productionSummary = z.object({
   latestRunStatus: z.string().nullable().default(null),
 });
 export const productionListResponse = paginated(productionSummary);
-
 
 export const submitProductionResponse = z.object({ runId: z.string() });
 

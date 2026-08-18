@@ -18,11 +18,11 @@ now, at bucket-creation time.
 This matters for how the platform describes itself. It probes the bucket and
 reports only what it finds:
 
-| Bucket state | What the platform reports |
-| --- | --- |
-| Versioning + Object Lock | "WORM retention applies" |
-| Versioning only | "protected by application logic and IAM policy only (no WORM guarantee)" |
-| Neither | "protected by application logic and IAM policy only (no WORM guarantee)" |
+| Bucket state             | What the platform reports                                                |
+| ------------------------ | ------------------------------------------------------------------------ |
+| Versioning + Object Lock | "WORM retention applies"                                                 |
+| Versioning only          | "protected by application logic and IAM policy only (no WORM guarantee)" |
+| Neither                  | "protected by application logic and IAM policy only (no WORM guarantee)" |
 
 It will never claim WORM that the bucket cannot actually provide. So if you want
 the stronger statement in your custody documentation, create the bucket with
@@ -45,10 +45,10 @@ set the default retention period deliberately — not to a placeholder.
 
 In the Wasabi console → **Buckets** → **Create Bucket**:
 
-| Bucket | Purpose | Suggested name |
-| --- | --- | --- |
-| Evidence | originals, derivatives, exports, productions | `aeg-clouddfir-evidence` |
-| Quarantine | files ClamAV flagged as malware | `aeg-clouddfir-quarantine` |
+| Bucket     | Purpose                                      | Suggested name             |
+| ---------- | -------------------------------------------- | -------------------------- |
+| Evidence   | originals, derivatives, exports, productions | `aeg-clouddfir-evidence`   |
+| Quarantine | files ClamAV flagged as malware              | `aeg-clouddfir-quarantine` |
 
 Bucket names are globally unique across all Wasabi customers, so add a suffix if
 these are taken. Both must be in the **same region**.
@@ -60,7 +60,7 @@ For the **evidence** bucket:
 - **Object Lock: enable now** if you want WORM (see above). Enabling it forces
   versioning on.
 - **Default Object Retention: enable it, with a real period.** This is not
-  optional decoration. Enabling Object Lock only makes retention *possible* —
+  optional decoration. Enabling Object Lock only makes retention _possible_ —
   objects acquire it from a bucket default or from a per-object value set at
   upload, and this application never sets per-object retention (it holds no
   `s3:PutObjectRetention` grant, deliberately). With Object Lock on and no
@@ -233,12 +233,12 @@ needs `s3:PutObjectRetention` added consciously.
 
 ### Quarantine bucket settings
 
-| Setting | Value | Why |
-| --- | --- | --- |
-| Object Lock | **off** | You must be able to purge malware. Locking it removes that option permanently. |
-| Versioning | off (optional) | Keys are content-addressed by SHA-256, so an "overwrite" is byte-identical and version history carries no information. |
-| CORS | **none** | `presignGet` always signs against the evidence bucket, so a quarantined object can never be handed to a browser. Adding CORS here would create reachability the application does not need. |
-| Public access | blocked (default) | — |
+| Setting       | Value             | Why                                                                                                                                                                                        |
+| ------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Object Lock   | **off**           | You must be able to purge malware. Locking it removes that option permanently.                                                                                                             |
+| Versioning    | off (optional)    | Keys are content-addressed by SHA-256, so an "overwrite" is byte-identical and version history carries no information.                                                                     |
+| CORS          | **none**          | `presignGet` always signs against the evidence bucket, so a quarantined object can never be handed to a browser. Adding CORS here would create reachability the application does not need. |
+| Public access | blocked (default) | —                                                                                                                                                                                          |
 
 ### Objects over 5 GiB
 
@@ -281,7 +281,7 @@ The exposure is narrower than `*` suggests. A presigned URL is a **bearer
 credential**: anyone holding it can fetch the object with curl, no browser and no
 CORS involved. CORS governs only whether JavaScript on another origin may read
 the response, so `*` does not widen who can reach evidence — it means a page on
-another origin could read a presigned URL's contents *if it already had the URL*,
+another origin could read a presigned URL's contents _if it already had the URL_,
 and holding the URL was already sufficient.
 
 The controls that actually bound this, all already in place:

@@ -184,7 +184,8 @@ async function main(): Promise<number> {
     s3,
     evidenceBucket,
     quarantineBucket,
-    presignTtlSeconds: Number.isInteger(presignTtlSeconds) && presignTtlSeconds > 0 ? presignTtlSeconds : 300,
+    presignTtlSeconds:
+      Number.isInteger(presignTtlSeconds) && presignTtlSeconds > 0 ? presignTtlSeconds : 300,
   });
   try {
     const p = await store.detectBucketProtection();
@@ -232,12 +233,18 @@ async function main(): Promise<number> {
           : `SHA-256 MISMATCH: wrote ${expected} read ${actual}. Something is transforming objects (server-side compression or encryption?). Do not store evidence here until resolved.`,
       );
 
-      const url = await store.presignGet('00000000-0000-4000-8000-000000000000', key, {
-        ttlSeconds: 60,
-      }).catch(() => undefined);
+      const url = await store
+        .presignGet('00000000-0000-4000-8000-000000000000', key, {
+          ttlSeconds: 60,
+        })
+        .catch(() => undefined);
       if (url === undefined) {
         // presignGet validates key shape; a scratch key is not tenant-scoped.
-        record('presigned URL', 'skip', 'scratch key is not tenant-scoped, so the store declined to presign it (key validation working as intended)');
+        record(
+          'presigned URL',
+          'skip',
+          'scratch key is not tenant-scoped, so the store declined to presign it (key validation working as intended)',
+        );
       } else {
         const res = await fetch(url);
         record(
@@ -287,7 +294,9 @@ main().then(
   (code) => process.exit(code),
   (err: unknown) => {
     // Never interpolate config into output: the endpoint is fine, the secret is not.
-    process.stderr.write(`storage check failed: ${err instanceof Error ? err.message : String(err)}\n`);
+    process.stderr.write(
+      `storage check failed: ${err instanceof Error ? err.message : String(err)}\n`,
+    );
     process.exit(1);
   },
 );

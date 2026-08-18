@@ -54,9 +54,7 @@ const CONVERTIBLE_EXTENSIONS = new Set([
   'sdc',
 ]);
 
-export type SofficeResult =
-  | { ok: true; text: string }
-  | { ok: false; reason: string };
+export type SofficeResult = { ok: true; text: string } | { ok: false; reason: string };
 
 export interface SofficeOptions {
   timeoutMs: number;
@@ -84,7 +82,10 @@ export function isConvertible(mimeType: string, filename: string): boolean {
 function extensionOf(filename: string): string {
   const dot = filename.lastIndexOf('.');
   if (dot < 0 || dot === filename.length - 1) return '';
-  return filename.slice(dot + 1).toLowerCase().replace(/[^a-z0-9]/g, '');
+  return filename
+    .slice(dot + 1)
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
 }
 
 /** Pick the extension soffice needs to choose an import filter. */

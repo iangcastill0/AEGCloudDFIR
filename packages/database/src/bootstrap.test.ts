@@ -16,9 +16,21 @@ const USER_ID = '33333333-3333-4333-8333-333333333333';
 
 interface FakeState {
   tenants: { id: string; slug: string; name: string; status: string }[];
-  users: { id: string; email: string; isPlatformAdmin: boolean; displayName: string; createdAt: Date }[];
+  users: {
+    id: string;
+    email: string;
+    isPlatformAdmin: boolean;
+    displayName: string;
+    createdAt: Date;
+  }[];
   memberships: { id: string; tenantId: string; userId: string; status: string }[];
-  roleAssignments: { id: string; tenantId: string; membershipId: string; role: string; source: string }[];
+  roleAssignments: {
+    id: string;
+    tenantId: string;
+    membershipId: string;
+    role: string;
+    source: string;
+  }[];
   auditEvents: { tenantId: string; action: string; targetId: string; summary: unknown }[];
   /** set_config calls, in order: ['app.platform=true', 'app.tenant_id=<id>'] */
   contexts: string[];
@@ -359,8 +371,20 @@ describe('bootstrapOrgAdmin — granting', () => {
   it('refuses when two identities share the email', async () => {
     const { prisma } = makeFake({
       users: [
-        { id: 'u-1', email: BASE.email, isPlatformAdmin: false, displayName: 'a', createdAt: new Date(1) },
-        { id: 'u-2', email: BASE.email, isPlatformAdmin: false, displayName: 'b', createdAt: new Date(2) },
+        {
+          id: 'u-1',
+          email: BASE.email,
+          isPlatformAdmin: false,
+          displayName: 'a',
+          createdAt: new Date(1),
+        },
+        {
+          id: 'u-2',
+          email: BASE.email,
+          isPlatformAdmin: false,
+          displayName: 'b',
+          createdAt: new Date(2),
+        },
       ],
     });
     await expect(bootstrapOrgAdmin(prisma, BASE)).rejects.toThrow(/2 users carry the email/);

@@ -69,9 +69,9 @@ page instead of failing loudly.
 
 **Add these A records** (Type `A`, TTL 600) — all answer `38.248.7.156`:
 
-| Host    | Serves                                                     |
-| ------- | ---------------------------------------------------------- |
-| `app`   | the review application (Next.js)                           |
+| Host    | Serves                                                      |
+| ------- | ----------------------------------------------------------- |
+| `app`   | the review application (Next.js)                            |
 | `api`   | the API, including the OIDC login/callback endpoints        |
 | `auth`  | Authentik — the OIDC issuer; this hostname is baked into    |
 |         | `CDFIR_OIDC_ISSUER` and cannot be renamed without reissuing |
@@ -271,7 +271,7 @@ being told one already covers a subset; all six names end up on one certificate
 under `/etc/letsencrypt/live/app.aegclouddfir.com/`.
 
 > **Do not re-copy `aegclouddfir.conf` after certbot has run.** certbot edits
-> the *installed* file in place to add the certificate paths, so overwriting it
+> the _installed_ file in place to add the certificate paths, so overwriting it
 > with the repo template silently removes TLS. The repo copy is the pre-certbot
 > starting point only. `aegclouddfir-apex.conf` carries its own hand-written 443
 > blocks pointing at the same certificate, so it is safe to re-copy — but verify

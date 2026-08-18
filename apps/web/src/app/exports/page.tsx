@@ -91,10 +91,7 @@ export default function ExportsPage() {
                     <td>{formatDateTime(e.verifiedAt)}</td>
                     <td>
                       {e.status === 'ready' ? (
-                        <ExportDownload
-                          exportId={e.id}
-                          expiresAt={e.downloadExpiresAt}
-                        />
+                        <ExportDownload exportId={e.id} expiresAt={e.downloadExpiresAt} />
                       ) : (
                         '—'
                       )}
@@ -274,13 +271,7 @@ function CreateExportDialog({
  * make the download verifiable. Hiding them behind an automatic save would bury
  * the one artifact a recipient needs to check the contents against.
  */
-function ExportDownload({
-  exportId,
-  expiresAt,
-}: {
-  exportId: string;
-  expiresAt: string | null;
-}) {
+function ExportDownload({ exportId, expiresAt }: { exportId: string; expiresAt: string | null }) {
   const download = useExportDownload();
   const links = download.data;
 

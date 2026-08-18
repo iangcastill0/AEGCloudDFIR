@@ -427,7 +427,10 @@ export class CasesService {
 
       // Count per tag so a reviewer can see how much of the matter each covers;
       // a tag on one document is a very different production from one on 500.
-      const byTag = new Map<string, { id: string; name: string; color: string; itemCount: number }>();
+      const byTag = new Map<
+        string,
+        { id: string; name: string; color: string; itemCount: number }
+      >();
       for (const a of assignments) {
         const existing = byTag.get(a.tagId);
         if (existing) existing.itemCount += 1;

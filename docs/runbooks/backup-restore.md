@@ -16,24 +16,24 @@ Two details the script exists to get right. Both were found by testing a real
 restore, and both produce a backup that looks successful while being unusable:
 
 - **pg_dump must run as a superuser.** Every tenant table carries
-  `FORCE ROW LEVEL SECURITY`, which applies to the table *owner* too. Dumping as
-  `cdfir_migrator` fails with *"query would be affected by row-level security
-  policy"* and yields a dump whose table of contents is complete while the data
+  `FORCE ROW LEVEL SECURITY`, which applies to the table _owner_ too. Dumping as
+  `cdfir_migrator` fails with _"query would be affected by row-level security
+  policy"_ and yields a dump whose table of contents is complete while the data
   is truncated — `pg_restore --list` cannot detect this.
 - **pg_dump's exit code must be checked before uploading.** A shell pipeline
-  reports the *last* command's status, so `pg_dump | uploader` returns success
+  reports the _last_ command's status, so `pg_dump | uploader` returns success
   even when pg_dump died, uploading a partial dump that then verifies against
   itself. The script writes to a temp file and checks the exit code first.
 
 ## What to back up
 
-| Store        | Method                                                              | Frequency |
-| ------------ | ------------------------------------------------------------------- | --------- |
-| PostgreSQL   | `scripts/backup-postgres.sh` (pg_dump -Fc → Wasabi, verified)       | nightly   |
+| Store        | Method                                                              | Frequency  |
+| ------------ | ------------------------------------------------------------------- | ---------- |
+| PostgreSQL   | `scripts/backup-postgres.sh` (pg_dump -Fc → Wasabi, verified)       | nightly    |
 | Object store | Wasabi versioning + Object Lock; content-addressed, nothing to dump | continuous |
-| OpenSearch   | none required — rebuildable from PostgreSQL + object store          | —         |
-| Redis        | none required — transient job state (the outbox re-dispatches)      | —         |
-| **KEK**      | **`CDFIR_KEK_LOCAL_MASTER_KEY` — to a password manager, by hand**   | on change |
+| OpenSearch   | none required — rebuildable from PostgreSQL + object store          | —          |
+| Redis        | none required — transient job state (the outbox re-dispatches)      | —          |
+| **KEK**      | **`CDFIR_KEK_LOCAL_MASTER_KEY` — to a password manager, by hand**   | on change  |
 
 ### The KEK is not in the backup, and must not be
 

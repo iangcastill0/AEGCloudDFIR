@@ -142,8 +142,6 @@ describe('CasesService case-restricted visibility', () => {
   });
 });
 
-
-
 /**
  * These validate the service's responses against the SAME schemas the web
  * client parses with. Without that, a shape mismatch compiles cleanly on both
@@ -227,9 +225,10 @@ describe('CasesService notes — matches the client contract', () => {
   };
 
   it('parses against caseNoteListResponse', async () => {
-    const { service } = notesService([noteRow], [
-      { id: 'u1', email: 'a@test.local', displayName: 'A Reviewer' },
-    ]);
+    const { service } = notesService(
+      [noteRow],
+      [{ id: 'u1', email: 'a@test.local', displayName: 'A Reviewer' }],
+    );
     const page = await service.notes(auth, CASE_ID, { limit: 10 });
     const parsed = caseNoteListResponse.safeParse(page);
     expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
@@ -237,9 +236,10 @@ describe('CasesService notes — matches the client contract', () => {
   });
 
   it('falls back to the email when a user has no display name', async () => {
-    const { service } = notesService([noteRow], [
-      { id: 'u1', email: 'a@test.local', displayName: '' },
-    ]);
+    const { service } = notesService(
+      [noteRow],
+      [{ id: 'u1', email: 'a@test.local', displayName: '' }],
+    );
     const page = await service.notes(auth, CASE_ID, { limit: 10 });
     expect(page.items[0]?.authorDisplay).toBe('a@test.local');
   });

@@ -22,7 +22,11 @@ import { SessionGuard } from '../auth/guards/session.guard.js';
 import { TenantGuard } from '../auth/guards/tenant.guard.js';
 import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { RequireRoles } from '../auth/guards/require-roles.decorator.js';
-import { ProductionsService, type ProductionDto, type ProductionRunDto } from './productions.service.js';
+import {
+  ProductionsService,
+  type ProductionDto,
+  type ProductionRunDto,
+} from './productions.service.js';
 import type { ValidationFlag } from './production.validator.js';
 
 function requireAuth(request: FastifyRequest): AuthContext {

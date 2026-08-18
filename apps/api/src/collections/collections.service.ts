@@ -583,7 +583,10 @@ export class CollectionsService {
             itemRef: row.providerItemId !== '' ? row.providerItemId : name,
             evidenceItemId:
               typeof detail.evidenceItemId === 'string' ? detail.evidenceItemId : null,
-            mimeType: typeof detail.mimeType === 'string' && detail.mimeType !== '' ? detail.mimeType : null,
+            mimeType:
+              typeof detail.mimeType === 'string' && detail.mimeType !== ''
+                ? detail.mimeType
+                : null,
             sizeBytes: typeof detail.sizeBytes === 'number' ? detail.sizeBytes : null,
             occurredAt: row.occurredAt.toISOString(),
           };
