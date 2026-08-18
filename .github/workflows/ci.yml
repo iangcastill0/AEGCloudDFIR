@@ -30,6 +30,8 @@ jobs:
         run: pnpm exec tsc -p scripts/tsconfig.json
       - name: Validate compose file
         run: docker compose -f infra/compose/docker-compose.yml config -q
+      - name: Shellcheck ops scripts
+        run: shellcheck scripts/*.sh
 
   migrations:
     name: Migrations apply to an empty database

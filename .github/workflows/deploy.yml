@@ -1,0 +1,124 @@
+# Deploys a published image tag to production. Manual on purpose: it never runs
+# itself. Green tests publish images (release.yml); a human decides when a
+# forensic archive holding real evidence gets replaced.
+#
+# The `production` environment is where that gate is enforced. Add yourself as a
+# required reviewer under Settings → Environments → production and GitHub will
+# hold this job until you approve it, and record who approved each deploy.
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Commit, branch or tag to deploy (must have passed CI)'
+        required: true
+        default: main
+      dry_run:
+        description: 'Print what would happen without changing anything'
+        type: boolean
+        default: false
+
+concurrency:
+  # Never two deploys at once: they would fight over .env and the containers.
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to aegclouddfir.com
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+
+      - name: Resolve the commit and its image tag
+        id: resolve
+        run: |
+          sha="$(git rev-parse HEAD)"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "tag=sha-$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Refuse to deploy a commit that did not pass CI
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # The images only exist for green commits, so a red one would fail at
+          # the pull anyway — but failing here says WHY, before touching prod.
+          conclusion="$(gh api \
+            "repos/${{ github.repository }}/actions/runs?head_sha=${{ steps.resolve.outputs.sha }}&status=completed" \
+            --jq '[.workflow_runs[] | select(.name == "CI")] | first | .conclusion // "none"')"
+          echo "CI for ${{ steps.resolve.outputs.sha }}: $conclusion"
+          if [ "$conclusion" != "success" ]; then
+            echo "::error::CI conclusion for this commit is '$conclusion', not success"
+            exit 1
+          fi
+
+      - name: Authorize SSH
+        env:
+          # Private key, so it must be a secret. Written with printf, never
+          # echoed, and the file is 0600.
+          DEPLOY_KEY: ${{ secrets.CDFIR_DEPLOY_SSH_KEY }}
+          # Public host key. A variable, not a secret — but pinned rather than
+          # accepted on first use, so a redirected DNS record cannot collect the
+          # deploy key.
+          KNOWN_HOSTS: ${{ vars.CDFIR_SSH_KNOWN_HOSTS }}
+        run: |
+          if [ -z "$DEPLOY_KEY" ] || [ -z "$KNOWN_HOSTS" ]; then
+            echo "::error::set the CDFIR_DEPLOY_SSH_KEY secret and CDFIR_SSH_KNOWN_HOSTS variable (see docs/runbooks/deploy.md)"
+            exit 1
+          fi
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Deploy
+        env:
+          TARGET: ${{ vars.CDFIR_DEPLOY_TARGET }}
+          REPO_PATH: ${{ vars.CDFIR_DEPLOY_PATH || '/var/www/AEGCloudDFIR' }}
+          SHA: ${{ steps.resolve.outputs.sha }}
+          TAG: ${{ steps.resolve.outputs.tag }}
+          DRY: ${{ inputs.dry_run }}
+        run: |
+          if [ -z "$TARGET" ]; then
+            echo "::error::set the CDFIR_DEPLOY_TARGET variable (e.g. ian@38.248.7.156)"
+            exit 1
+          fi
+          args=""
+          [ "$DRY" = "true" ] && args="--dry-run"
+          # Move the checkout to the deployed commit so compose file, deploy
+          # script and images all describe the same revision. --hard discards
+          # nothing that matters: .env and the compose .env symlink are ignored.
+          ssh -i ~/.ssh/id_deploy -o BatchMode=yes "$TARGET" \
+            "set -euo pipefail
+             cd '$REPO_PATH'
+             git fetch --prune --quiet origin
+             git reset --hard --quiet '$SHA'
+             ./scripts/deploy.sh '$TAG' $args"
+
+      - name: Confirm the site answers from outside
+        if: ${{ !inputs.dry_run }}
+        run: |
+          # The script already checked from inside the host; this proves nginx
+          # and TLS in front of it are also serving the new version.
+          code="$(curl -s -o /dev/null -m 20 -w '%{http_code}' https://app.aegclouddfir.com/)"
+          echo "app.aegclouddfir.com: $code"
+          [ "$code" = "200" ] || { echo "::error::public site returned $code"; exit 1; }
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Deploy ${{ job.status }}"
+            echo
+            echo "- commit: \`${{ steps.resolve.outputs.sha }}\`"
+            echo "- image tag: \`${{ steps.resolve.outputs.tag }}\`"
+            echo "- dry run: ${{ inputs.dry_run }}"
+          } >> "$GITHUB_STEP_SUMMARY"

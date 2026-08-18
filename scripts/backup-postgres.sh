@@ -28,7 +28,10 @@ if [ ! -f "$ENV_FILE" ]; then
   echo "error: $ENV_FILE not found (run from the repo root)" >&2
   exit 2
 fi
-set -a; . "$ENV_FILE"; set +a
+set -a
+# shellcheck source=/dev/null  # runtime path; nothing to analyse statically
+. "$ENV_FILE"
+set +a
 
 : "${CDFIR_LOCAL_PG_SUPER_PASSWORD:?CDFIR_LOCAL_PG_SUPER_PASSWORD must be set (needed to bypass FORCE RLS)}"
 : "${CDFIR_BACKUP_S3_BUCKET:?CDFIR_BACKUP_S3_BUCKET must be set}"

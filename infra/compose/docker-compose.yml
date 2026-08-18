@@ -16,6 +16,11 @@
 # password becomes changeme-local-only. Deployments symlink .env into this
 # directory so either invocation works.
 
+# api/web/worker carry BOTH `image:` and `build:`. Locally, compose builds and
+# tags with that name. In production the deploy pulls the tag CI published and
+# never builds, which is why the server no longer needs a build cache. The tag
+# lives in .env as CDFIR_IMAGE_TAG so a later plain `up -d` redeploys the same
+# images rather than silently falling back to something else.
 name: cdfir
 
 services:
@@ -216,6 +221,7 @@ services:
         condition: service_healthy
 
   api:
+    image: ghcr.io/iangcastill0/aegclouddfir/api:${CDFIR_IMAGE_TAG:-dev}
     build:
       context: ../..
       dockerfile: infra/docker/api.Dockerfile
@@ -248,6 +254,7 @@ services:
     profiles: ['app']
 
   worker:
+    image: ghcr.io/iangcastill0/aegclouddfir/worker:${CDFIR_IMAGE_TAG:-dev}
     build:
       context: ../..
       dockerfile: infra/docker/worker.Dockerfile
@@ -281,6 +288,7 @@ services:
     profiles: ['app']
 
   web:
+    image: ghcr.io/iangcastill0/aegclouddfir/web:${CDFIR_IMAGE_TAG:-dev}
     build:
       context: ../..
       dockerfile: infra/docker/web.Dockerfile
