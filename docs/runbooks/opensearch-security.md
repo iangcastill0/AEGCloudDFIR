@@ -115,9 +115,9 @@ curl -s -o /dev/null -w 'other indices: %{http_code}\n' \
   -u "cdfir_app:$APP_PW" "http://127.0.0.1:59200/_cat/indices"
 ```
 
-Then search for something in the web app. Search returning results is the only
-proof that matters; the api's `/readyz` does **not** probe OpenSearch, so it will
-report `ok` even if every search is failing.
+Then search for something in the web app. `/readyz` now probes search too, so
+`{"search":"ok"}` there means the api can authenticate and read its own index —
+but a real query through the UI is still the proof that the whole path works.
 
 ## If search breaks
 

@@ -116,6 +116,18 @@ describe('evaluateReadyz', () => {
     expect(r.detail).toContain('objectStorage');
   });
 
+  it('fails when search is the broken dependency', () => {
+    // Search was added to readyz precisely so this alerts. The monitor needs no
+    // change to notice — it fails on ANY dependency that is not ok — and this
+    // pins that, so a future edit cannot quietly narrow it to database+storage.
+    const body =
+      '{"status":"degraded","checks":{"database":"ok","objectStorage":"ok","search":"unreachable (AuthenticationException)"}}';
+    const r = evaluateReadyz(200, body);
+    expect(r.status).toBe('fail');
+    expect(r.detail).toContain('search');
+    expect(r.detail).toContain('AuthenticationException');
+  });
+
   it('fails on a non-200, including nothing at all', () => {
     expect(evaluateReadyz(503, '').status).toBe('fail');
     expect(evaluateReadyz(0, '').status).toBe('fail');

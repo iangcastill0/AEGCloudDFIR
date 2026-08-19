@@ -43,6 +43,7 @@ export interface SearchAdapter {
     loader: AsyncIterable<EvidenceSearchDoc[]>,
   ): Promise<{ indexName: string; count: number }>;
   health(): Promise<boolean>;
+  checkReachable(): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -346,6 +347,26 @@ export class OpenSearchAdapter implements SearchAdapter {
     });
 
     return { indexName: newIndex, count };
+  }
+
+  /**
+   * Readiness probe for the API: throws the underlying error instead of
+   * flattening it to a boolean.
+   *
+   * `health()` above returns true/false, which cannot tell "OpenSearch is down"
+   * from "the password is wrong" — and the caller needs that difference to know
+   * whether to look at the cluster or at .env.
+   *
+   * Deliberately an alias lookup scoped to this app's own indices, not
+   * `_cluster/health`: the app's user is granted cluster:monitor/health, so a
+   * cluster probe answers 200 even when the app has no permission to read its
+   * own data. This asks the question that matters — can I authenticate AND see
+   * my index? — which is precisely the failure that followed switching
+   * authentication on. A missing alias is not an error here; that is the
+   * worker's job to create and log.
+   */
+  async checkReachable(): Promise<void> {
+    await this.client.indices.existsAlias({ name: this.alias, index: this.indexScope });
   }
 
   async health(): Promise<boolean> {

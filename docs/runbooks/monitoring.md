@@ -7,14 +7,14 @@ up to it.
 
 `packages/monitoring` runs on the server every 5 minutes from cron and checks:
 
-| Check        | Fails when                                                        |
-| ------------ | ----------------------------------------------------------------- |
-| `api`        | `/readyz` is not 200, or the database or object storage is not ok |
-| `site`       | `https://app.aegclouddfir.com` does not answer 2xx/3xx            |
-| `containers` | an expected container is missing, unhealthy, or restarting        |
-| `disk`       | root filesystem ≥ 90% (warns at 80%)                              |
-| `backup`     | the newest verified backup is older than 30 hours                 |
-| `tls`        | the certificate expires within 7 days (warns at 21)               |
+| Check        | Fails when                                                                |
+| ------------ | ------------------------------------------------------------------------- |
+| `api`        | `/readyz` is not 200, or the database, object storage or search is not ok |
+| `site`       | `https://app.aegclouddfir.com` does not answer 2xx/3xx                    |
+| `containers` | an expected container is missing, unhealthy, or restarting                |
+| `disk`       | root filesystem ≥ 90% (warns at 80%)                                      |
+| `backup`     | the newest verified backup is older than 30 hours                         |
+| `tls`        | the certificate expires within 7 days (warns at 21)                       |
 
 Results go to a [healthchecks.io](https://healthchecks.io) check:
 
@@ -88,7 +88,7 @@ enough not to become the next disk problem.
 - **No Alertmanager.** Alerting is the checker plus healthchecks.io; adding a
   second alerting path would mean two places to configure and two to trust.
 - **No metrics from the api yet.** Only the worker exposes `/metrics`. The api's
-  health is covered by the `api` check.
+  health is covered by the `api` check, which now includes search.
 
 ## Gotcha: do not quote values in `.env`
 

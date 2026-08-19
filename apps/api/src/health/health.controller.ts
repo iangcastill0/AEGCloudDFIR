@@ -2,7 +2,8 @@ import { Controller, Get, Inject, Redirect, ServiceUnavailableException } from '
 import type { AppConfig } from '@aeg-clouddfir/config';
 import type { PrismaClient } from '@aeg-clouddfir/database';
 import type { EvidenceObjectStore } from '@aeg-clouddfir/evidence';
-import { APP_CONFIG, PRISMA, EVIDENCE_STORE } from '../common/tokens.js';
+import type { SearchAdapter } from '@aeg-clouddfir/search';
+import { APP_CONFIG, PRISMA, EVIDENCE_STORE, SEARCH_ADAPTER } from '../common/tokens.js';
 
 @Controller()
 export class HealthController {
@@ -10,6 +11,7 @@ export class HealthController {
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     @Inject(PRISMA) private readonly prisma: PrismaClient,
     @Inject(EVIDENCE_STORE) private readonly evidenceStore: EvidenceObjectStore,
+    @Inject(SEARCH_ADAPTER) private readonly search: SearchAdapter,
   ) {}
 
   /**
@@ -61,8 +63,9 @@ export class HealthController {
     const results = await Promise.allSettled([
       this.prisma.$queryRaw`SELECT 1`,
       this.evidenceStore.checkReachable(),
+      this.search.checkReachable(),
     ]);
-    const [db, storage] = results;
+    const [db, storage, search] = results;
     checks['database'] = db.status === 'fulfilled' ? 'ok' : 'unreachable';
     checks['objectStorage'] =
       storage.status === 'fulfilled'
@@ -72,7 +75,14 @@ export class HealthController {
           // generic "unreachable" would send you looking in the wrong place for.
           `unreachable (${storage.reason instanceof Error ? storage.reason.name : 'unknown'})`;
 
-    if (db.status === 'rejected' || storage.status === 'rejected') {
+    checks['search'] =
+      search.status === 'fulfilled'
+        ? 'ok'
+        : // 401/AuthenticationException means the password is wrong; a connection
+          // error means the cluster is down. Both look identical in a boolean.
+          `unreachable (${search.reason instanceof Error ? search.reason.name : 'unknown'})`;
+
+    if (db.status === 'rejected' || storage.status === 'rejected' || search.status === 'rejected') {
       throw new ServiceUnavailableException({ status: 'degraded', checks });
     }
     return { status: 'ok', checks };

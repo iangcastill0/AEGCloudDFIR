@@ -294,6 +294,43 @@ describe('deleteByTenant', () => {
   });
 });
 
+describe('checkReachable', () => {
+  it('resolves when the alias lookup succeeds', async () => {
+    const client = mockClient();
+    client.indices.existsAlias.mockResolvedValue({ body: true });
+    await expect(adapter(client).checkReachable()).resolves.toBeUndefined();
+  });
+
+  it('resolves when the alias does not exist yet', async () => {
+    // A fresh deployment has no index until the worker creates one. That is not
+    // a readiness failure, or the very first deploy could never pass its health
+    // gate.
+    const client = mockClient();
+    client.indices.existsAlias.mockResolvedValue({ body: false });
+    await expect(adapter(client).checkReachable()).resolves.toBeUndefined();
+  });
+
+  it('propagates the error rather than flattening it to false', async () => {
+    // readyz names the failure so the operator knows whether to look at the
+    // cluster or at the password. health() returns a boolean and cannot.
+    const client = mockClient();
+    const err = new Error('Response Error');
+    err.name = 'ResponseError';
+    client.indices.existsAlias.mockRejectedValue(err);
+    await expect(adapter(client).checkReachable()).rejects.toThrow(/Response Error/);
+  });
+
+  it('asks about its own indices, so a restricted user is not refused', async () => {
+    const client = mockClient();
+    client.indices.existsAlias.mockResolvedValue({ body: true });
+    await adapter(client).checkReachable();
+    expect(client.indices.existsAlias).toHaveBeenCalledWith({
+      name: 'test-evidence',
+      index: 'test-*',
+    });
+  });
+});
+
 describe('reindexToNewVersion', () => {
   it('scopes its alias lookup too, so reindexing works for a restricted user', async () => {
     // Same 403 as ensureIndex, but it would only surface during a reindex —
