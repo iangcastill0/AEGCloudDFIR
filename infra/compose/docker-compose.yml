@@ -63,7 +63,17 @@ services:
     image: opensearchproject/opensearch:2.19.1
     environment:
       discovery.type: single-node
-      plugins.security.disabled: 'true' # local dev only; enable + TLS in prod
+      # Authentication is ON by default. Set CDFIR_OPENSEARCH_SECURITY_DISABLED=true
+      # in .env for a throwaway local stack; production must leave it unset.
+      # Without it, every document in the index is readable by anything that can
+      # reach the port with no credentials at all.
+      plugins.security.disabled: ${CDFIR_OPENSEARCH_SECURITY_DISABLED:-false}
+      # TLS on the REST layer stays off: clients reach it only over the compose
+      # network, the adapter has no way to trust a private CA, and a self-signed
+      # cert it cannot verify would just be turned off again at the client. The
+      # transport layer (node-to-node) is TLS regardless — the security plugin
+      # requires it. Revisit if OpenSearch is ever reachable off this host.
+      plugins.security.ssl.http.enabled: 'false'
       OPENSEARCH_JAVA_OPTS: '-Xms512m -Xmx512m'
       OPENSEARCH_INITIAL_ADMIN_PASSWORD: ${CDFIR_LOCAL_OS_ADMIN_PASSWORD:-LocalDev!ChangeMe1}
     volumes:
@@ -71,7 +81,14 @@ services:
     ports:
       - '127.0.0.1:${CDFIR_OPENSEARCH_HOST_PORT:-9200}:9200'
     healthcheck:
-      test: ['CMD-SHELL', 'curl -fsS http://localhost:9200/_cluster/health >/dev/null']
+      # Tries authenticated first, then anonymous, so this works whether security
+      # is on or off. With security on, an unauthenticated probe gets 401 and the
+      # container would be marked unhealthy forever.
+      test:
+        [
+          'CMD-SHELL',
+          'curl -fsS -u "admin:$${OPENSEARCH_INITIAL_ADMIN_PASSWORD}" http://localhost:9200/_cluster/health >/dev/null || curl -fsS http://localhost:9200/_cluster/health >/dev/null',
+        ]
       interval: 10s
       timeout: 5s
       retries: 30

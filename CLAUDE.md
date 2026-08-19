@@ -168,10 +168,13 @@ treats a stale stamp as a failed backup. Restore procedure:
   external tool. Fully mocked tests passed for a LibreOffice conversion that
   produced no output at all.
 - Explain in plain language by default; the user has asked for this repeatedly.
-- Known gaps, deliberately open: OpenSearch runs with
-  `plugins.security.disabled: 'true'`; Microsoft/Google connector credentials are
-  empty so those flows are untested; `README.md` "Honest limitations" lists the
-  rest.
+- OpenSearch **requires authentication** (compose defaults
+  `plugins.security.disabled` to `false`); the app user is `cdfir_app`, limited to
+  `cdfir-*`. REST TLS is deliberately off — see
+  `docs/runbooks/opensearch-security.md`. Note `/readyz` does **not** probe
+  OpenSearch, so a search outage does not show up there.
+- Known gaps, deliberately open: Microsoft/Google connector credentials are empty
+  so those flows are untested; `README.md` "Honest limitations" lists the rest.
 
 ## Keeping this file current
 
