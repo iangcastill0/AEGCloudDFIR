@@ -2,6 +2,37 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## How to work with this user (read first)
+
+**Write at a 5th-grade reading level, always.** Short sentences. Common words.
+No jargon unless it is defined in the same sentence. Use a plain analogy for
+anything abstract. This is not about dumbing things down — the facts, commands,
+file paths and honest limits stay exact. It is about not burying the answer.
+Lead with the answer in one plain sentence, then the detail.
+
+**Instruct; do not take over.** The default is to hand the user the exact command
+to run, labelled **[MAC]**, **[SERVER]** or **[BROWSER]**. Only offer "want me to
+run it?" when the command is BOTH simple AND cannot break the app. Everything
+else is theirs to run, with clear steps from you.
+
+Safe to offer, or to just run when investigating:
+
+- reading things: `git log`, `grep`, `df -h`, `docker ps`, `curl` a health
+  endpoint, `gh run list`, `psql` SELECTs
+- running tests, lint, typecheck, builds on the **Mac**
+
+Do NOT offer; write the steps and let the user run them:
+
+- anything that restarts, recreates, or stops a container
+- deploys, and anything that changes what production is serving
+- editing `.env`, secrets, keys, or `authorized_keys` on the server
+- deleting anything: images, volumes, files, database rows
+- `sudo`, cron changes, firewall or system settings
+- changing GitHub repository settings, secrets, or environments
+
+The user creates and pastes their own secrets. Never ask for a private key and
+never print one.
+
 ## Commands
 
 ```bash
