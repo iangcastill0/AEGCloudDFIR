@@ -82,3 +82,11 @@ fi
 echo "==> upload + verify"
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T worker \
   node /app/packages/database/dist/backup-cli.js < "$DUMP"
+
+# Record success ONLY here — after the upload was re-read and re-hashed. The
+# monitor treats a stale stamp as a failed backup, so writing it earlier (or
+# unconditionally) would turn the alarm off for exactly the failure it watches:
+# `set -e` means a failed upload never reaches this line.
+STAMP_FILE="${CDFIR_BACKUP_STAMP_FILE:-.last-backup}"
+date -u +%Y-%m-%dT%H:%M:%SZ > "$STAMP_FILE"
+echo "==> recorded success in $STAMP_FILE"

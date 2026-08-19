@@ -304,7 +304,78 @@ services:
       - api
     profiles: ['app']
 
+  # --- Monitoring ------------------------------------------------------------
+  # In the `monitoring` profile, so `up -d` does not start it unless asked:
+  #   docker compose --env-file ../../.env --profile monitoring up -d
+  #
+  # Every port binds to 127.0.0.1. Grafana and Prometheus are reached through an
+  # SSH tunnel rather than published: this box is shared with an unrelated
+  # application, and a metrics UI on the public internet is an inventory of the
+  # deployment for anyone who finds it.
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    profiles: [monitoring]
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      # 15 days on a 98 GB disk that has already hit 100% once. Long enough to
+      # see a trend, short enough not to become the next disk problem.
+      - '--storage.tsdb.retention.time=15d'
+      - '--storage.tsdb.retention.size=4GB'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ../monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - '127.0.0.1:${CDFIR_PROMETHEUS_HOST_PORT:-59090}:9090'
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:9090/-/healthy >/dev/null']
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  grafana:
+    image: grafana/grafana:11.5.1
+    profiles: [monitoring]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${CDFIR_GRAFANA_ADMIN_PASSWORD:-changeme-local-only}
+      # No anonymous access, no sign-up, and no phoning home.
+      GF_AUTH_ANONYMOUS_ENABLED: 'false'
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+      GF_ANALYTICS_REPORTING_ENABLED: 'false'
+      GF_ANALYTICS_CHECK_FOR_UPDATES: 'false'
+    volumes:
+      - ../monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - '127.0.0.1:${CDFIR_GRAFANA_HOST_PORT:-53000}:3000'
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Deliberately no cAdvisor. Per-container CPU/memory needs the Docker socket,
+  # and mounting that socket grants root-equivalent control of the host even when
+  # mounted read-only — `:ro` protects the file, not the API behind it. This box
+  # also runs an unrelated application, so that is not a trade worth making for
+  # graphs. Host-level resources come from node-exporter below, and container
+  # liveness is covered by the health checker.
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    profiles: [monitoring]
+    command:
+      - '--path.rootfs=/host'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    pid: host
+    volumes:
+      - /:/host:ro,rslave
+    restart: unless-stopped
+
 volumes:
+  prometheus-data:
+  grafana-data:
   postgres-data:
   redis-data:
   opensearch-data:

@@ -30,3 +30,6 @@ postgres-data/
 playwright-report/
 test-results/
 sbom/*.json
+
+# Written by scripts/backup-postgres.sh; read by the monitor to detect a missed backup.
+.last-backup

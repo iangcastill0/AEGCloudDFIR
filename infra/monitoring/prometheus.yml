@@ -1,0 +1,26 @@
+# Scrape targets for the CloudDFIR stack.
+#
+# Everything here is reachable on the compose network by service name, so no
+# host ports are involved and nothing needs to be exposed publicly.
+global:
+  scrape_interval: 30s
+  scrape_timeout: 10s
+  external_labels:
+    deployment: aegclouddfir
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Host CPU, memory, disk, filesystem. The disk filling to 100% has broken a
+  # deploy here, so this is the graph that matters most.
+  - job_name: node
+    static_configs:
+      - targets: ['node-exporter:9100']
+
+  # The worker already exports job counts, dead letters, outbox depth and a
+  # heartbeat — it just had nothing scraping it.
+  - job_name: worker
+    static_configs:
+      - targets: ['worker:9464']

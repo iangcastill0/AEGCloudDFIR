@@ -79,6 +79,30 @@ jobs:
           printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
 
+      # The health checker runs ON THE HOST (it reads the real disk and asks
+      # docker what is running), but the host has no pnpm and no node_modules.
+      # It has zero runtime dependencies, so CI compiles it and ships the handful
+      # of .js files. Doing it on every deploy means it cannot drift from the
+      # source in this repo.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @aeg-clouddfir/monitoring run build
+
+      - name: Ship the health checker
+        env:
+          TARGET: ${{ vars.CDFIR_DEPLOY_TARGET }}
+          REPO_PATH: ${{ vars.CDFIR_DEPLOY_PATH || '/var/www/AEGCloudDFIR' }}
+        run: |
+          ssh -i ~/.ssh/id_deploy -o BatchMode=yes "$TARGET" \
+            "mkdir -p '$REPO_PATH/packages/monitoring/dist'"
+          scp -i ~/.ssh/id_deploy -o BatchMode=yes \
+            packages/monitoring/dist/*.js \
+            "$TARGET:$REPO_PATH/packages/monitoring/dist/"
+
       - name: Deploy
         env:
           TARGET: ${{ vars.CDFIR_DEPLOY_TARGET }}
