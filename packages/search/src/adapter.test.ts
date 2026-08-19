@@ -88,6 +88,23 @@ describe('ensureIndex', () => {
     expect(call.body['settings']).toBeDefined();
   });
 
+  it('scopes the alias lookup to its own indices, not the whole cluster', async () => {
+    // `HEAD /_alias/<name>` with no index is authorized cluster-wide, so a user
+    // restricted to its own indices gets 403. That is exactly what happened the
+    // day OpenSearch authentication was enabled: every worker boot logged
+    // "could not ensure the search index". Asking about `<prefix>-*` is the same
+    // question, scoped to what the app is allowed to see.
+    const client = mockClient();
+    client.indices.existsAlias.mockResolvedValue({ body: true });
+
+    await adapter(client).ensureIndex();
+
+    expect(client.indices.existsAlias).toHaveBeenCalledWith({
+      name: 'test-evidence',
+      index: 'test-*',
+    });
+  });
+
   it('does nothing when the alias already exists', async () => {
     const client = mockClient();
     client.indices.existsAlias.mockResolvedValue({ body: true });
@@ -278,6 +295,23 @@ describe('deleteByTenant', () => {
 });
 
 describe('reindexToNewVersion', () => {
+  it('scopes its alias lookup too, so reindexing works for a restricted user', async () => {
+    // Same 403 as ensureIndex, but it would only surface during a reindex —
+    // i.e. while recovering from a mapping change, the worst time to find it.
+    const client = mockClient();
+    client.indices.getAlias.mockResolvedValue({
+      body: { 'test-evidence-v2': { aliases: { 'test-evidence': {} } } },
+    });
+    client.bulk.mockResolvedValueOnce({ body: bulkOk(['a']) });
+
+    await adapter(client).reindexToNewVersion(batches([doc('a')]));
+
+    expect(client.indices.getAlias).toHaveBeenCalledWith({
+      name: 'test-evidence',
+      index: 'test-*',
+    });
+  });
+
   async function* batches(...groups: EvidenceSearchDoc[][]) {
     for (const group of groups) yield group;
   }

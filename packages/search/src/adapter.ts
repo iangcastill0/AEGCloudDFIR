@@ -84,13 +84,16 @@ export interface RawSearchBody {
 
 export interface MinimalOpenSearchClient {
   indices: {
-    existsAlias(params: { name: string }): Promise<OsApiResponse<boolean>>;
+    existsAlias(params: { name: string; index?: string }): Promise<OsApiResponse<boolean>>;
     exists(params: { index: string }): Promise<OsApiResponse<boolean>>;
     create(params: {
       index: string;
       body: Record<string, unknown>;
     }): Promise<OsApiResponse<unknown>>;
-    getAlias(params: { name: string }): Promise<OsApiResponse<Record<string, unknown>>>;
+    getAlias(params: {
+      name: string;
+      index?: string;
+    }): Promise<OsApiResponse<Record<string, unknown>>>;
     updateAliases(params: {
       body: { actions: Record<string, unknown>[] };
     }): Promise<OsApiResponse<unknown>>;
@@ -160,9 +163,26 @@ export class OpenSearchAdapter implements SearchAdapter {
     return buildAliasName(this.indexPrefix);
   }
 
+  /**
+   * Index pattern the alias lookups are scoped to.
+   *
+   * `GET|HEAD /_alias/<name>` without an index is evaluated cluster-wide, so a
+   * user restricted to its own indices gets 403 — which is what happened the
+   * moment OpenSearch authentication was switched on: the worker logged "could
+   * not ensure the search index" on every boot. Scoping the request to this
+   * prefix asks the same question about the indices the app is allowed to see,
+   * so the app needs no cluster-wide alias visibility.
+   */
+  private get indexScope(): string {
+    return `${this.indexPrefix}-*`;
+  }
+
   async ensureIndex(): Promise<{ created: boolean; indexName: string }> {
     const indexName = buildIndexName(this.indexPrefix, MAPPING_VERSION);
-    const aliasExists = await this.client.indices.existsAlias({ name: this.alias });
+    const aliasExists = await this.client.indices.existsAlias({
+      name: this.alias,
+      index: this.indexScope,
+    });
     if (aliasExists.body) {
       return { created: false, indexName };
     }
@@ -282,7 +302,10 @@ export class OpenSearchAdapter implements SearchAdapter {
   async reindexToNewVersion(
     loader: AsyncIterable<EvidenceSearchDoc[]>,
   ): Promise<{ indexName: string; count: number }> {
-    const aliasResponse = await this.client.indices.getAlias({ name: this.alias });
+    const aliasResponse = await this.client.indices.getAlias({
+      name: this.alias,
+      index: this.indexScope,
+    });
     const currentIndices = Object.keys(aliasResponse.body);
     if (currentIndices.length === 0) {
       throw new Error(`Alias ${this.alias} does not point at any index; run ensureIndex first`);
