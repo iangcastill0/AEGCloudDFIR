@@ -28,13 +28,32 @@ if [ ! -f "$ENV_FILE" ]; then
   echo "error: $ENV_FILE not found (run from the repo root)" >&2
   exit 2
 fi
-set -a
-# shellcheck source=/dev/null  # runtime path; nothing to analyse statically
-. "$ENV_FILE"
-set +a
+# Read only the two values needed, rather than sourcing the whole file.
+#
+# Sourcing executes .env as shell, so ANY line the shell dislikes aborts the
+# backup before it dumps anything. That happened: an unquoted host key
+# (`CDFIR_SSH_KNOWN=1.2.3.4 ssh-ed25519 AAAA...`) parsed as a command name and
+# the nightly backup silently stopped running. A file of settings should not be
+# able to fail like a program, and nothing here needs the other 140 values —
+# the upload runs inside the worker container, which gets its own environment
+# from compose.
+env_value() {
+  local key="$1" line value
+  line="$(grep -E "^${key}=" "$ENV_FILE" | tail -1 || true)"
+  value="${line#*=}"
+  # Tolerate values written with surrounding quotes, as a shell would.
+  case "$value" in
+    \"*\") value="${value#\"}"; value="${value%\"}" ;;
+    \'*\') value="${value#\'}"; value="${value%\'}" ;;
+  esac
+  printf '%s' "$value"
+}
 
-: "${CDFIR_LOCAL_PG_SUPER_PASSWORD:?CDFIR_LOCAL_PG_SUPER_PASSWORD must be set (needed to bypass FORCE RLS)}"
-: "${CDFIR_BACKUP_S3_BUCKET:?CDFIR_BACKUP_S3_BUCKET must be set}"
+CDFIR_LOCAL_PG_SUPER_PASSWORD="$(env_value CDFIR_LOCAL_PG_SUPER_PASSWORD)"
+CDFIR_BACKUP_S3_BUCKET="$(env_value CDFIR_BACKUP_S3_BUCKET)"
+
+: "${CDFIR_LOCAL_PG_SUPER_PASSWORD:?CDFIR_LOCAL_PG_SUPER_PASSWORD must be set in .env (needed to bypass FORCE RLS)}"
+: "${CDFIR_BACKUP_S3_BUCKET:?CDFIR_BACKUP_S3_BUCKET must be set in .env}"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -61,5 +80,5 @@ if [ "$SIZE" -lt 1000 ]; then
 fi
 
 echo "==> upload + verify"
-docker compose -f "$COMPOSE_FILE" exec -T worker \
+docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T worker \
   node /app/packages/database/dist/backup-cli.js < "$DUMP"
