@@ -74,7 +74,7 @@ never in a production code path.
 - Verification: `VERIFICATION.md` (exact commands, results, residual risks)
 
 Ops commands: `pnpm audit:verify` (audit hash chains), `pnpm tsx
-scripts/reindex.ts` (rebuild search from truth), `pnpm sbom` (CycloneDX SBOM +
+scripts/reindex.ts` (rebuild search from truth), `pnpm sbom:generate` (CycloneDX SBOM +
 license report).
 
 ## Honest limitations (read before relying on this)
