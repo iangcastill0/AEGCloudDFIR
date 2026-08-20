@@ -11,10 +11,18 @@ const store = {} as EvidenceObjectStore;
 const search = {} as SearchAdapter;
 
 /** Prisma's $queryRaw is a tagged template; only its resolution matters here. */
-function fakePrisma(dbOk: boolean): PrismaClient {
+function fakePrisma(dbOk: boolean, reason?: unknown): PrismaClient {
   return {
-    $queryRaw: () => (dbOk ? Promise.resolve([{ 1: 1 }]) : Promise.reject(new Error('down'))),
+    $queryRaw: () =>
+      dbOk ? Promise.resolve([{ 1: 1 }]) : Promise.reject(reason ?? new Error('down')),
   } as unknown as PrismaClient;
+}
+
+/** Postgres 42P01 = undefined table, i.e. the migrations were never applied. */
+function missingTableError(): Error & { code: string } {
+  const err = new Error('relation "tenants" does not exist') as Error & { code: string };
+  err.code = '42P01';
+  return err;
 }
 function fakeStore(err?: Error): EvidenceObjectStore {
   return {
@@ -115,6 +123,39 @@ describe('HealthController readyz', () => {
     const c = new HealthController(config, fakePrisma(true), fakeStore(), fakeSearch(err));
     await expect(c.readyz()).rejects.toMatchObject({
       response: { checks: { search: 'unreachable (AuthenticationException)' } },
+    });
+  });
+
+  // Staging ran for an hour with an EMPTY database while readyz reported
+  // "database: ok", because the probe was `SELECT 1` — which only proves a
+  // socket opened. Logins failed with a 500 that had to be diagnosed from the
+  // worker's log.
+  it('reports a missing schema distinctly from an unreachable database', async () => {
+    const c = new HealthController(
+      config,
+      fakePrisma(false, missingTableError()),
+      fakeStore(),
+      fakeSearch(),
+    );
+    await expect(c.readyz()).rejects.toMatchObject({
+      response: { checks: { database: 'schema missing (run migrate:deploy)' } },
+    });
+  });
+
+  it('still says unreachable when the connection itself fails', async () => {
+    const c = new HealthController(config, fakePrisma(false), fakeStore(), fakeSearch());
+    await expect(c.readyz()).rejects.toMatchObject({
+      response: { checks: { database: 'unreachable' } },
+    });
+  });
+
+  it('detects 42P01 reported only in the message, as raw queries do', async () => {
+    const err = new Error(
+      'Raw query failed. Code: `42P01`. Message: `relation ... does not exist`',
+    );
+    const c = new HealthController(config, fakePrisma(false, err), fakeStore(), fakeSearch());
+    await expect(c.readyz()).rejects.toMatchObject({
+      response: { checks: { database: 'schema missing (run migrate:deploy)' } },
     });
   });
 });

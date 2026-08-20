@@ -5,6 +5,18 @@ import type { EvidenceObjectStore } from '@aeg-clouddfir/evidence';
 import type { SearchAdapter } from '@aeg-clouddfir/search';
 import { APP_CONFIG, PRISMA, EVIDENCE_STORE, SEARCH_ADAPTER } from '../common/tokens.js';
 
+/**
+ * True when the failure is "that table does not exist" rather than a connection
+ * problem. Postgres reports 42P01; Prisma exposes it as `code` and also includes
+ * it in the message for raw queries.
+ */
+function isMissingSchema(reason: unknown): boolean {
+  if (typeof reason !== 'object' || reason === null) return false;
+  const err = reason as { code?: unknown; message?: unknown };
+  if (err.code === '42P01') return true;
+  return typeof err.message === 'string' && err.message.includes('42P01');
+}
+
 @Controller()
 export class HealthController {
   constructor(
@@ -61,12 +73,21 @@ export class HealthController {
     const checks: Record<string, string> = {};
 
     const results = await Promise.allSettled([
-      this.prisma.$queryRaw`SELECT 1`,
+      this.prisma.$queryRaw`SELECT 1 FROM tenants LIMIT 1`,
       this.evidenceStore.checkReachable(),
       this.search.checkReachable(),
     ]);
     const [db, storage, search] = results;
-    checks['database'] = db.status === 'fulfilled' ? 'ok' : 'unreachable';
+    checks['database'] =
+      db.status === 'fulfilled'
+        ? 'ok'
+        : // `SELECT 1` only proves a socket opened. Querying a real table means
+          // an unmigrated database FAILS instead of reporting ok — staging ran
+          // with zero tables while this said "database: ok", and the login 500
+          // it caused had to be diagnosed from the worker's log instead.
+          isMissingSchema(db.reason)
+          ? 'schema missing (run migrate:deploy)'
+          : 'unreachable';
     checks['objectStorage'] =
       storage.status === 'fulfilled'
         ? 'ok'

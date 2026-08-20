@@ -1,3 +1,4 @@
+import { HttpException } from '@nestjs/common';
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
@@ -93,6 +94,34 @@ async function bootstrap(): Promise<void> {
       },
       'request completed',
     );
+    done();
+  });
+
+  // Unhandled errors: log the cause, not just the status code.
+  //
+  // Without this a 500 appeared in the log as `"res":{"statusCode":500}` and
+  // nothing else. A staging login failed exactly that way, and the reason — the
+  // database had no schema at all — was only found in the WORKER's log. Client
+  // errors are already visible in the response, so only 5xx and non-HTTP throws
+  // are logged, and never the request body.
+  fastify.addHook('onError', (request, reply, error, done) => {
+    const status = error instanceof HttpException ? error.getStatus() : 500;
+    if (status >= 500) {
+      logger.error(
+        {
+          req: { method: request.method, url: request.url, requestId: request.cdfirRequestId },
+          err: {
+            name: error.name,
+            message: error.message,
+            // Prisma puts the useful part in `code` (42P01 = table missing).
+            ...(typeof (error as { code?: unknown }).code === 'string'
+              ? { code: (error as { code: string }).code }
+              : {}),
+          },
+        },
+        'request failed',
+      );
+    }
     done();
   });
 

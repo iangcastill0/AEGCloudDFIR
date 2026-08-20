@@ -154,8 +154,38 @@ docker exec cdfir-minio-1 sh -c \
 cd /var/www/AEGCloudDFIR && ./scripts/deploy-staging.sh main
 ```
 
-Migrations run when staging's worker boots, against staging's own empty
-database.
+### 7. Apply the schema — nothing does this for you
+
+**Nothing in this application runs migrations automatically.** An earlier version
+of this runbook claimed the worker does at boot; that was wrong (it confused this
+app with Authentik, whose worker does apply its own migrations). Skipping this
+leaves a database with zero tables, and the only visible symptom is that sign-in
+returns HTTP 500 after the identity provider has already accepted you.
+
+```bash
+cd /var/www/AEGCloudDFIR
+PW=$(grep -E '^CDFIR_DB_PASSWORD=' .env.staging | cut -d= -f2-)
+docker exec -e CDFIR_DATABASE_MIGRATION_URL="postgresql://cdfir_migrator:$PW@postgres-staging:5432/cdfir" \
+  cdfir-staging-api sh -c 'cd /app/packages/database && ./node_modules/.bin/prisma migrate deploy'
+```
+
+Note `cdfir_migrator`, not `cdfir`: the runtime role deliberately cannot change
+the schema. Then restart the app so the worker stops retrying:
+
+```bash
+cd /var/www/AEGCloudDFIR/infra/compose
+docker compose -p cdfir-staging --env-file ../../.env.staging \
+  -f docker-compose.staging.yml restart api-staging worker-staging
+```
+
+Confirm it took:
+
+```bash
+curl -s http://127.0.0.1:4100/readyz
+```
+
+`"database":"ok"` now means the schema is really there — the probe queries a real
+table, so an unmigrated database reports `schema missing (run migrate:deploy)`.
 
 ## Day to day
 
