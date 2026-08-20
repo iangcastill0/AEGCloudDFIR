@@ -248,6 +248,8 @@ export function useCollectionExceptions(id: string, kindFilter: string) {
 
 export interface SearchRequestInput {
   queryText: string;
+  /** Which language queryText is written in; composed clauses must match it. */
+  syntax?: 'simple' | 'advanced';
   caseId?: string;
   custodianEmail?: string;
   source?: string;
@@ -264,18 +266,31 @@ const FACET_QUERY_FIELDS: Record<string, string> = {
   tagNames: 'tag',
 };
 
-/** Compose the API's single query string from the rail's filters. */
+/**
+ * Compose the API's single query string from the rail's filters.
+ *
+ * The clauses must be written in the SAME language as the user's text, or the
+ * parser sees a mix and rejects the whole query. `kind`, not `type`: `type` is
+ * not a field, and emitting it made choosing a Source fail every search with
+ * "Unknown field \"type\"".
+ */
 export function composeQuery(input: SearchRequestInput): string {
+  const advanced = input.syntax === 'advanced';
+  const eq = (field: string, value: string): string =>
+    advanced ? `${field} IS "${value}"` : `${field}:"${value}"`;
+
   const parts: string[] = [];
   const text = input.queryText.trim();
   if (text.length > 0) parts.push(`(${text})`);
-  if (input.custodianEmail) parts.push(`custodian:${input.custodianEmail.trim()}`);
-  if (input.source === 'email') parts.push('(type:email OR type:attachment)');
-  if (input.source === 'drive') parts.push('type:file');
+  if (input.custodianEmail) parts.push(eq('custodian', input.custodianEmail.trim()));
+  if (input.source === 'email') {
+    parts.push(`(${eq('kind', 'email')} OR ${eq('kind', 'attachment')})`);
+  }
+  if (input.source === 'drive') parts.push(eq('kind', 'file'));
   for (const [field, values] of Object.entries(input.facetFilters ?? {})) {
     const queryField = FACET_QUERY_FIELDS[field];
     if (!queryField || values.length === 0) continue;
-    const clause = values.map((v) => `${queryField}:"${v.replaceAll('"', '')}"`).join(' OR ');
+    const clause = values.map((v) => eq(queryField, v.replaceAll('"', ''))).join(' OR ');
     parts.push(values.length > 1 ? `(${clause})` : clause);
   }
   return parts.join(' AND ');
@@ -339,6 +354,7 @@ export function useSearch(input: SearchRequestInput, enabled: boolean) {
         method: 'POST',
         body: {
           query: composeQuery(input),
+          syntax: input.syntax ?? 'simple',
           ...(input.caseId ? { caseId: input.caseId } : {}),
           ...(input.cursor ? { searchAfter: JSON.parse(input.cursor) as unknown[] } : {}),
           limit: input.limit ?? 100,

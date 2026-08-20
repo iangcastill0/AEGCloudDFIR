@@ -64,3 +64,49 @@ export function checkQueryExample(query: string): string[] {
   if (depth > 0) problems.push('unclosed parenthesis');
   return problems;
 }
+
+/**
+ * Examples for the advanced language (`parameter OPERATOR value`).
+ *
+ * Same query model as the simple language, different spelling — so these are
+ * written to mirror the simple examples where possible, which is the quickest
+ * way to see how one maps onto the other.
+ */
+export const ADVANCED_QUERY_EXAMPLES: QueryExample[] = [
+  {
+    query: 'from.address IS alice@example.com',
+    description: 'Messages sent by a specific address',
+  },
+  {
+    query: 'to.address IS bob@example.com AND subject CONTAINS "quarterly report"',
+    description: 'Recipient plus exact subject phrase',
+  },
+  {
+    query: 'tags IS ANY OF (Hot, Privileged, "For Review")',
+    description: 'Any of several tags, without writing three conditions',
+  },
+  {
+    query: 'body CONTAINS ANY OF ("wire transfer", "bank details")',
+    description: 'Any of several phrases in the document body',
+  },
+  {
+    query: 'body CONTAINS "wire transfer"~3',
+    description: 'Words up to 3 positions apart (slop)',
+  },
+  {
+    query: 'body DOES NOT CONTAIN draft AND date > 2026-01-01',
+    description: 'Exclude a term, and bound by date',
+  },
+  { query: 'name.ext IS pdf AND size >= 1000000', description: 'PDFs of at least 1 MB' },
+  { query: 'bates DOES NOT EXIST', description: 'Items with no Bates number yet' },
+  {
+    query: 'NOT (tags IS Confidential OR tags IS Privileged)',
+    description: 'Everything outside two tags',
+  },
+];
+
+/** Human labels for the language selector. */
+export const QUERY_SYNTAX_OPTIONS = [
+  { value: 'simple', label: 'Simple (field:value)' },
+  { value: 'advanced', label: 'Advanced (CONTAINS / IS)' },
+] as const;

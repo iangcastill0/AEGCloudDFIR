@@ -984,6 +984,10 @@ model SavedSearch {
   /// Validated query AST JSON (never a raw engine query).
   queryAst    Json
   queryText   String   @default("")
+  /// Which language queryText is written in: simple | advanced. Reloading a
+  /// saved search re-parses queryText, so the wrong parser would change what it
+  /// means.
+  syntax      String   @default("simple")
   createdById String?  @db.Uuid
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt

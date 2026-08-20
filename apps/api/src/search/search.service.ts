@@ -4,6 +4,7 @@ import {
   astFromBuilder,
   buildSearchRequest,
   DEFAULT_FIELD_REGISTRY,
+  parseAdvancedQuery,
   parseQuery,
   QuerySyntaxError,
   QueryValidationError,
@@ -24,8 +25,18 @@ import { isCaseRestricted, mayViewPrivileged } from '../common/roles.js';
 import { zodValidate } from '../common/zod-validate.js';
 import { AuditService } from '../audit/audit.service.js';
 
+/**
+ * Which language `query` is written in.
+ *
+ * Defaults to 'simple' so existing clients and saved searches keep working. Both
+ * parsers produce the same AST, so this choice cannot affect what a query is
+ * allowed to reach — the tenant filter is injected after parsing either way.
+ */
+export const QUERY_SYNTAXES = ['simple', 'advanced'] as const;
+
 const searchRequestSchema = z.object({
   query: z.string().max(4000).optional(),
+  syntax: z.enum(QUERY_SYNTAXES).default('simple'),
   builder: z.unknown().optional(),
   caseId: z.string().uuid().optional(),
   sort: z.array(z.string().max(40)).max(3).optional(),
@@ -104,10 +115,16 @@ export class SearchService {
    * otherwise validate the supplied AST. Returns the raw, JSON-serializable
    * QueryNode that passed validation.
    */
-  parseOrValidate(queryText: string, queryAst: unknown): unknown {
+  parseOrValidate(
+    queryText: string,
+    queryAst: unknown,
+    syntax: 'simple' | 'advanced' = 'simple',
+  ): unknown {
     if (queryText.trim().length > 0) {
       try {
-        const node = parseQuery(queryText);
+        // The stored syntax matters: parsing an advanced query with the simple
+        // parser would either fail or, worse, mean something different.
+        const node = syntax === 'advanced' ? parseAdvancedQuery(queryText) : parseQuery(queryText);
         validateAst(node, DEFAULT_FIELD_REGISTRY);
         return node;
       } catch (err) {

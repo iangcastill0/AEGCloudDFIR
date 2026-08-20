@@ -28,6 +28,7 @@ export { DEFAULT_FUZZY_EDITS, tokenize } from './lexer.js';
 export type { ComparisonOp, Token } from './lexer.js';
 
 export { astFromBuilder, parseQuery } from './parser.js';
+export { ADVANCED_PARAMETERS, parseAdvancedQuery } from './advanced.js';
 export type {
   BoolNode,
   BuilderQuery,

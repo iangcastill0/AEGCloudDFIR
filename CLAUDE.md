@@ -161,6 +161,15 @@ treats a stale stamp as a failed backup. Restore procedure:
 
 ## Working style in this repo
 
+- **Never report pipeline or deployment state from inference — check it.**
+  `gh run list --workflow=CI -L 5 --json headSha,status,conclusion`, the same for
+  `"Release images"`, and `grep CDFIR_IMAGE_TAG` in the server's `.env` /
+  `.env.staging` for what is actually running. Do not describe a queue, an ETA, or
+  what an environment "should" have; those claims have been wrong in both
+  directions — inventing a backlog that did not exist, and saying a change was
+  still waiting when its image had already shipped. One image contains every
+  commit up to its SHA, so a later green build supersedes earlier ones.
+
 - **Verify inside the running container or against the real artifact**, not by
   build exit codes. Every fault found here had the signature "reports success,
   silently broken": a healthy container with credentials that had never worked, a

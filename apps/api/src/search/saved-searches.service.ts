@@ -18,6 +18,8 @@ export interface SavedSearchDto {
   name: string;
   caseId: string | null;
   queryText: string;
+  /** Which language queryText is written in, so the client edits it correctly. */
+  syntax: 'simple' | 'advanced';
   queryAst: unknown;
   createdAt: string;
   version: number;
@@ -28,6 +30,7 @@ type SavedSearchRow = {
   name: string;
   caseId: string | null;
   queryText: string;
+  syntax: string;
   queryAst: unknown;
   createdAt: Date;
   version: number;
@@ -39,6 +42,9 @@ function toDto(row: SavedSearchRow): SavedSearchDto {
     name: row.name,
     caseId: row.caseId,
     queryText: row.queryText,
+    // Anything unexpected in the column reads as 'simple', which is what every
+    // row written before this feature actually is.
+    syntax: row.syntax === 'advanced' ? 'advanced' : 'simple',
     queryAst: row.queryAst,
     createdAt: row.createdAt.toISOString(),
     version: row.version,
@@ -58,15 +64,17 @@ export class SavedSearchesService {
     name: string;
     caseId?: string;
     queryText: string;
+    syntax: 'simple' | 'advanced';
     queryAst: Prisma.InputJsonValue;
   } {
     const input = zodValidate(savedSearchRequest, body);
     // The stored AST is ALWAYS validated — never a raw engine query.
-    const ast = this.search.parseOrValidate(input.queryText, input.queryAst);
+    const ast = this.search.parseOrValidate(input.queryText, input.queryAst, input.syntax);
     return {
       name: input.name,
       caseId: input.caseId,
       queryText: input.queryText,
+      syntax: input.syntax,
       queryAst: ast as Prisma.InputJsonValue,
     };
   }
@@ -87,6 +95,7 @@ export class SavedSearchesService {
           name: input.name,
           caseId: input.caseId ?? null,
           queryText: input.queryText,
+          syntax: input.syntax,
           queryAst: input.queryAst,
           createdById: auth.userId,
         },
@@ -156,6 +165,7 @@ export class SavedSearchesService {
           name: input.name,
           caseId: input.caseId ?? null,
           queryText: input.queryText,
+          syntax: input.syntax,
           queryAst: input.queryAst,
           version: { increment: 1 },
         },

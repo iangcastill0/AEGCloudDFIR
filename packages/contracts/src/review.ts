@@ -36,6 +36,11 @@ export const savedSearchRequest = z.object({
   name: z.string().min(1).max(120),
   caseId: uuid.optional(),
   queryText: z.string().max(4000),
+  /**
+   * Which language queryText is written in. Stored because loading a saved
+   * search re-parses the text, and the wrong parser changes its meaning.
+   */
+  syntax: z.enum(['simple', 'advanced']).default('simple'),
   /** Validated query AST as produced by the search package. */
   queryAst: z.unknown(),
 });

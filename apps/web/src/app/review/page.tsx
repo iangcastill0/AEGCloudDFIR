@@ -30,12 +30,14 @@ import {
   useTags,
 } from '@/lib/hooks';
 import type { SearchHit } from '@/lib/schemas';
-import { QUERY_EXAMPLES } from '@/lib/query-help';
+import { ADVANCED_QUERY_EXAMPLES, QUERY_EXAMPLES, QUERY_SYNTAX_OPTIONS } from '@/lib/query-help';
 import { errorMessage } from '@/lib/errors';
 import { formatBytes, formatDateTime, humanizeToken } from '@/lib/format';
 
 interface Filters {
   queryText: string;
+  /** Which query language queryText is written in. */
+  syntax: 'simple' | 'advanced';
   caseId: string;
   custodianEmail: string;
   source: string;
@@ -44,6 +46,7 @@ interface Filters {
 
 const EMPTY_FILTERS: Filters = {
   queryText: '',
+  syntax: 'simple',
   caseId: '',
   custodianEmail: '',
   source: '',
@@ -62,6 +65,7 @@ export default function ReviewPage() {
   const search = useSearch(
     {
       queryText: submitted?.queryText ?? '',
+      syntax: submitted?.syntax ?? 'simple',
       ...(submitted?.caseId ? { caseId: submitted.caseId } : {}),
       ...(submitted?.custodianEmail ? { custodianEmail: submitted.custodianEmail } : {}),
       ...(submitted?.source ? { source: submitted.source } : {}),
@@ -179,6 +183,16 @@ function SearchRail(props: {
           props.onSearch();
         }}
       >
+        <Select
+          label="Query language"
+          value={draft.syntax}
+          onChange={(e) =>
+            // Only the language changes: the text is kept so the two spellings
+            // can be compared side by side rather than retyped.
+            setDraft({ ...draft, syntax: e.target.value as 'simple' | 'advanced' })
+          }
+          options={QUERY_SYNTAX_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+        />
         <TextInput
           label="Search query"
           value={draft.queryText}
@@ -196,11 +210,13 @@ function SearchRail(props: {
           {helpOpen ? (
             <div className="help-popover__panel">
               <ul>
-                {QUERY_EXAMPLES.map((ex) => (
-                  <li key={ex.query}>
-                    <code>{ex.query}</code> — {ex.description}
-                  </li>
-                ))}
+                {(draft.syntax === 'advanced' ? ADVANCED_QUERY_EXAMPLES : QUERY_EXAMPLES).map(
+                  (ex) => (
+                    <li key={ex.query}>
+                      <code>{ex.query}</code> — {ex.description}
+                    </li>
+                  ),
+                )}
               </ul>
               <TruthNotice kind="bcc" />
             </div>

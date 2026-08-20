@@ -52,6 +52,14 @@ const FIELD_DEFS: Record<string, FieldDef> = {
   ocr: { esPath: 'text.ocr', type: 'ocr' },
   filename: { esPath: 'name', type: 'text' },
   name: { esPath: 'name', type: 'text' },
+  /**
+   * What the item IS: email, file, attachment, container, audit_batch.
+   *
+   * Distinct from `extension` (docx, pdf). The review rail's Email/Drive filter
+   * used to emit `type:email`, which is not a field at all, so choosing a source
+   * failed the whole search with "Unknown field".
+   */
+  kind: { esPath: 'kind', type: 'keyword' },
   extension: { esPath: 'extension', type: 'keyword' },
   ext: { esPath: 'extension', type: 'keyword' },
   mime: { esPath: 'mimeType', type: 'keyword' },
