@@ -143,14 +143,10 @@ curl -s -u "admin:$ADMIN_PW" -X PUT \
   -d "{\"password\":\"$STG_PW\",\"opendistro_security_roles\":[\"cdfir_staging\"]}"
 ```
 
-MinIO buckets (one MinIO server, separate buckets):
-
-```bash
-docker exec cdfir-minio-1 sh -c \
-  'mc alias set local http://localhost:9000 minioadmin "$MINIO_ROOT_PASSWORD" >/dev/null &&
-   mc mb --ignore-existing local/cdfir-staging-evidence &&
-   mc mb --ignore-existing local/cdfir-staging-quarantine'
-```
+Storage: create staging's own Wasabi buckets and a key that can reach **only**
+them — see the "Staging storage" section at the end of this runbook. Then fill in
+`CDFIR_S3_BUCKET_EVIDENCE`, `CDFIR_S3_BUCKET_QUARANTINE`,
+`CDFIR_S3_ACCESS_KEY_ID` and `CDFIR_S3_SECRET_ACCESS_KEY` in `.env.staging`.
 
 ### 6. First start
 
@@ -226,3 +222,38 @@ stack.
   Harmless today; worth tightening if staging ever holds anything sensitive.
 - **Staging shares ClamAV and Tika with production.** A huge staging import
   competes for them, so do not load-test on a working day.
+
+## Staging storage (Wasabi)
+
+Staging used the MinIO already running on the host. That broke downloads: the API
+reaches MinIO as `http://minio:9000`, a name no browser can resolve, and the host
+is part of a presigned URL's signature so it cannot be swapped afterwards. Every
+export download failed with `ERR_NAME_NOT_RESOLVED`.
+
+Wasabi also means staging exercises the storage engine production actually uses —
+Object Lock, the 5 GiB multipart copy threshold, signed download filenames. None
+of that was covered before.
+
+**[BROWSER]** In the Wasabi console:
+
+1. **Create two buckets**, e.g. `gdf-aegclouddfir-staging` and
+   `gdf-aegclouddfir-staging-quarantine`, in the same region as production
+   (`us-east-1`).
+2. **Versioning: on.** **Object Lock: your call** —
+   - _off_ keeps staging cheap and lets you delete test data whenever you like,
+     but the WORM detection path never runs;
+   - _on with a 1-day default retention_ exercises that path while still letting
+     you clean up tomorrow. Production uses 90 days, which on staging would mean
+     every test upload is undeletable for three months.
+3. **Create a separate user** for staging with its own access key, and attach a
+   policy limited to those two buckets. Do not reuse production's key: a staging
+   key that can read production evidence removes the reason for a second
+   environment.
+4. Paste the key and bucket names into `.env.staging`, values bare, no quotes.
+
+Buckets themselves cost nothing; you pay for what is stored, against the same
+account minimum you already have.
+
+The MinIO container stays on the host and is now unused by both environments.
+Removing it from the compose file would free about 100 MB, but it is also the
+fallback if you ever want a local-only stack.
