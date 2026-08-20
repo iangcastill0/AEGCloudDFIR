@@ -12,6 +12,7 @@ export const MEMBERSHIP_ID = '33333333-3333-4333-8333-333333333333';
 export const CONNECTOR_ID = '44444444-4444-4444-8444-444444444444';
 export const CASE_ID = '55555555-5555-4555-8555-555555555555';
 export const TAG_ID = '66666666-6666-4666-8666-666666666666';
+export const COLLECTION_ID = '77777777-7777-4777-8777-777777777777';
 export const ITEM_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 export const ITEM_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 export const ITEM_C = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';

@@ -17,6 +17,7 @@ import {
   useCase,
   useCaseMembers,
   useCaseNotes,
+  useCollections,
   useSavedSearches,
   useTags,
   useUpdateCase,
@@ -114,18 +115,28 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
   );
 }
 
+type SourceKind = 'collection' | 'tag' | 'saved_search';
+
 function AddItemsCard({ caseId, onStatus }: { caseId: string; onStatus: (t: string) => void }) {
   const tags = useTags();
   const savedSearches = useSavedSearches();
+  const collections = useCollections();
   const addItems = useAddCaseItems(caseId);
-  const [sourceKind, setSourceKind] = useState<'tag' | 'saved_search'>('tag');
+  const [sourceKind, setSourceKind] = useState<SourceKind>('collection');
   const [sourceId, setSourceId] = useState('');
   const [includeFamilies, setIncludeFamilies] = useState(true);
 
   const options =
     sourceKind === 'tag'
       ? (tags.data?.items ?? []).map((t) => ({ value: t.id, label: t.name }))
-      : (savedSearches.data?.items ?? []).map((s) => ({ value: s.id, label: s.name }));
+      : sourceKind === 'saved_search'
+        ? (savedSearches.data?.items ?? []).map((s) => ({ value: s.id, label: s.name }))
+        : // Show what the collection holds: picking by name alone gives no clue
+          // whether it is the one that acquired 6 items or 6,000.
+          (collections.data?.items ?? []).map((c) => ({
+            value: c.id,
+            label: `${c.name} (${c.status})`,
+          }));
 
   return (
     <section className="card" aria-labelledby="case-add-items">
@@ -137,16 +148,25 @@ function AddItemsCard({ caseId, onStatus }: { caseId: string; onStatus: (t: stri
         label="Add from"
         value={sourceKind}
         onChange={(e) => {
-          setSourceKind(e.target.value as 'tag' | 'saved_search');
+          setSourceKind(e.target.value as SourceKind);
           setSourceId('');
         }}
         options={[
+          // First, because it is how a matter usually starts: collect, then
+          // scope the case to what came back.
+          { value: 'collection', label: 'Everything in a collection' },
           { value: 'tag', label: 'Everything with a tag' },
           { value: 'saved_search', label: 'Results of a saved search' },
         ]}
       />
       <Select
-        label={sourceKind === 'tag' ? 'Tag' : 'Saved search'}
+        label={
+          sourceKind === 'tag'
+            ? 'Tag'
+            : sourceKind === 'saved_search'
+              ? 'Saved search'
+              : 'Collection'
+        }
         value={sourceId}
         placeholder="Choose…"
         onChange={(e) => setSourceId(e.target.value)}
@@ -166,7 +186,9 @@ function AddItemsCard({ caseId, onStatus }: { caseId: string; onStatus: (t: stri
               source:
                 sourceKind === 'tag'
                   ? { kind: 'tag', tagId: sourceId }
-                  : { kind: 'saved_search', savedSearchId: sourceId },
+                  : sourceKind === 'saved_search'
+                    ? { kind: 'saved_search', savedSearchId: sourceId }
+                    : { kind: 'collection', collectionId: sourceId },
               includeFamilies,
             },
             {

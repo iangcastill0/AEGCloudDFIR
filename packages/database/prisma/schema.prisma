@@ -1060,7 +1060,7 @@ model CaseItem {
   caseId         String   @db.Uuid
   evidenceItemId String   @db.Uuid
   addedById      String?  @db.Uuid
-  /// tag | search | manual | family — how the item entered the case.
+  /// tag | search | manual | family | collection — how the item entered the case.
   addedVia       String   @default("manual")
   createdAt      DateTime @default(now())
 

@@ -71,6 +71,12 @@ export const addCaseItemsRequest = z.object({
     z.object({ kind: z.literal('items'), evidenceItemIds: z.array(uuid).min(1).max(10_000) }),
     z.object({ kind: z.literal('tag'), tagId: uuid }),
     z.object({ kind: z.literal('saved_search'), savedSearchId: uuid }),
+    /**
+     * Everything a collection acquired. This is how a matter usually starts —
+     * you collect first, then scope the case to what came back — and without it
+     * the only way to reference a whole collection was to tag every item in it.
+     */
+    z.object({ kind: z.literal('collection'), collectionId: uuid }),
   ]),
   includeFamilies: z.boolean().default(true),
 });

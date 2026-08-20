@@ -219,6 +219,11 @@ export class CasesService {
         input.source.savedSearchId,
       );
       addedVia = 'search';
+    } else if (input.source.kind === 'collection') {
+      // Resolved inside the transaction below: the collection has to be
+      // checked against the tenant before any of its items are read.
+      sourceIds = [];
+      addedVia = 'collection';
     } else {
       sourceIds = [];
       addedVia = 'tag';
@@ -238,6 +243,19 @@ export class CasesService {
           select: { evidenceItemId: true },
         });
         sourceIds = assignments.map((a) => a.evidenceItemId);
+      } else if (input.source.kind === 'collection') {
+        const collection = await tx.collection.findFirst({
+          where: { id: input.source.collectionId, tenantId: auth.tenantId },
+          select: { id: true },
+        });
+        // 404 rather than an empty add: adding zero items silently would look
+        // exactly like a collection that happened to be empty.
+        if (!collection) throw new NotFoundException();
+        const items = await tx.evidenceItem.findMany({
+          where: { tenantId: auth.tenantId, collectionId: collection.id },
+          select: { id: true },
+        });
+        sourceIds = items.map((item) => item.id);
       } else if (input.source.kind === 'items') {
         const rows = await tx.evidenceItem.findMany({
           where: { tenantId: auth.tenantId, id: { in: sourceIds } },

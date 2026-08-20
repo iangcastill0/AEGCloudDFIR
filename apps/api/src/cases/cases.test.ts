@@ -11,6 +11,7 @@ import { CasesService } from './cases.service.js';
 import type { SelectionService } from '../search/selection.service.js';
 import {
   CASE_ID,
+  COLLECTION_ID,
   ITEM_A,
   ITEM_B,
   TAG_ID,
@@ -84,6 +85,75 @@ describe('CasesService.addItems', () => {
         summary: expect.objectContaining({ sourceKind: 'tag', added: 2 }),
       }),
     );
+  });
+
+  it('adds everything in a collection, recording how it got there', async () => {
+    // "Add from a collection" is how a case starts: you collect first, then scope
+    // a matter to what came back. Doing it by tag first meant tagging thousands
+    // of items just to reference them.
+    const createMany = vi.fn(async (args: { data: unknown[] }) => ({ count: args.data.length }));
+    const findMany = vi.fn(async () => [{ id: ITEM_A }, { id: ITEM_B }]);
+    const { service, audit } = makeService({
+      case: { findFirst: vi.fn(async () => caseRow()) },
+      collection: { findFirst: vi.fn(async () => ({ id: COLLECTION_ID })) },
+      evidenceItem: { findMany },
+      caseItem: { createMany },
+    });
+
+    const result = await service.addItems(
+      auth,
+      CASE_ID,
+      { source: { kind: 'collection', collectionId: COLLECTION_ID }, includeFamilies: false },
+      fakeRequest(),
+    );
+
+    expect(result).toEqual({ requested: 2, added: 2 });
+    // Scoped to the collection AND the tenant: a collection id from another
+    // tenant must not widen the query.
+    expect(findMany.mock.calls[0]?.[0]).toMatchObject({
+      where: { tenantId: TENANT_ID, collectionId: COLLECTION_ID },
+    });
+    const rows = (createMany.mock.calls[0]?.[0] as { data: { addedVia: string }[] }).data;
+    expect(rows[0]?.addedVia).toBe('collection');
+    expect(audit.appendTx).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        summary: expect.objectContaining({ sourceKind: 'collection', added: 2 }),
+      }),
+    );
+  });
+
+  it('404s for a collection in another tenant, rather than adding nothing quietly', async () => {
+    // Silently adding zero items would look identical to an empty collection.
+    const { service } = makeService({
+      case: { findFirst: vi.fn(async () => caseRow()) },
+      collection: { findFirst: vi.fn(async () => null) },
+    });
+    await expect(
+      service.addItems(
+        auth,
+        CASE_ID,
+        { source: { kind: 'collection', collectionId: COLLECTION_ID }, includeFamilies: false },
+        fakeRequest(),
+      ),
+    ).rejects.toThrow(NotFoundException);
+  });
+
+  it('reports zero for an empty collection without failing', async () => {
+    const createMany = vi.fn(async () => ({ count: 0 }));
+    const { service } = makeService({
+      case: { findFirst: vi.fn(async () => caseRow()) },
+      collection: { findFirst: vi.fn(async () => ({ id: COLLECTION_ID })) },
+      evidenceItem: { findMany: vi.fn(async () => []) },
+      caseItem: { createMany },
+    });
+    const result = await service.addItems(
+      auth,
+      CASE_ID,
+      { source: { kind: 'collection', collectionId: COLLECTION_ID }, includeFamilies: false },
+      fakeRequest(),
+    );
+    expect(result).toEqual({ requested: 0, added: 0 });
   });
 
   it('404s for a case that does not exist in this tenant', async () => {
