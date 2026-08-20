@@ -1,0 +1,98 @@
+# Staging deploys itself. No approval, no clicking.
+#
+# Triggered by the image build finishing green, which itself only runs after CI
+# passes — so staging always runs a tested commit, it just does not wait for a
+# human. Production is the opposite and stays that way: deploy.yml is manual and
+# gated on a reviewer.
+name: Deploy staging
+
+on:
+  workflow_run:
+    workflows: [Release images]
+    types: [completed]
+    branches: [main]
+  # Also runnable by hand, e.g. to put an older tag back on staging.
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Commit, branch or tag to put on staging'
+        required: true
+        default: main
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to staging.aegclouddfir.com
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # For the automatic path, check out the exact commit whose images were
+          # just published, not whatever main points at now.
+          ref: ${{ github.event.workflow_run.head_sha || inputs.ref }}
+          fetch-depth: 0
+
+      - name: Resolve the image tag
+        id: resolve
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "tag=sha-$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Authorize SSH
+        env:
+          DEPLOY_KEY: ${{ secrets.CDFIR_DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ vars.CDFIR_SSH_KNOWN_HOSTS }}
+        run: |
+          if [ -z "$DEPLOY_KEY" ] || [ -z "$KNOWN_HOSTS" ]; then
+            echo "::error::CDFIR_DEPLOY_SSH_KEY / CDFIR_SSH_KNOWN_HOSTS are not set (see docs/runbooks/staging.md)"
+            exit 1
+          fi
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Deploy
+        env:
+          TARGET: ${{ vars.CDFIR_DEPLOY_TARGET }}
+          REPO_PATH: ${{ vars.CDFIR_DEPLOY_PATH || '/var/www/AEGCloudDFIR' }}
+          SHA: ${{ steps.resolve.outputs.sha }}
+          TAG: ${{ steps.resolve.outputs.tag }}
+        run: |
+          # Staging tracks main, so the checkout moves with it. Production only
+          # moves when someone approves deploy.yml — the two never fight, because
+          # each pins its own CDFIR_IMAGE_TAG in its own env file.
+          ssh -i ~/.ssh/id_deploy -o BatchMode=yes "$TARGET" \
+            "set -euo pipefail
+             cd '$REPO_PATH'
+             git fetch --prune --quiet origin
+             git reset --hard --quiet '$SHA'
+             ./scripts/deploy-staging.sh '$TAG'"
+
+      - name: Confirm staging answers from outside
+        run: |
+          code="$(curl -s -o /dev/null -m 20 -w '%{http_code}' https://staging.aegclouddfir.com/ || true)"
+          echo "staging.aegclouddfir.com: $code"
+          # 401 is a pass: the site is up and asking for a login.
+          case "$code" in
+            200 | 302 | 401) ;;
+            *) echo "::error::staging returned $code"; exit 1 ;;
+          esac
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Staging ${{ job.status }}"
+            echo
+            echo "- commit: \`${{ steps.resolve.outputs.sha }}\`"
+            echo "- image tag: \`${{ steps.resolve.outputs.tag }}\`"
+            echo "- url: https://staging.aegclouddfir.com"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -88,6 +88,26 @@ jobs:
           cache-from: type=gha,scope=web
           cache-to: type=gha,scope=web,mode=max
 
+      # A second web image for staging. Next inlines NEXT_PUBLIC_* at build time,
+      # so the production bundle points at production hosts and cannot be reused
+      # — staging needs its own build with its own URLs. api and worker read
+      # their configuration at runtime, so they are shared unchanged: what
+      # staging exercises is byte-identical to what production runs.
+      - name: web (staging)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/web.Dockerfile
+          push: true
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ vars.STAGING_API_URL || 'https://api-staging.aegclouddfir.com' }}
+            NEXT_PUBLIC_AUTHENTIK_URL=${{ vars.NEXT_PUBLIC_AUTHENTIK_URL || 'https://auth.aegclouddfir.com' }}
+          tags: |
+            ghcr.io/iangcastill0/aegclouddfir/web:sha-${{ steps.sha.outputs.short }}-staging
+            ghcr.io/iangcastill0/aegclouddfir/web:main-staging
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,scope=web-staging,mode=max
+
       - name: Summary
         run: |
           {

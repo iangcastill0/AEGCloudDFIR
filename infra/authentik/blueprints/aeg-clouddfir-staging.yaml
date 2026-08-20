@@ -1,0 +1,74 @@
+# Authentik blueprint: the STAGING OIDC application.
+#
+# A separate file from aeg-clouddfir.yaml on purpose. Authentik applies each
+# blueprint independently, so a mistake here cannot reject the production
+# provider and lock everyone out of the live site.
+#
+# Its client secret must match .env.staging's CDFIR_OIDC_CLIENT_SECRET. The
+# blueprint is authoritative, so if they differ Authentik silently rotates the
+# secret out from under staging and every sign-in fails at the token exchange
+# with nothing useful in the app's logs.
+version: 1
+metadata:
+  name: cdfir-staging
+  labels:
+    blueprints.goauthentik.io/description: 'AEG-CloudDFIR STAGING OIDC provider + application'
+entries:
+  - model: authentik_providers_oauth2.oauth2provider
+    # `id` is what !KeyOf resolves against, and is not the same as `identifiers`.
+    id: cdfir-staging
+    identifiers:
+      name: cdfir-staging
+    attrs:
+      name: cdfir-staging
+      client_type: confidential
+      client_id: cdfir-staging
+      client_secret: !Env [CDFIR_STAGING_OIDC_CLIENT_SECRET_BOOTSTRAP, 'changeme-staging-only']
+      authorization_flow:
+        !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+      invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+      redirect_uris:
+        - matching_mode: strict
+          url:
+            !Env [
+              CDFIR_STAGING_OIDC_REDIRECT_URI,
+              'https://api-staging.aegclouddfir.com/auth/callback',
+            ]
+      signing_key:
+        !Find [authentik_crypto.certificatekeypair, [name, authentik Self-signed Certificate]]
+      access_code_validity: minutes=1
+      access_token_validity: minutes=10
+      refresh_token_validity: days=1
+      # Same as production: the app keys accounts on (issuer, sub), and the
+      # issuer differs, so staging accounts are distinct from production ones
+      # even for the same person.
+      sub_mode: hashed_user_id
+      include_claims_in_id_token: true
+      property_mappings:
+        - !Find [
+            authentik_providers_oauth2.scopemapping,
+            [name, "authentik default OAuth Mapping: OpenID 'openid'"],
+          ]
+        - !Find [
+            authentik_providers_oauth2.scopemapping,
+            [name, "authentik default OAuth Mapping: OpenID 'email'"],
+          ]
+        - !Find [
+            authentik_providers_oauth2.scopemapping,
+            [name, "authentik default OAuth Mapping: OpenID 'profile'"],
+          ]
+  - model: authentik_core.application
+    identifiers:
+      slug: cdfir-staging
+    attrs:
+      name: AEG-CloudDFIR (staging)
+      slug: cdfir-staging
+      provider: !KeyOf cdfir-staging
+      policy_engine_mode: any
+      meta_description: 'STAGING — test data only, not real evidence'
+      meta_launch_url:
+        !Env [
+          CDFIR_STAGING_OIDC_LAUNCH_URL,
+          'https://api-staging.aegclouddfir.com/auth/login?redirectTo=%2F',
+        ]
+      meta_publisher: 'AEG'
