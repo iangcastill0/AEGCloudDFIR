@@ -15,6 +15,8 @@ import {
   useAddCaseItems,
   useAddCaseNote,
   useCase,
+  useCaseActivity,
+  useCaseSummary,
   useCaseMembers,
   useCaseNotes,
   useCollections,
@@ -104,6 +106,8 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
             />
 
             <div className="card-grid" style={{ marginTop: 'var(--space-4)' }}>
+              <ContentsCard caseId={id} />
+              <ActivityCard caseId={id} />
               <AddItemsCard caseId={id} onStatus={setStatusText} />
               <MembersCard caseId={id} />
               <NotesCard caseId={id} onStatus={setStatusText} />
@@ -112,6 +116,154 @@ export default function CaseDetailPage({ params }: { params: Promise<{ id: strin
         )}
       </QueryBoundary>
     </>
+  );
+}
+
+/**
+ * What the case actually contains.
+ *
+ * Counted by the database, not by paging through items in the browser: a case
+ * can reference tens of thousands. Collections and custodians are named, because
+ * "which acquisition does this matter draw on" is the question a reviewer
+ * actually has.
+ */
+function ContentsCard({ caseId }: { caseId: string }) {
+  const summary = useCaseSummary(caseId);
+  return (
+    <section className="card" aria-labelledby="case-contents">
+      <h2 id="case-contents">What is in this case</h2>
+      <QueryBoundary
+        isPending={summary.isPending}
+        error={summary.error}
+        data={summary.data}
+        onRetry={() => void summary.refetch()}
+      >
+        {(s) =>
+          s.itemCount === 0 ? (
+            <p className="cdfir-field__hint">
+              No items yet. Add some below — a collection is usually the place to start.
+            </p>
+          ) : (
+            <>
+              <p>
+                <strong>{s.itemCount.toLocaleString()}</strong> item
+                {s.itemCount === 1 ? '' : 's'} · {s.noteCount} note{s.noteCount === 1 ? '' : 's'} ·{' '}
+                {s.memberCount} member{s.memberCount === 1 ? '' : 's'}
+              </p>
+              {s.earliestItemDate && s.latestItemDate ? (
+                <p className="cdfir-field__hint">
+                  {/* The evidence's own dates, not when it was added: that is what
+                      scopes a matter. */}
+                  Evidence dated {formatDateTime(s.earliestItemDate)} to{' '}
+                  {formatDateTime(s.latestItemDate)}
+                </p>
+              ) : null}
+
+              <h3>By type</h3>
+              <ul className="cdfir-count-list">
+                {s.byKind.map((k) => (
+                  <li key={k.kind}>
+                    <span>{k.kind}</span>
+                    <span>{k.count.toLocaleString()}</span>
+                  </li>
+                ))}
+              </ul>
+
+              <h3>How it got here</h3>
+              <ul className="cdfir-count-list">
+                {s.bySource.map((v) => (
+                  <li key={v.addedVia}>
+                    <span>{v.addedVia}</span>
+                    <span>{v.count.toLocaleString()}</span>
+                  </li>
+                ))}
+              </ul>
+
+              {s.collections.length > 0 ? (
+                <>
+                  <h3>From collections</h3>
+                  <ul className="cdfir-count-list">
+                    {s.collections.map((c) => (
+                      <li key={c.id}>
+                        <Link href={`/collections/${c.id}`}>{c.name}</Link>
+                        <span>{c.count.toLocaleString()}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : null}
+
+              {s.custodians.length > 0 ? (
+                <>
+                  <h3>Custodians</h3>
+                  <ul className="cdfir-count-list">
+                    {s.custodians.map((c) => (
+                      <li key={c.id}>
+                        <span>{c.email}</span>
+                        <span>{c.count.toLocaleString()}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : null}
+            </>
+          )
+        }
+      </QueryBoundary>
+    </section>
+  );
+}
+
+/**
+ * The case's history, taken from the hash-chained audit log.
+ *
+ * Scoped to this case, so someone working it can see what happened without the
+ * tenant-wide audit permission. Each line is described by the API rather than
+ * assembled here: the audit summary is free-form JSON, and a browser guessing at
+ * its shape is how "undefined items added" reaches a screen.
+ */
+function ActivityCard({ caseId }: { caseId: string }) {
+  const activity = useCaseActivity(caseId);
+  return (
+    <section className="card" aria-labelledby="case-activity">
+      <h2 id="case-activity">Activity</h2>
+      <QueryBoundary
+        isPending={activity.isPending}
+        error={activity.error}
+        data={activity.data}
+        onRetry={() => void activity.refetch()}
+      >
+        {(a) =>
+          a.items.length === 0 ? (
+            <p className="cdfir-field__hint">Nothing recorded yet.</p>
+          ) : (
+            <Table caption="Case activity" captionHidden>
+              <thead>
+                <tr>
+                  <th scope="col">When</th>
+                  <th scope="col">Who</th>
+                  <th scope="col">What</th>
+                </tr>
+              </thead>
+              <tbody>
+                {a.items.map((e) => (
+                  <tr key={e.id}>
+                    <td>{formatDateTime(e.occurredAt)}</td>
+                    <td>{e.actorDisplay || '—'}</td>
+                    <td>{e.detail}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          )
+        }
+      </QueryBoundary>
+      <p className="cdfir-field__hint">
+        {/* Say where this comes from: it is the same append-only chain the audit
+            tab verifies, not a separate log that could disagree with it. */}
+        From the append-only audit chain. Verify it under Audit.
+      </p>
+    </section>
   );
 }
 

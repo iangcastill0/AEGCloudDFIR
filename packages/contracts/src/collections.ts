@@ -310,6 +310,46 @@ export const caseTag = z.object({
 });
 export const caseTagListResponse = z.object({ items: z.array(caseTag) });
 
+/**
+ * What a case actually contains, aggregated in the database rather than by
+ * counting rows in the browser: a case can hold tens of thousands of items.
+ */
+export const caseSummary = z.object({
+  itemCount: z.number().int(),
+  /** email / file / container / audit_batch … */
+  byKind: z.array(z.object({ kind: z.string(), count: z.number().int() })),
+  /** How each item entered: collection, tag, search, manual, family. */
+  bySource: z.array(z.object({ addedVia: z.string(), count: z.number().int() })),
+  /** Which acquisitions the case draws on, named rather than by id. */
+  collections: z.array(z.object({ id: z.string(), name: z.string(), count: z.number().int() })),
+  custodians: z.array(z.object({ id: z.string(), email: z.string(), count: z.number().int() })),
+  /** Span of the evidence itself, not of when it was added. */
+  earliestItemDate: z.string().nullable(),
+  latestItemDate: z.string().nullable(),
+  noteCount: z.number().int(),
+  memberCount: z.number().int(),
+});
+export type CaseSummary = z.infer<typeof caseSummary>;
+
+/**
+ * One entry in a case's history, drawn from the audit chain.
+ *
+ * Separate from /audit, which needs org_admin or auditor: someone working a case
+ * should be able to see that case's own history without being able to read every
+ * event in the tenant.
+ */
+export const caseActivityEntry = z.object({
+  id: z.string(),
+  /** BigInt in the database; a string here, like every other sequence. */
+  sequence: z.string(),
+  action: z.string(),
+  actorDisplay: z.string().default(''),
+  occurredAt: z.string(),
+  /** Plain-language description built from the event's own summary. */
+  detail: z.string().default(''),
+});
+export const caseActivityListResponse = paginated(caseActivityEntry);
+
 /** What adding items to a case actually did. */
 export const addCaseItemsResponse = z.object({
   requested: z.number().int(),

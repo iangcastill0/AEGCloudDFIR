@@ -10,7 +10,10 @@ import { z } from 'zod';
 // webpack rejects it with "has no internal name", failing the production build
 // while tsc and the unit tests pass — so it only surfaces in `next build`.
 export {
+  caseActivityEntry,
+  caseActivityListResponse,
   caseMember,
+  caseSummary,
   productionDetail,
   type ProductionDetail,
   caseMemberListResponse,

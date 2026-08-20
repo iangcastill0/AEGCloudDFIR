@@ -9,6 +9,8 @@ import {
 } from '@tanstack/react-query';
 import {
   addCaseItemsResponse,
+  caseActivityListResponse,
+  caseSummary,
   caseTagListResponse,
   collectionStatusResponse,
   validateProductionResponse,
@@ -594,6 +596,23 @@ export function useAddCaseNote(id: string) {
     mutationFn: (text: string) =>
       apiFetch(`/api/v1/cases/${id}/notes`, { method: 'POST', body: { text } }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['case-notes', id] }),
+  });
+}
+
+/** Totals for a case: what it holds and where it came from. */
+export function useCaseSummary(id: string) {
+  return useQuery({
+    queryKey: ['case-summary', id],
+    queryFn: () => apiFetch(`/api/v1/cases/${id}/summary`, { schema: caseSummary }),
+  });
+}
+
+/** This case's own history, from the audit chain. */
+export function useCaseActivity(id: string) {
+  return useQuery({
+    queryKey: ['case-activity', id],
+    queryFn: () =>
+      apiFetch(`/api/v1/cases/${id}/activity?limit=50`, { schema: caseActivityListResponse }),
   });
 }
 

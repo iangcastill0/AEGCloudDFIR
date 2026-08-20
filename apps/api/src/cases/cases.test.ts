@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { NotFoundException } from '@nestjs/common';
 import { CaseStatus, TenantRole } from '@aeg-clouddfir/database';
 import {
+  caseActivityListResponse,
   caseMemberListResponse,
+  caseSummary,
   caseTagListResponse,
   caseNoteListResponse,
   caseNote,
@@ -12,6 +14,7 @@ import type { SelectionService } from '../search/selection.service.js';
 import {
   CASE_ID,
   COLLECTION_ID,
+  CUSTODIAN_ID,
   ITEM_A,
   ITEM_B,
   TAG_ID,
@@ -168,6 +171,148 @@ describe('CasesService.addItems', () => {
         fakeRequest(),
       ),
     ).rejects.toThrow(NotFoundException);
+  });
+});
+
+describe('CasesService.summary', () => {
+  function grouped(rows: Record<string, unknown>[]) {
+    return vi.fn(async () => rows);
+  }
+
+  it('reports totals, sources, collections and custodians by name', async () => {
+    const { service } = makeService({
+      case: { findFirst: vi.fn(async () => caseRow()) },
+      caseItem: {
+        groupBy: grouped([
+          { addedVia: 'collection', _count: { _all: 6 } },
+          { addedVia: 'tag', _count: { _all: 2 } },
+        ]),
+      },
+      evidenceItem: {
+        groupBy: vi
+          .fn()
+          // kind, then collectionId, then custodianId — in the order the service asks.
+          .mockResolvedValueOnce([
+            { kind: 'email', _count: { _all: 7 } },
+            { kind: 'container', _count: { _all: 1 } },
+          ])
+          .mockResolvedValueOnce([{ collectionId: COLLECTION_ID, _count: { _all: 8 } }])
+          .mockResolvedValueOnce([{ custodianId: CUSTODIAN_ID, _count: { _all: 8 } }]),
+        aggregate: vi.fn(async () => ({
+          _min: { primaryDate: new Date('2026-01-02T00:00:00Z') },
+          _max: { primaryDate: new Date('2026-08-01T00:00:00Z') },
+        })),
+      },
+      collection: { findMany: vi.fn(async () => [{ id: COLLECTION_ID, name: 'testing-pst' }]) },
+      custodian: { findMany: vi.fn(async () => [{ id: CUSTODIAN_ID, email: 'test@test.com' }]) },
+      caseNote: { count: vi.fn(async () => 3) },
+      caseMember: { count: vi.fn(async () => 2) },
+    });
+
+    const result = await service.summary(auth, CASE_ID);
+
+    expect(result.itemCount).toBe(8);
+    expect(result.bySource).toEqual([
+      { addedVia: 'collection', count: 6 },
+      { addedVia: 'tag', count: 2 },
+    ]);
+    expect(result.byKind).toEqual([
+      { kind: 'email', count: 7 },
+      { kind: 'container', count: 1 },
+    ]);
+    // Named, not an id: an id tells a reviewer nothing about the acquisition.
+    expect(result.collections).toEqual([{ id: COLLECTION_ID, name: 'testing-pst', count: 8 }]);
+    expect(result.custodians).toEqual([{ id: CUSTODIAN_ID, email: 'test@test.com', count: 8 }]);
+    expect(result.earliestItemDate).toBe('2026-01-02T00:00:00.000Z');
+    expect(result.latestItemDate).toBe('2026-08-01T00:00:00.000Z');
+    expect(result.noteCount).toBe(3);
+    expect(caseSummary.safeParse(result).success).toBe(true);
+  });
+
+  it('says so when a collection has been deleted, rather than dropping its items', async () => {
+    // The items still belong to the case; hiding them would make the totals lie.
+    const { service } = makeService({
+      case: { findFirst: vi.fn(async () => caseRow()) },
+      caseItem: { groupBy: vi.fn(async () => [{ addedVia: 'collection', _count: { _all: 4 } }]) },
+      evidenceItem: {
+        groupBy: vi
+          .fn()
+          .mockResolvedValueOnce([{ kind: 'email', _count: { _all: 4 } }])
+          .mockResolvedValueOnce([{ collectionId: COLLECTION_ID, _count: { _all: 4 } }])
+          .mockResolvedValueOnce([]),
+        aggregate: vi.fn(async () => ({
+          _min: { primaryDate: null },
+          _max: { primaryDate: null },
+        })),
+      },
+      collection: { findMany: vi.fn(async () => []) },
+      custodian: { findMany: vi.fn(async () => []) },
+      caseNote: { count: vi.fn(async () => 0) },
+      caseMember: { count: vi.fn(async () => 0) },
+    });
+
+    const result = await service.summary(auth, CASE_ID);
+    expect(result.collections).toEqual([
+      { id: COLLECTION_ID, name: '(deleted collection)', count: 4 },
+    ]);
+    expect(result.earliestItemDate).toBeNull();
+  });
+
+  it('404s for a case in another tenant', async () => {
+    const { service } = makeService({ case: { findFirst: vi.fn(async () => null) } });
+    await expect(service.summary(auth, CASE_ID)).rejects.toThrow(NotFoundException);
+  });
+});
+
+describe('CasesService.activity', () => {
+  const event = (over: Record<string, unknown> = {}) => ({
+    id: 'ev-1',
+    sequence: 41n,
+    action: 'case.items_added',
+    actorDisplay: 'Ian Castillo',
+    occurredAt: new Date('2026-08-20T18:00:00Z'),
+    summary: { added: 6, requested: 8, sourceKind: 'collection' },
+    ...over,
+  });
+
+  it('returns this case history in plain language, newest first', async () => {
+    const findMany = vi.fn(async () => [event()]);
+    const { service } = makeService({
+      case: { findFirst: vi.fn(async () => caseRow()) },
+      auditEvent: { findMany },
+    });
+
+    const result = await service.activity(auth, CASE_ID, { limit: 20 });
+
+    expect(result.items[0]).toMatchObject({
+      action: 'case.items_added',
+      actorDisplay: 'Ian Castillo',
+      detail: '6 items added from a collection (2 already in the case)',
+      // BigInt cannot survive JSON; the contract expects a string.
+      sequence: '41',
+    });
+    // Scoped to THIS case, and to the tenant, not a text search over summaries.
+    expect(findMany.mock.calls[0]?.[0]).toMatchObject({
+      where: { tenantId: TENANT_ID, targetType: 'case', targetId: CASE_ID },
+      orderBy: { sequence: 'desc' },
+    });
+    expect(caseActivityListResponse.safeParse(result).success).toBe(true);
+  });
+
+  it('pages with a cursor and reports whether more remain', async () => {
+    const rows = [event({ id: 'a' }), event({ id: 'b' }), event({ id: 'c' })];
+    const { service } = makeService({
+      case: { findFirst: vi.fn(async () => caseRow()) },
+      auditEvent: { findMany: vi.fn(async () => rows) },
+    });
+    const result = await service.activity(auth, CASE_ID, { limit: 2 });
+    expect(result.items).toHaveLength(2);
+    expect(result.nextCursor).toBe('b');
+  });
+
+  it('404s for a case in another tenant', async () => {
+    const { service } = makeService({ case: { findFirst: vi.fn(async () => null) } });
+    await expect(service.activity(auth, CASE_ID, { limit: 20 })).rejects.toThrow(NotFoundException);
   });
 });
 

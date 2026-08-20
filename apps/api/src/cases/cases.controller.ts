@@ -128,6 +128,53 @@ export class CasesController {
    * Tags present on this case's items — used by the production wizard so a
    * reviewer can only select tags that actually appear in the matter.
    */
+  /** Totals for the case: what it holds, where it came from, how wide its dates run. */
+  @Get(':id/summary')
+  @RequireRoles(TenantRole.case_manager, TenantRole.reviewer, TenantRole.org_admin)
+  async summary(
+    @Param('id') id: string,
+    @Req() request: FastifyRequest,
+  ): Promise<{
+    itemCount: number;
+    byKind: { kind: string; count: number }[];
+    bySource: { addedVia: string; count: number }[];
+    collections: { id: string; name: string; count: number }[];
+    custodians: { id: string; email: string; count: number }[];
+    earliestItemDate: string | null;
+    latestItemDate: string | null;
+    noteCount: number;
+    memberCount: number;
+  }> {
+    return this.cases.summary(requireAuth(request), id);
+  }
+
+  /**
+   * This case's history from the audit chain.
+   *
+   * Readable by the people working the case. The tenant-wide /audit endpoint
+   * still requires org_admin or auditor — seeing one case's history is not the
+   * same privilege as reading every event in the tenant.
+   */
+  @Get(':id/activity')
+  @RequireRoles(TenantRole.case_manager, TenantRole.reviewer, TenantRole.org_admin)
+  async activity(
+    @Param('id') id: string,
+    @Query() query: Record<string, unknown>,
+    @Req() request: FastifyRequest,
+  ): Promise<{
+    items: {
+      id: string;
+      sequence: string;
+      action: string;
+      actorDisplay: string;
+      occurredAt: string;
+      detail: string;
+    }[];
+    nextCursor: string | null;
+  }> {
+    return this.cases.activity(requireAuth(request), id, parseCursorQuery(query));
+  }
+
   @Get(':id/tags')
   @RequireRoles(
     TenantRole.case_manager,

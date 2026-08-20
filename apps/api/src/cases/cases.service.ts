@@ -17,6 +17,7 @@ import { addCaseItemsRequest, createCaseRequest } from '@aeg-clouddfir/contracts
 import type { FastifyRequest } from 'fastify';
 import '../common/http.js';
 import type { AuthContext } from '../common/http.js';
+import { describeCaseEvent } from './case-activity.js';
 import { PRISMA } from '../common/tokens.js';
 import type { CursorQuery } from '../common/pagination.js';
 import { zodValidate } from '../common/zod-validate.js';
@@ -85,6 +86,27 @@ function toDto(row: CaseRow): CaseDto {
     createdAt: row.createdAt.toISOString(),
     version: row.version,
   };
+}
+
+interface CaseSummaryDto {
+  itemCount: number;
+  byKind: { kind: string; count: number }[];
+  bySource: { addedVia: string; count: number }[];
+  collections: { id: string; name: string; count: number }[];
+  custodians: { id: string; email: string; count: number }[];
+  earliestItemDate: string | null;
+  latestItemDate: string | null;
+  noteCount: number;
+  memberCount: number;
+}
+
+interface CaseActivityDto {
+  id: string;
+  sequence: string;
+  action: string;
+  actorDisplay: string;
+  occurredAt: string;
+  detail: string;
 }
 
 @Injectable()
@@ -423,6 +445,140 @@ export class CasesService {
    * matches nothing in the matter — producing an empty set, or worse, silently
    * narrowing a production the reviewer believed was complete.
    */
+  /**
+   * What the case holds, counted in the database.
+   *
+   * Aggregated with groupBy rather than by loading the rows: a case can
+   * reference tens of thousands of items, and the page only needs the totals.
+   * Collections and custodians are resolved to names, because an id tells a
+   * reviewer nothing about which acquisition a case draws on.
+   */
+  async summary(auth: AuthContext, id: string): Promise<CaseSummaryDto> {
+    return withTenantContext(this.prisma, auth.tenantId, async (tx) => {
+      await this.requireCase(tx, auth, id);
+      const inThisCase = {
+        tenantId: auth.tenantId,
+        caseItems: { some: { caseId: id } },
+      };
+
+      const [bySourceRows, byKindRows, byCollection, byCustodian, span, noteCount, memberCount] =
+        await Promise.all([
+          tx.caseItem.groupBy({
+            by: ['addedVia'],
+            where: { tenantId: auth.tenantId, caseId: id },
+            _count: { _all: true },
+          }),
+          tx.evidenceItem.groupBy({ by: ['kind'], where: inThisCase, _count: { _all: true } }),
+          tx.evidenceItem.groupBy({
+            by: ['collectionId'],
+            where: inThisCase,
+            _count: { _all: true },
+          }),
+          tx.evidenceItem.groupBy({
+            by: ['custodianId'],
+            where: inThisCase,
+            _count: { _all: true },
+          }),
+          tx.evidenceItem.aggregate({
+            where: inThisCase,
+            _min: { primaryDate: true },
+            _max: { primaryDate: true },
+          }),
+          tx.caseNote.count({ where: { tenantId: auth.tenantId, caseId: id } }),
+          tx.caseMember.count({ where: { tenantId: auth.tenantId, caseId: id } }),
+        ]);
+
+      // Name the collections and custodians in one query each, not one per row.
+      const collectionIds = byCollection
+        .map((r) => r.collectionId)
+        .filter((v): v is string => v !== null);
+      const custodianIds = byCustodian
+        .map((r) => r.custodianId)
+        .filter((v): v is string => v !== null);
+      const [collectionRows, custodianRows] = await Promise.all([
+        collectionIds.length > 0
+          ? tx.collection.findMany({
+              where: { tenantId: auth.tenantId, id: { in: collectionIds } },
+              select: { id: true, name: true },
+            })
+          : Promise.resolve([]),
+        custodianIds.length > 0
+          ? tx.custodian.findMany({
+              where: { tenantId: auth.tenantId, id: { in: custodianIds } },
+              select: { id: true, email: true },
+            })
+          : Promise.resolve([]),
+      ]);
+      const collectionName = new Map(collectionRows.map((c) => [c.id, c.name]));
+      const custodianEmail = new Map(custodianRows.map((c) => [c.id, c.email]));
+
+      const itemCount = bySourceRows.reduce((sum, r) => sum + r._count._all, 0);
+      return {
+        itemCount,
+        byKind: byKindRows.map((r) => ({ kind: r.kind, count: r._count._all })),
+        bySource: bySourceRows.map((r) => ({ addedVia: r.addedVia, count: r._count._all })),
+        collections: byCollection
+          .filter((r) => r.collectionId !== null)
+          .map((r) => ({
+            id: r.collectionId as string,
+            // An item whose collection was deleted still belongs to the case;
+            // say so rather than dropping it from the totals.
+            name: collectionName.get(r.collectionId as string) ?? '(deleted collection)',
+            count: r._count._all,
+          })),
+        custodians: byCustodian
+          .filter((r) => r.custodianId !== null)
+          .map((r) => ({
+            id: r.custodianId as string,
+            email: custodianEmail.get(r.custodianId as string) ?? '(unknown custodian)',
+            count: r._count._all,
+          })),
+        earliestItemDate: span._min.primaryDate?.toISOString() ?? null,
+        latestItemDate: span._max.primaryDate?.toISOString() ?? null,
+        noteCount,
+        memberCount,
+      };
+    });
+  }
+
+  /**
+   * This case's own history, from the audit chain.
+   *
+   * Deliberately not /audit, which requires org_admin or auditor: someone working
+   * a case needs to see what happened to it without being able to read every
+   * event in the tenant. Every case action is written with targetType 'case' and
+   * the case id, so the filter is exact rather than a text search.
+   */
+  async activity(
+    auth: AuthContext,
+    id: string,
+    page: { limit: number; cursor?: string },
+  ): Promise<{ items: CaseActivityDto[]; nextCursor: string | null }> {
+    return withTenantContext(this.prisma, auth.tenantId, async (tx) => {
+      await this.requireCase(tx, auth, id);
+      const rows = await tx.auditEvent.findMany({
+        where: { tenantId: auth.tenantId, targetType: 'case', targetId: id },
+        orderBy: { sequence: 'desc' },
+        take: page.limit + 1,
+        ...(page.cursor !== undefined ? { cursor: { id: page.cursor }, skip: 1 } : {}),
+      });
+      const slice = rows.slice(0, page.limit);
+      const last = slice[slice.length - 1];
+      return {
+        items: slice.map((row) => ({
+          id: row.id,
+          // BigInt: JSON cannot carry it, and the contract expects a string.
+          sequence: String(row.sequence),
+          action: row.action,
+          actorDisplay: row.actorDisplay,
+          occurredAt: row.occurredAt.toISOString(),
+          detail: describeCaseEvent(row.action, row.summary),
+        })),
+        nextCursor: rows.length > page.limit && last ? last.id : null,
+      };
+    });
+  }
+
   async tags(
     auth: AuthContext,
     id: string,
