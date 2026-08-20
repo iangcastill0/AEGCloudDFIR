@@ -28,7 +28,7 @@ COMPOSE_DIR="$REPO_ROOT/infra/compose"
 COMPOSE_FILE="$COMPOSE_DIR/docker-compose.staging.yml"
 ENV_FILE="$REPO_ROOT/.env.staging"
 PROJECT="cdfir-staging"
-SERVICES=(postgres-staging redis-staging api-staging worker-staging web-staging)
+SERVICES=(postgres-staging redis-staging opensearch-staging api-staging worker-staging web-staging)
 
 if [ ! -f "$ENV_FILE" ]; then
   echo "error: $ENV_FILE not found. Create it from .env.staging.example first —" >&2

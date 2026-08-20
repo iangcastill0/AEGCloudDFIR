@@ -253,6 +253,9 @@ services:
 
   api:
     image: ghcr.io/iangcastill0/aegclouddfir/api:${CDFIR_IMAGE_TAG:-dev}
+    logging:
+      driver: json-file
+      options: { max-size: '10m', max-file: '3' }
     build:
       context: ../..
       dockerfile: infra/docker/api.Dockerfile
@@ -286,6 +289,9 @@ services:
 
   worker:
     image: ghcr.io/iangcastill0/aegclouddfir/worker:${CDFIR_IMAGE_TAG:-dev}
+    logging:
+      driver: json-file
+      options: { max-size: '10m', max-file: '3' }
     build:
       context: ../..
       dockerfile: infra/docker/worker.Dockerfile
@@ -320,6 +326,9 @@ services:
 
   web:
     image: ghcr.io/iangcastill0/aegclouddfir/web:${CDFIR_IMAGE_TAG:-dev}
+    logging:
+      driver: json-file
+      options: { max-size: '10m', max-file: '3' }
     build:
       context: ../..
       dockerfile: infra/docker/web.Dockerfile

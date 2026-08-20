@@ -22,9 +22,15 @@ push to main → CI (~4 min) → images built (~2 min) → STAGING updates itsel
 | Sign-in           | its own Authentik application (`cdfir-staging`)                                  |
 | Secrets           | its own `.env.staging`; every value differs from production                      |
 
-**Shared, because these hold no data of their own and are the memory-hungry
-parts:** OpenSearch (namespaced by prefix), ClamAV, Tika. Running second copies
-would cost roughly 2.5 GB of RAM and buy no isolation.
+**Shared:** ClamAV and Tika (stateless — a staging scan storm slows production
+but cannot break it), the MinIO _server_ (separate buckets inside it), the
+Authentik _server_ (separate application inside it), nginx, the Docker daemon and
+the host.
+
+**Still coupled, and worth knowing:** the disk. Both OpenSearch clusters and both
+databases write to the same filesystem, so if it fills, OpenSearch turns indices
+read-only in BOTH and production stops indexing. Container logs are capped at
+10 MB × 3 for exactly this reason, and the monitor alarms at 90%.
 
 Staging runs **the same api and worker images as production** — only the
 configuration differs, so what you exercise is what ships. The web image is the
@@ -101,13 +107,25 @@ the production provider.
 
 ### 5. Staging's own search user and buckets
 
+Staging runs its **own** OpenSearch cluster on port 59201, so the user is created
+there — not in production's. Bring the cluster up first:
+
+```bash
+cd /var/www/AEGCloudDFIR/infra/compose
+docker compose -p cdfir-staging --env-file ../../.env.staging \
+  -f docker-compose.staging.yml up -d opensearch-staging
+sleep 60   # the security plugin initialises on first start
+```
+
+Then create the app user inside it:
+
 ```bash
 cd /var/www/AEGCloudDFIR
-ADMIN_PW=$(grep -E '^CDFIR_LOCAL_OS_ADMIN_PASSWORD=' .env | cut -d= -f2-)
+ADMIN_PW=$(grep -E '^CDFIR_STAGING_OS_ADMIN_PASSWORD=' .env.staging | cut -d= -f2-)
 STG_PW=$(grep -E '^CDFIR_OPENSEARCH_PASSWORD=' .env.staging | cut -d= -f2-)
 
 curl -s -u "admin:$ADMIN_PW" -X PUT \
-  "http://127.0.0.1:59200/_plugins/_security/api/roles/cdfir_staging" \
+  "http://127.0.0.1:59201/_plugins/_security/api/roles/cdfir_staging" \
   -H 'Content-Type: application/json' -d '{
     "cluster_permissions": ["cluster_composite_ops", "cluster:monitor/health"],
     "index_permissions": [
@@ -116,12 +134,12 @@ curl -s -u "admin:$ADMIN_PW" -X PUT \
   }'
 
 curl -s -u "admin:$ADMIN_PW" -X PUT \
-  "http://127.0.0.1:59200/_plugins/_security/api/internalusers/cdfir_staging" \
+  "http://127.0.0.1:59201/_plugins/_security/api/internalusers/cdfir_staging" \
   -H 'Content-Type: application/json' \
   -d "{\"password\":\"$STG_PW\",\"opendistro_security_roles\":[\"cdfir_staging\"]}"
 ```
 
-MinIO buckets:
+MinIO buckets (one MinIO server, separate buckets):
 
 ```bash
 docker exec cdfir-minio-1 sh -c \

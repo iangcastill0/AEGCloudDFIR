@@ -32,6 +32,9 @@ networks:
 services:
   postgres-staging:
     container_name: cdfir-staging-postgres
+    logging:
+      driver: json-file
+      options: { max-size: '10m', max-file: '3' }
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: cdfir
@@ -52,6 +55,9 @@ services:
 
   redis-staging:
     container_name: cdfir-staging-redis
+    logging:
+      driver: json-file
+      options: { max-size: '10m', max-file: '3' }
     image: redis:7-alpine
     command: ['redis-server', '--appendonly', 'yes', '--maxmemory-policy', 'noeviction']
     volumes:
@@ -64,8 +70,47 @@ services:
       timeout: 3s
       retries: 20
 
+  # Staging's OWN search cluster.
+  #
+  # Sharing production's cluster coupled them where it hurts: one JVM heap, one
+  # shard budget, and a staging reindex competing with production searches. A
+  # second cluster costs ~600 MB and removes that.
+  #
+  # It does NOT decouple the disk: both clusters write to the same filesystem, so
+  # if that fills, OpenSearch flips indices read-only in BOTH. Capped container
+  # logs and the 90% disk alarm are what guard that.
+  opensearch-staging:
+    image: opensearchproject/opensearch:2.19.1
+    container_name: cdfir-staging-opensearch
+    logging:
+      driver: json-file
+      options: { max-size: '10m', max-file: '3' }
+    environment:
+      discovery.type: single-node
+      plugins.security.disabled: 'false'
+      plugins.security.ssl.http.enabled: 'false'
+      # Half production's heap: staging holds test data, not a real archive.
+      OPENSEARCH_JAVA_OPTS: '-Xms512m -Xmx512m'
+      OPENSEARCH_INITIAL_ADMIN_PASSWORD: ${CDFIR_STAGING_OS_ADMIN_PASSWORD:?set a staging OpenSearch admin password}
+    volumes:
+      - staging-opensearch-data:/usr/share/opensearch/data
+    ports:
+      - '127.0.0.1:${CDFIR_OPENSEARCH_HOST_PORT:-59201}:9200'
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'curl -fsS -u "admin:$${OPENSEARCH_INITIAL_ADMIN_PASSWORD}" http://localhost:9200/_cluster/health >/dev/null',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
   api-staging:
     container_name: cdfir-staging-api
+    logging:
+      driver: json-file
+      options: { max-size: '10m', max-file: '3' }
     image: ghcr.io/iangcastill0/aegclouddfir/api:${CDFIR_IMAGE_TAG:-main}
     env_file: ../../.env.staging
     environment:
@@ -79,7 +124,7 @@ services:
       CDFIR_DATABASE_URL: postgresql://cdfir:${CDFIR_DB_PASSWORD}@postgres-staging:5432/cdfir
       CDFIR_DATABASE_MIGRATION_URL: postgresql://cdfir_migrator:${CDFIR_DB_PASSWORD}@postgres-staging:5432/cdfir
       CDFIR_REDIS_URL: redis://redis-staging:6379
-      CDFIR_OPENSEARCH_URL: http://opensearch:9200
+      CDFIR_OPENSEARCH_URL: http://opensearch-staging:9200
       CDFIR_TIKA_URL: http://tika:9998
       CDFIR_CLAMAV_HOST: clamav
     ports:
@@ -88,6 +133,8 @@ services:
       postgres-staging:
         condition: service_healthy
       redis-staging:
+        condition: service_healthy
+      opensearch-staging:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
@@ -98,6 +145,9 @@ services:
 
   worker-staging:
     container_name: cdfir-staging-worker
+    logging:
+      driver: json-file
+      options: { max-size: '10m', max-file: '3' }
     # Staging runs the SAME image as production, so what is tested here is what
     # ships. Only its configuration differs.
     image: ghcr.io/iangcastill0/aegclouddfir/worker:${CDFIR_IMAGE_TAG:-main}
@@ -106,13 +156,15 @@ services:
       CDFIR_DATABASE_URL: postgresql://cdfir:${CDFIR_DB_PASSWORD}@postgres-staging:5432/cdfir
       CDFIR_DATABASE_MIGRATION_URL: postgresql://cdfir_migrator:${CDFIR_DB_PASSWORD}@postgres-staging:5432/cdfir
       CDFIR_REDIS_URL: redis://redis-staging:6379
-      CDFIR_OPENSEARCH_URL: http://opensearch:9200
+      CDFIR_OPENSEARCH_URL: http://opensearch-staging:9200
       CDFIR_TIKA_URL: http://tika:9998
       CDFIR_CLAMAV_HOST: clamav
     depends_on:
       postgres-staging:
         condition: service_healthy
       redis-staging:
+        condition: service_healthy
+      opensearch-staging:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
@@ -123,6 +175,9 @@ services:
 
   web-staging:
     container_name: cdfir-staging-web
+    logging:
+      driver: json-file
+      options: { max-size: '10m', max-file: '3' }
     # A DIFFERENT image from production: Next inlines NEXT_PUBLIC_* at build
     # time, so a staging bundle has to be built with staging URLs. CI publishes
     # it under the -staging suffix.
@@ -136,5 +191,6 @@ services:
     restart: unless-stopped
 
 volumes:
+  staging-opensearch-data:
   staging-postgres-data:
   staging-redis-data:
