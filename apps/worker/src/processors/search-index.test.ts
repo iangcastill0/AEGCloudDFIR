@@ -3,8 +3,17 @@ import {
   MAX_HEADERS_INDEXED,
   buildAuditBatchIndex,
   buildSearchDoc,
+  processSearchIndex,
   type SearchDocInput,
 } from './search-index.js';
+import {
+  COLLECTION,
+  CUSTODIAN,
+  EVIDENCE,
+  TENANT,
+  fakeCtx,
+  type FakeCtx,
+} from '../testing/fakes.js';
 
 const base: SearchDocInput = {
   evidenceItemId: 'cdfir-1',
@@ -201,5 +210,86 @@ describe('buildSearchDoc (audit batch)', () => {
     expect(doc.audit?.workload).toBe('Exchange');
     expect(doc.text?.file).toContain('MailItemsAccessed');
     expect(doc.email).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Ledger transition after indexing
+// ---------------------------------------------------------------------------
+
+/**
+ * A PST container moves preserved -> processed (children extracted) -> indexed.
+ * The indexer only promoted rows sitting at `preserved`, so a container matched
+ * nothing: its collection_items row stayed at `processed` for good, and the
+ * per-custodian `indexed` counter under-reported.
+ *
+ * Seen on a real PST: two documents in the search index, ledger and counter both
+ * saying one.
+ */
+describe('processSearchIndex ledger transition', () => {
+  function armItem(f: FakeCtx, kind: string) {
+    f.tx.evidenceItem.findUnique.mockResolvedValue({
+      id: EVIDENCE,
+      tenantId: TENANT,
+      collectionId: COLLECTION,
+      custodianId: CUSTODIAN,
+      kind,
+      name: kind === 'container' ? 'sample.pst' : 'a message',
+      extension: kind === 'container' ? 'pst' : 'eml',
+      mimeType: kind === 'container' ? 'application/vnd.ms-outlook-pst' : 'message/rfc822',
+      size: 271360,
+      sha256: 'd'.repeat(64),
+      provider: 'upload',
+      processingStatus: kind === 'container' ? 'extracted' : 'parsed',
+      malwareStatus: 'clean',
+      primaryDate: new Date('2026-08-20T00:00:00Z'),
+      acquiredAt: new Date('2026-08-20T00:00:00Z'),
+      sourceCreatedAt: null,
+      sourceModifiedAt: null,
+      sourcePath: '',
+      sourceLabels: [],
+      isApiExportDerivative: false,
+      custodian: { email: 'test@test.com' },
+      emailMetadata: null,
+      participants: [],
+      headers: [],
+      extractedTexts: [],
+      ocrPages: [],
+      tagAssignments: [],
+      caseItems: [],
+      productionItems: [],
+      childRelationships: [],
+      parentRelationships: [],
+      auditRecords: [],
+    });
+    f.tx.collectionItem.updateMany.mockResolvedValue({ count: 1 });
+  }
+
+  it('accepts a container sitting at `processed`, not only `preserved`', async () => {
+    const f = fakeCtx();
+    armItem(f, 'container');
+
+    await processSearchIndex(f.ctx, { tenantId: TENANT, evidenceItemId: EVIDENCE });
+
+    const promotion = f.tx.collectionItem.updateMany.mock.calls
+      .map((c) => c[0] as { where: { state?: unknown }; data: { state?: string } })
+      .find((c) => c.data.state === 'indexed');
+    expect(promotion).toBeDefined();
+    // Either state means "bytes are safe, ready to index"; a container only
+    // reaches `processed` because extracting its children happens afterwards.
+    expect(promotion?.where.state).toEqual({ in: ['preserved', 'processed'] });
+  });
+
+  it('counts the container, so the per-custodian total matches the index', async () => {
+    const f = fakeCtx();
+    armItem(f, 'container');
+
+    await processSearchIndex(f.ctx, { tenantId: TENANT, evidenceItemId: EVIDENCE });
+
+    // The counter is only bumped when a ledger row was actually promoted, so a
+    // missed promotion under-reports silently rather than failing loudly.
+    expect(f.tx.$executeRaw).toHaveBeenCalled();
+    const sql = f.tx.$executeRaw.mock.calls.map((c) => JSON.stringify(c)).join('\n');
+    expect(sql).toContain('indexed');
   });
 });

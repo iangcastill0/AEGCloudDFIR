@@ -21,6 +21,16 @@ import { QUEUES, dedupKeys } from '../queues.js';
 import { readAllCapped } from '../streams.js';
 import type { EvidenceStagePayload } from './payloads.js';
 
+/**
+ * Ledger states an item can be promoted from once it has been indexed.
+ *
+ * `processed` matters: a container (a PST, say) goes preserved -> processed when
+ * its children are extracted, so filtering on `preserved` alone left containers
+ * stuck at `processed` and under-counted the per-custodian `indexed` total —
+ * two documents in the index, one reported.
+ */
+const INDEXABLE_LEDGER_STATES = ['preserved', 'processed'] as const;
+
 export const MAX_HEADERS_INDEXED = 200;
 export const MAX_OCR_PAGES_INDEXED = 500;
 export const MAX_AUDIT_RECORDS_INDEXED = 5000;
@@ -457,7 +467,7 @@ export async function processSearchIndex(
     // error rather than waiting forever on a dead-lettered job).
     await withTenantContext(ctx.prisma, tenantId, async (tx) => {
       const failed = await tx.collectionItem.updateMany({
-        where: { evidenceItemId, state: 'preserved' },
+        where: { evidenceItemId, state: { in: [...INDEXABLE_LEDGER_STATES] } },
         data: { state: 'failed', lastError: 'search indexing failed; see dead-letter queue' },
       });
       if (failed.count > 0 && item.collectionId !== null) {
@@ -515,7 +525,7 @@ export async function processSearchIndex(
       data: { processingStatus: 'indexed' },
     });
     const updated = await tx.collectionItem.updateMany({
-      where: { evidenceItemId, state: 'preserved' },
+      where: { evidenceItemId, state: { in: [...INDEXABLE_LEDGER_STATES] } },
       data: { state: 'indexed' },
     });
     if (updated.count > 0 && item.collectionId !== null) {
