@@ -1,13 +1,17 @@
 # Staging
 
 A second copy of the app on the same server, at
-<https://staging.aegclouddfir.com>. It updates itself whenever tests pass on
-`main`. Production never does — you approve every live deploy.
+<https://staging.aegclouddfir.com>. Both environments deploy when you ask them
+to; staging just skips the reviewer gate, so it is one click instead of two.
 
 ```
-push to main → CI (~4 min) → images built (~2 min) → STAGING updates itself
-                                                   → production waits for you
+push to main → CI (~4 min) → images built (~2 min) → you run Deploy staging
+                                                   → you run Deploy (production,
+                                                     needs approval)
 ```
+
+Wait for the image build to finish before deploying: the images only exist for
+commits that passed CI, so deploying too early fails at the pull.
 
 ## What is separate, and what is shared
 
@@ -189,9 +193,9 @@ table, so an unmigrated database reports `schema missing (run migrate:deploy)`.
 
 ## Day to day
 
-Nothing. Push to `main`, and staging has it a few minutes later — watch **Deploy
-staging** in the Actions tab. To put an older build on staging, run that workflow
-by hand with a different `ref`.
+Actions → **Deploy staging** → Run workflow → `ref` = `main` (or any commit that
+passed CI). No approval step. To put an older build back, run it with a different
+`ref`.
 
 Promoting to production is unchanged: Actions → **Deploy** → approve.
 

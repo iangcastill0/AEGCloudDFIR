@@ -1,17 +1,15 @@
-# Staging deploys itself. No approval, no clicking.
+# Staging deploys when a human asks, like production.
 #
-# Triggered by the image build finishing green, which itself only runs after CI
-# passes — so staging always runs a tested commit, it just does not wait for a
-# human. Production is the opposite and stays that way: deploy.yml is manual and
-# gated on a reviewer.
+# It used to deploy itself when the image build went green. That worked, but the
+# operator asked for it to be manual: they want to see and choose each step
+# rather than have work appear on a server on its own. Staging still skips the
+# reviewer gate, so it is one click rather than two.
+#
+# The commit must already have passed CI, because the images only exist for
+# commits that did — a pull of a tag that was never built simply fails.
 name: Deploy staging
 
 on:
-  workflow_run:
-    workflows: [Release images]
-    types: [completed]
-    branches: [main]
-  # Also runnable by hand, e.g. to put an older tag back on staging.
   workflow_dispatch:
     inputs:
       ref:
@@ -26,16 +24,13 @@ concurrency:
 jobs:
   deploy:
     name: Deploy to staging.aegclouddfir.com
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v4
         with:
-          # For the automatic path, check out the exact commit whose images were
-          # just published, not whatever main points at now.
-          ref: ${{ github.event.workflow_run.head_sha || inputs.ref }}
+          ref: ${{ inputs.ref }}
           fetch-depth: 0
 
       - name: Resolve the image tag

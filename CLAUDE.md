@@ -120,8 +120,10 @@ Label every command **[MAC]**, **[SERVER]**, or **[BROWSER]**.
 
 ## Deployment
 
-CI (`ci.yml`) → images (`release.yml`, only on green CI) → deploy (`deploy.yml`,
-manual, `production` environment with a required reviewer, `main` only).
+CI (`ci.yml`) → images (`release.yml`, only on green CI) → deploy. Both deploys
+are manual and run from the Actions tab: `deploy-staging.yml` (one click) and
+`deploy.yml` (`production` environment, required reviewer, `main` only).
+**Do not commit until the operator asks**; they run every deploy themselves.
 `scripts/deploy.sh` runs on the host, verifies `/readyz` plus the public site, and
 rolls back to the previously deployed tag on failure. Full setup and rollback:
 `docs/runbooks/deploy.md`.
