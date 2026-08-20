@@ -147,6 +147,22 @@ by hand with a different `ref`.
 
 Promoting to production is unchanged: Actions → **Deploy** → approve.
 
+## Why every staging service name ends in -staging
+
+Staging shares production's docker network, and compose registers each service
+name as a DNS alias on it. When both stacks had a service called `postgres`, that
+one name had two addresses and Docker answered **round-robin** — production's api
+resolved `postgres` to _staging's_ database half the time. It survived only
+because its connection pool was hours old.
+
+Unique names are the fix. Adding an `aliases:` entry does not help: the service
+name is registered regardless. The same collision applied to `api`, `web` and
+`worker` — Prometheus scrapes `worker:9464`, so its metrics were coming from
+whichever worker DNS happened to pick.
+
+If you add a service to the staging stack, give it a name that exists in neither
+stack.
+
 ## Things worth knowing
 
 - **Staging holds no real evidence and no Wasabi credentials.** Treat anything you

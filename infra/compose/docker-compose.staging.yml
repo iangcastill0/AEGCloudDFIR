@@ -20,6 +20,8 @@
 #    running second copies would cost ~2.5 GB for no isolation gain.
 #
 # Staging joins the production compose network to reach those three by name.
+# CONSEQUENCE: every service here must have a name that exists in neither stack,
+# or its DNS alias collides with production's. See the api comment below.
 name: cdfir-staging
 
 networks:
@@ -28,7 +30,8 @@ networks:
     external: true
 
 services:
-  postgres:
+  postgres-staging:
+    container_name: cdfir-staging-postgres
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: cdfir
@@ -47,7 +50,8 @@ services:
       timeout: 3s
       retries: 20
 
-  redis:
+  redis-staging:
+    container_name: cdfir-staging-redis
     image: redis:7-alpine
     command: ['redis-server', '--appendonly', 'yes', '--maxmemory-policy', 'noeviction']
     volumes:
@@ -60,25 +64,30 @@ services:
       timeout: 3s
       retries: 20
 
-  api:
+  api-staging:
+    container_name: cdfir-staging-api
     image: ghcr.io/iangcastill0/aegclouddfir/api:${CDFIR_IMAGE_TAG:-main}
     env_file: ../../.env.staging
     environment:
-      # Service names resolve on the shared network: `postgres` and `redis` are
-      # THIS project's containers (compose prefers its own), while opensearch,
-      # clamav and tika are production's.
-      CDFIR_DATABASE_URL: postgresql://cdfir:${CDFIR_DB_PASSWORD}@postgres:5432/cdfir
-      CDFIR_DATABASE_MIGRATION_URL: postgresql://cdfir_migrator:${CDFIR_DB_PASSWORD}@postgres:5432/cdfir
-      CDFIR_REDIS_URL: redis://redis:6379
+      # Every staging service name carries a -staging suffix because compose
+      # registers each service name as a DNS alias on the shared network. With
+      # both stacks using `postgres`, that alias had TWO addresses and Docker
+      # answered round-robin — production's api resolved `postgres` to STAGING's
+      # database half the time. Unique names are the only reliable fix; an
+      # `aliases:` entry does not help, because the service name is registered
+      # regardless.
+      CDFIR_DATABASE_URL: postgresql://cdfir:${CDFIR_DB_PASSWORD}@postgres-staging:5432/cdfir
+      CDFIR_DATABASE_MIGRATION_URL: postgresql://cdfir_migrator:${CDFIR_DB_PASSWORD}@postgres-staging:5432/cdfir
+      CDFIR_REDIS_URL: redis://redis-staging:6379
       CDFIR_OPENSEARCH_URL: http://opensearch:9200
       CDFIR_TIKA_URL: http://tika:9998
       CDFIR_CLAMAV_HOST: clamav
     ports:
       - '127.0.0.1:${CDFIR_API_HOST_PORT:-4100}:4000'
     depends_on:
-      postgres:
+      postgres-staging:
         condition: service_healthy
-      redis:
+      redis-staging:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
@@ -87,22 +96,23 @@ services:
       timeout: 5s
       retries: 20
 
-  worker:
+  worker-staging:
+    container_name: cdfir-staging-worker
     # Staging runs the SAME image as production, so what is tested here is what
     # ships. Only its configuration differs.
     image: ghcr.io/iangcastill0/aegclouddfir/worker:${CDFIR_IMAGE_TAG:-main}
     env_file: ../../.env.staging
     environment:
-      CDFIR_DATABASE_URL: postgresql://cdfir:${CDFIR_DB_PASSWORD}@postgres:5432/cdfir
-      CDFIR_DATABASE_MIGRATION_URL: postgresql://cdfir_migrator:${CDFIR_DB_PASSWORD}@postgres:5432/cdfir
-      CDFIR_REDIS_URL: redis://redis:6379
+      CDFIR_DATABASE_URL: postgresql://cdfir:${CDFIR_DB_PASSWORD}@postgres-staging:5432/cdfir
+      CDFIR_DATABASE_MIGRATION_URL: postgresql://cdfir_migrator:${CDFIR_DB_PASSWORD}@postgres-staging:5432/cdfir
+      CDFIR_REDIS_URL: redis://redis-staging:6379
       CDFIR_OPENSEARCH_URL: http://opensearch:9200
       CDFIR_TIKA_URL: http://tika:9998
       CDFIR_CLAMAV_HOST: clamav
     depends_on:
-      postgres:
+      postgres-staging:
         condition: service_healthy
-      redis:
+      redis-staging:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
@@ -111,7 +121,8 @@ services:
       timeout: 5s
       retries: 20
 
-  web:
+  web-staging:
+    container_name: cdfir-staging-web
     # A DIFFERENT image from production: Next inlines NEXT_PUBLIC_* at build
     # time, so a staging bundle has to be built with staging URLs. CI publishes
     # it under the -staging suffix.
@@ -120,7 +131,7 @@ services:
     ports:
       - '127.0.0.1:${CDFIR_WEB_HOST_PORT:-3100}:3000'
     depends_on:
-      api:
+      api-staging:
         condition: service_started
     restart: unless-stopped
 
