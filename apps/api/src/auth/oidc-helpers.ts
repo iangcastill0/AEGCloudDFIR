@@ -140,3 +140,26 @@ export function buildAuthorizationParameters(
 export function callbackUrl(apiPublicUrl: string): string {
   return `${apiPublicUrl.replace(/\/+$/, '')}/auth/callback`;
 }
+
+/**
+ * Protocol-level detail from a failed token exchange, for logging.
+ *
+ * openid-client reports every failure with the same message — "server responded
+ * with an error in the response body" — whether the client secret was wrong, the
+ * code expired, PKCE failed, or the redirect URI did not match. The OAuth error
+ * code and description distinguish them and contain no token material.
+ *
+ * Only strings are passed through: an identity provider is free to return
+ * anything, and a logger should not be handed an arbitrary object from a remote
+ * server.
+ */
+export function oauthErrorFields(err: unknown): Record<string, string> {
+  if (typeof err !== 'object' || err === null) return {};
+  const body = err as { error?: unknown; error_description?: unknown };
+  return {
+    ...(typeof body.error === 'string' ? { oauthError: body.error } : {}),
+    ...(typeof body.error_description === 'string'
+      ? { oauthDescription: body.error_description }
+      : {}),
+  };
+}

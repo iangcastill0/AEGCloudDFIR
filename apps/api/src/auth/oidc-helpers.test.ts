@@ -5,6 +5,7 @@ import {
   callbackUrl,
   extractGroups,
   mapIdTokenClaims,
+  oauthErrorFields,
   parseGroupRoleMap,
   rolesForGroups,
   validateRedirectTo,
@@ -149,5 +150,37 @@ describe('authorization parameters', () => {
   it('normalizes trailing slashes in the public URL', () => {
     expect(callbackUrl('https://api.ev.example')).toBe('https://api.ev.example/auth/callback');
     expect(callbackUrl('https://api.ev.example//')).toBe('https://api.ev.example/auth/callback');
+  });
+});
+
+describe('oauthErrorFields', () => {
+  it('surfaces the OAuth error code and description', () => {
+    // The real case: Authentik rejected a code and the only clue in our logs was
+    // openid-client's generic message, identical for every kind of failure.
+    expect(
+      oauthErrorFields({ error: 'invalid_grant', error_description: 'Code does not exist' }),
+    ).toEqual({ oauthError: 'invalid_grant', oauthDescription: 'Code does not exist' });
+  });
+
+  it('returns nothing for a plain Error, rather than inventing fields', () => {
+    expect(oauthErrorFields(new Error('socket hang up'))).toEqual({});
+  });
+
+  it('ignores non-string values from the identity provider', () => {
+    // A remote server can return anything; a logger should not be handed an
+    // arbitrary object because of it.
+    expect(oauthErrorFields({ error: { nested: true }, error_description: 42 })).toEqual({});
+  });
+
+  it('takes whichever field is present', () => {
+    expect(oauthErrorFields({ error: 'invalid_client' })).toEqual({
+      oauthError: 'invalid_client',
+    });
+  });
+
+  it('handles null and primitives without throwing', () => {
+    for (const input of [null, undefined, 'oops', 7]) {
+      expect(oauthErrorFields(input)).toEqual({});
+    }
   });
 });

@@ -27,6 +27,7 @@ import {
   buildAuthorizationParameters,
   extractGroups,
   mapIdTokenClaims,
+  oauthErrorFields,
   parseGroupRoleMap,
   rolesForGroups,
   validateRedirectTo,
@@ -149,9 +150,15 @@ export class AuthController {
         expectedNonce: flow.nonce,
       });
     } catch (err) {
-      // Never log token material; the error message is protocol-level only.
+      // Log the OAuth error code and description alongside the message. They are
+      // protocol-level, never token material, and they are the difference
+      // between a diagnosable failure and a guess: openid-client's message is
+      // the same string ("server responded with an error in the response body")
+      // whether the client secret is wrong, the code expired, PKCE failed, or
+      // the redirect URI did not match. Without this, the only way to tell was
+      // to read the identity provider's own logs.
       this.logger.warn(
-        { err: err instanceof Error ? err.message : String(err) },
+        { err: err instanceof Error ? err.message : String(err), ...oauthErrorFields(err) },
         'oidc code exchange failed',
       );
       throw new UnauthorizedException('login failed');
