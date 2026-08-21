@@ -47,7 +47,7 @@ import {
   logoutResponse,
   meResponse,
   memberListResponse,
-  orgSetupResponse,
+  orgConnectorSetupResponse,
   previewResponse,
   productionDetail,
   productionListResponse,
@@ -118,7 +118,7 @@ export function useSetupOrgConnector() {
       apiFetch(`/api/v1/connectors/${id}/org`, {
         method: 'POST',
         body,
-        schema: orgSetupResponse,
+        schema: orgConnectorSetupResponse,
       }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['connectors'] }),
   });

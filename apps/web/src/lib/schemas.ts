@@ -10,6 +10,11 @@ import { z } from 'zod';
 // webpack rejects it with "has no internal name", failing the production build
 // while tsc and the unit tests pass — so it only surfaces in `next build`.
 export {
+  // The connector shapes live in contracts so the browser cannot expect a body
+  // the API does not send. A local copy expected a top-level `id` when the API
+  // nests the connector, and it broke the moment the request became valid.
+  createConnectorResponse,
+  orgConnectorSetupResponse,
   caseActivityEntry,
   caseActivityListResponse,
   caseMember,
@@ -77,22 +82,6 @@ export const connectorSummary = z.object({
 export type ConnectorSummary = z.infer<typeof connectorSummary>;
 
 export const connectorListResponse = paginated(connectorSummary);
-
-export const createConnectorResponse = z.object({
-  id: z.string(),
-  /** Present for delegated OAuth flows; browser should navigate to it. */
-  authorizationUrl: z.string().nullable().default(null),
-  /** Present for Microsoft organization mode (admin-consent URL). */
-  adminConsentUrl: z.string().nullable().default(null),
-});
-
-/** POST /api/v1/connectors/:id/org */
-export const orgSetupResponse = z.object({
-  ok: z.literal(true),
-  /** Microsoft only: an Entra admin must open this to grant consent. */
-  adminConsentUrl: z.string().optional(),
-  auditScopes: z.array(z.string()).optional(),
-});
 
 export const connectorTestResponse = z.object({
   ok: z.boolean(),

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { connectionMode, provider } from './common.js';
+import { connectionMode, provider, uuid } from './common.js';
 
 /**
  * Connector request shapes.
@@ -36,3 +36,42 @@ export const orgGoogleSetupRequest = z.object({
   adminEmail: z.string().email(),
 });
 export type OrgGoogleSetupRequest = z.infer<typeof orgGoogleSetupRequest>;
+
+/**
+ * What POST /connectors returns.
+ *
+ * The connector is nested, not spread. The web schema used to expect a top-level
+ * `id`, which failed with `path: ["id"], expected string` the moment the request
+ * stopped being rejected — the shape had simply never been exercised.
+ *
+ * `adminConsentUrl` is NOT here: it comes from the organization-setup step,
+ * POST /connectors/:id/org, which is the only place a credential is supplied.
+ */
+export const connectorSummaryResponse = z.object({
+  id: uuid,
+  provider: z.string(),
+  mode: z.string(),
+  label: z.string().default(''),
+  externalIdentity: z.string().default(''),
+  externalTenantId: z.string().default(''),
+  allowedDomains: z.array(z.string()).default([]),
+  status: z.string(),
+  statusDetail: z.string().default(''),
+  createdAt: z.string(),
+  revokedAt: z.string().nullable().default(null),
+});
+
+export const createConnectorResponse = z.object({
+  connector: connectorSummaryResponse,
+  /** Present for delegated OAuth: the browser navigates here to sign in. */
+  authorizationUrl: z.string().optional(),
+});
+export type CreateConnectorResponse = z.infer<typeof createConnectorResponse>;
+
+/** What POST /connectors/:id/org returns. */
+export const orgConnectorSetupResponse = z.object({
+  ok: z.literal(true),
+  /** Microsoft only: an Entra admin must open this to grant consent. */
+  adminConsentUrl: z.string().optional(),
+  auditScopes: z.array(z.string()).optional(),
+});

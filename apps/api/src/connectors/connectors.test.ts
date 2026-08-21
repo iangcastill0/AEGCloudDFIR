@@ -6,7 +6,7 @@ import {
   SecretKind,
   encryptSecret,
 } from '@aeg-clouddfir/database';
-import { TRUTHFULNESS_NOTICES } from '@aeg-clouddfir/contracts';
+import { TRUTHFULNESS_NOTICES, createConnectorResponse } from '@aeg-clouddfir/contracts';
 import { TenantRole } from '@aeg-clouddfir/database';
 import { ConnectorsService } from './connectors.service.js';
 import { connectorSecretScope } from './token-provider.factory.js';
@@ -143,6 +143,28 @@ describe('the create request the browser actually sends', () => {
     await expect(
       service.create(auth, { provider: 'google', mode: 'delegated' }, fakeRequest()),
     ).rejects.toThrow();
+  });
+
+  it('returns a body the browser can parse — the connector is NESTED', async () => {
+    // The web schema expected a top-level `id`. Nothing caught it because the
+    // request was rejected before the response was ever parsed; the moment the
+    // request was valid, the browser failed with
+    // `path: ["id"], expected string`. This asserts the real shape.
+    const { service } = makeService({
+      connectorAccount: {
+        count: vi.fn(async () => 0),
+        create: vi.fn(async () => baseAccount({ provider: 'google' })),
+      },
+    });
+    const result = await service.create(
+      auth,
+      { provider: 'google', mode: 'delegated', label: 'Mailbox' },
+      fakeRequest(),
+    );
+    const parsed = createConnectorResponse.safeParse(result);
+    expect(parsed.success).toBe(true);
+    expect(parsed.data?.connector.id).toBe(result.connector.id);
+    expect(parsed.data?.authorizationUrl).toBeDefined();
   });
 
   it('accepts what buildCreateConnector produces', async () => {

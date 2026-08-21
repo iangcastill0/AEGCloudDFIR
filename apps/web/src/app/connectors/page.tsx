@@ -263,7 +263,8 @@ function OrgSetupDialog({
       {
         onSuccess: (created) => {
           setupOrg.mutate(
-            { id: created.id, body },
+            // The connector is nested in the response, not spread into it.
+            { id: created.connector.id, body },
             {
               onSuccess: (result) => {
                 if (result.adminConsentUrl !== undefined) {
