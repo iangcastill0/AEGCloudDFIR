@@ -39,7 +39,12 @@ import {
   type ExchangedTokens,
   type FetchLike,
 } from '@aeg-clouddfir/connectors';
-import { TRUTHFULNESS_NOTICES, connectionMode, provider } from '@aeg-clouddfir/contracts';
+import {
+  TRUTHFULNESS_NOTICES,
+  createConnectorRequest,
+  orgGoogleSetupRequest,
+  orgMicrosoftSetupRequest,
+} from '@aeg-clouddfir/contracts';
 import type { FastifyRequest } from 'fastify';
 import '../common/http.js';
 import type { AuthContext } from '../common/http.js';
@@ -73,21 +78,9 @@ export const PROVIDER_REVOCATION_NOTES: Record<Provider, string> = {
     'There is no provider-side grant for file uploads; nothing further to revoke. Already-preserved uploaded files remain in evidence storage.',
 };
 
-const createConnectorSchema = z.object({
-  provider,
-  mode: connectionMode,
-  label: z.string().min(1).max(200),
-});
-
-const orgMicrosoftSchema = z.object({
-  externalTenantId: z.string().min(1).max(200),
-});
-
-const orgGoogleSchema = z.object({
-  serviceAccountJson: z.string().min(2),
-  allowedDomains: z.array(z.string().min(1).max(255)).min(1).max(50),
-  adminEmail: z.string().email(),
-});
+// Request shapes live in @aeg-clouddfir/contracts so the web builds exactly what
+// this validates. They used to be declared here, and the page's payload drifted:
+// it never sent `label`, so every create returned 400.
 
 export interface ConnectorDto {
   id: string;
@@ -246,7 +239,7 @@ export class ConnectorsService {
     authorizationUrl?: string;
     flowCookie?: { value: string; maxAge: number };
   }> {
-    const input = zodValidate(createConnectorSchema, body);
+    const input = zodValidate(createConnectorRequest, body);
 
     if (input.provider === 'upload') {
       throw new BadRequestException(
@@ -578,7 +571,7 @@ export class ConnectorsService {
             'provider OAuth is not configured: set CDFIR_MS_CLIENT_ID (and its client secret) to enable microsoft connections',
           );
         }
-        const input = zodValidate(orgMicrosoftSchema, body);
+        const input = zodValidate(orgMicrosoftSetupRequest, body);
         await tx.connectorAccount.update({
           where: { id: account.id },
           data: {
@@ -625,7 +618,7 @@ export class ConnectorsService {
       }
 
       // Google: domain-wide delegation with an uploaded service-account key.
-      const input = zodValidate(orgGoogleSchema, body);
+      const input = zodValidate(orgGoogleSetupRequest, body);
       const key = parseServiceAccountKey(input.serviceAccountJson);
       if (!key) {
         throw new BadRequestException(

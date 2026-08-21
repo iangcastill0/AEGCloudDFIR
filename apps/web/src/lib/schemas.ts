@@ -86,6 +86,14 @@ export const createConnectorResponse = z.object({
   adminConsentUrl: z.string().nullable().default(null),
 });
 
+/** POST /api/v1/connectors/:id/org */
+export const orgSetupResponse = z.object({
+  ok: z.literal(true),
+  /** Microsoft only: an Entra admin must open this to grant consent. */
+  adminConsentUrl: z.string().optional(),
+  auditScopes: z.array(z.string()).optional(),
+});
+
 export const connectorTestResponse = z.object({
   ok: z.boolean(),
   message: z.string().default(''),

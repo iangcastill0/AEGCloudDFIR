@@ -15,8 +15,14 @@ import {
   useConnectors,
   useCreateConnector,
   useRevokeConnector,
+  useSetupOrgConnector,
   useTestConnector,
 } from '@/lib/hooks';
+import {
+  buildCreateConnector,
+  buildGoogleOrgSetup,
+  buildMicrosoftOrgSetup,
+} from '@/lib/connector-setup';
 import { errorMessage } from '@/lib/errors';
 
 type OrgSetup = { provider: 'microsoft' | 'google' } | null;
@@ -30,11 +36,14 @@ export default function ConnectorsPage() {
   const [orgSetup, setOrgSetup] = useState<OrgSetup>(null);
   const [revokeTarget, setRevokeTarget] = useState<{ id: string; name: string } | null>(null);
   const [statusText, setStatusText] = useState('');
+  const [label, setLabel] = useState('');
 
   function connectDelegated(provider: 'microsoft' | 'google') {
     setStatusText(`Starting ${provider} sign-in…`);
     create.mutate(
-      { provider, mode: 'delegated' },
+      // A label is required by the API. Leaving it out is what made every
+      // Connect click fail with 400 before the provider was ever contacted.
+      buildCreateConnector({ provider, mode: 'delegated', label: label.trim(), now: new Date() }),
       {
         onSuccess: (data) => {
           if (data.authorizationUrl) {
@@ -70,6 +79,12 @@ export default function ConnectorsPage() {
       <section className="card" aria-labelledby="connect-personal">
         <h2 id="connect-personal">Connect a personal (delegated) account</h2>
         <TruthNotice kind="delegatedAccess" />
+        <TextInput
+          label="Label (optional)"
+          hint="A name for this connection until the account signs in. Left blank, the provider and today's date are used."
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+        />
         <div className="button-row">
           <Button onClick={() => connectDelegated('microsoft')} busy={create.isPending}>
             Connect Microsoft account
@@ -210,40 +225,63 @@ function OrgSetupDialog({
   onStatus: (text: string) => void;
 }) {
   const create = useCreateConnector();
+  const setupOrg = useSetupOrgConnector();
   const [entraTenantId, setEntraTenantId] = useState('');
   const [serviceAccountJson, setServiceAccountJson] = useState('');
   const [allowedDomains, setAllowedDomains] = useState('');
   const [adminEmail, setAdminEmail] = useState('');
+  const [label, setLabel] = useState('');
   const [consentUrl, setConsentUrl] = useState<string | null>(null);
   const [error, setError] = useState('');
 
+  /**
+   * Two steps, in this order: create the connector, then send its credential to
+   * /connectors/:id/org. The old code put the credential inside the create call,
+   * where the API never looked at it — so organization mode could not work even
+   * once the label was fixed.
+   */
   function submit() {
     setError('');
+    let body: unknown;
+    try {
+      body =
+        provider === 'microsoft'
+          ? buildMicrosoftOrgSetup(entraTenantId)
+          : buildGoogleOrgSetup({ serviceAccountJson, allowedDomains, adminEmail });
+    } catch {
+      setError('Check the fields above: something is missing or not in the expected form.');
+      return;
+    }
+
     create.mutate(
-      {
+      buildCreateConnector({
         provider,
         mode: 'organization',
-        organization:
-          provider === 'microsoft'
-            ? { entraTenantId: entraTenantId.trim() }
-            : {
-                serviceAccountJson,
-                allowedDomains: allowedDomains
-                  .split(/[\n,]/)
-                  .map((s) => s.trim())
-                  .filter(Boolean),
-                adminEmail: adminEmail.trim(),
-              },
-      },
+        label: label.trim(),
+        now: new Date(),
+      }),
       {
-        onSuccess: (data) => {
-          if (provider === 'microsoft' && data.adminConsentUrl) {
-            setConsentUrl(data.adminConsentUrl);
-            onStatus('Connector created. Grant admin consent to finish setup.');
-          } else {
-            onStatus('Organization connector created.');
-            onClose();
-          }
+        onSuccess: (created) => {
+          setupOrg.mutate(
+            { id: created.id, body },
+            {
+              onSuccess: (result) => {
+                if (result.adminConsentUrl !== undefined) {
+                  setConsentUrl(result.adminConsentUrl);
+                  onStatus('Connector created. Grant admin consent to finish setup.');
+                  return;
+                }
+                onStatus('Organization connector created.');
+                onClose();
+              },
+              // The connector row exists at this point; say so, so the operator
+              // does not create a second one chasing the same error.
+              onError: (err) =>
+                setError(
+                  `The connector was created but its credential was rejected: ${errorMessage(err)}`,
+                ),
+            },
+          );
         },
         onError: (err) => setError(errorMessage(err)),
       },
@@ -270,7 +308,7 @@ function OrgSetupDialog({
           {consentUrl === null ? (
             <Button
               onClick={submit}
-              busy={create.isPending}
+              busy={create.isPending || setupOrg.isPending}
               disabled={provider === 'microsoft' ? !microsoftValid : !googleValid}
             >
               Create connector
@@ -279,6 +317,12 @@ function OrgSetupDialog({
         </>
       }
     >
+      <TextInput
+        label="Label (optional)"
+        hint="A name for this connection. Left blank, the provider and today's date are used."
+        value={label}
+        onChange={(e) => setLabel(e.target.value)}
+      />
       {provider === 'microsoft' ? (
         <>
           <TextInput

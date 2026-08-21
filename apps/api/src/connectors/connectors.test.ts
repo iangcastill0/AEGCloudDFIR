@@ -132,6 +132,36 @@ describe('ConnectorsService.create', () => {
   });
 });
 
+describe('the create request the browser actually sends', () => {
+  it('rejects a body with no label, which is what the page used to send', async () => {
+    // The page posted { provider, mode } for months. Every Connect click 400d
+    // here, before any provider was contacted. The shared contract schema and
+    // apps/web/src/lib/connector-setup.test.ts now hold both sides together.
+    const { service } = makeService({
+      connectorAccount: { count: vi.fn(async () => 0), create: vi.fn(async () => baseAccount()) },
+    });
+    await expect(
+      service.create(auth, { provider: 'google', mode: 'delegated' }, fakeRequest()),
+    ).rejects.toThrow();
+  });
+
+  it('accepts what buildCreateConnector produces', async () => {
+    const { service } = makeService({
+      connectorAccount: {
+        count: vi.fn(async () => 0),
+        create: vi.fn(async () => baseAccount({ provider: 'google' })),
+      },
+    });
+    const result = await service.create(
+      auth,
+      // Exactly the shape the page now builds.
+      { provider: 'google', mode: 'delegated', label: 'Google Workspace (personal) 2026-08-21' },
+      fakeRequest(),
+    );
+    expect(result.authorizationUrl).toBeDefined();
+  });
+});
+
 describe('ConnectorsService.configureOrg (google)', () => {
   const serviceAccountJson = JSON.stringify({
     client_email: 'svc@project.iam.gserviceaccount.com',

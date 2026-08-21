@@ -9,6 +9,7 @@ import {
 } from '@tanstack/react-query';
 import {
   addCaseItemsResponse,
+  type CreateConnectorRequest,
   caseActivityListResponse,
   caseSummary,
   caseTagListResponse,
@@ -46,6 +47,7 @@ import {
   logoutResponse,
   meResponse,
   memberListResponse,
+  orgSetupResponse,
   previewResponse,
   productionDetail,
   productionListResponse,
@@ -101,15 +103,25 @@ export function useConnectors() {
   });
 }
 
-export interface CreateConnectorInput {
-  provider: 'microsoft' | 'google';
-  mode: 'delegated' | 'organization';
-  organization?: {
-    entraTenantId?: string;
-    serviceAccountJson?: string;
-    allowedDomains?: string[];
-    adminEmail?: string;
-  };
+/**
+ * The create body is now the contract's own type. The old shape carried an
+ * `organization` object that the API never read — organization credentials go
+ * to POST /connectors/:id/org, a separate step, via useSetupOrgConnector below.
+ */
+export type CreateConnectorInput = CreateConnectorRequest;
+
+/** POST /connectors/:id/org — the second step for organization mode. */
+export function useSetupOrgConnector() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: unknown }) =>
+      apiFetch(`/api/v1/connectors/${id}/org`, {
+        method: 'POST',
+        body,
+        schema: orgSetupResponse,
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['connectors'] }),
+  });
 }
 
 export function useCreateConnector() {
