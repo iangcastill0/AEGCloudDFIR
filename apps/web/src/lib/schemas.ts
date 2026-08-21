@@ -190,8 +190,22 @@ export const explainResponse = z.object({
     .default([]),
 });
 
+/** One person on a message. bcc is never sent by the API — see its detail(). */
+export const emailParticipant = z.object({
+  role: z.string(),
+  name: z.string().default(''),
+  address: z.string().default(''),
+});
+export type EmailParticipant = z.infer<typeof emailParticipant>;
+
 export const evidenceDetail = evidenceSummary.extend({
   metadata: z.record(z.string(), z.unknown()).default({}),
+  // These three arrive from the API today and used to be dropped here, because
+  // a Zod object strips whatever it does not declare. The email view needs all
+  // three, and the notices were never shown at all.
+  emailMetadata: z.record(z.string(), z.unknown()).nullable().default(null),
+  participants: z.array(emailParticipant).default([]),
+  notices: z.array(z.string()).default([]),
   headers: z.array(z.object({ name: z.string(), value: z.string() })).default([]),
   extractedText: z.string().nullable().default(null),
   family: z
@@ -201,6 +215,8 @@ export const evidenceDetail = evidenceSummary.extend({
         name: z.string(),
         kind: z.string(),
         relationship: z.string(),
+        /** Relative to the item being viewed: its child, or its parent. */
+        direction: z.enum(['parent', 'child']).default('child'),
       }),
     )
     .default([]),

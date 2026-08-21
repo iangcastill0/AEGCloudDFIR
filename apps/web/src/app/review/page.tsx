@@ -17,6 +17,7 @@ import {
 } from '@aeg-clouddfir/ui';
 import { HighlightText, QueryBoundary, TruthNotice } from '@/components/shared';
 import { QueryBuilder } from '@/components/QueryBuilder';
+import { EmailView } from '@/components/EmailView';
 import {
   useAuditRecords,
   useBulkTag,
@@ -31,7 +32,8 @@ import {
   useSearchFields,
   useTags,
 } from '@/lib/hooks';
-import type { SearchHit } from '@/lib/schemas';
+import type { EvidenceDetail, SearchHit } from '@/lib/schemas';
+import { isEmailLike } from '@/lib/eml-view';
 import { ADVANCED_QUERY_EXAMPLES, QUERY_EXAMPLES } from '@/lib/query-help';
 import {
   freshBuilder,
@@ -253,6 +255,7 @@ export default function ReviewPage() {
 
           <PreviewPane
             activeId={activeId}
+            onSelect={setActiveId}
             queryText={
               submitted === null
                 ? ''
@@ -860,10 +863,13 @@ function PreviewPane({
   activeId,
   queryText,
   onStatus,
+  onSelect,
 }: {
   activeId: string | null;
   queryText: string;
   onStatus: (text: string) => void;
+  /** Selecting an attachment previews it in this same pane. */
+  onSelect: (id: string) => void;
 }) {
   const evidence = useEvidence(activeId);
   const preview = useEvidencePreview(activeId);
@@ -924,7 +930,9 @@ function PreviewPane({
                 {
                   id: 'content',
                   label: 'Content',
-                  panel: <ContentTab previewState={preview} itemKind={item.kind} />,
+                  panel: (
+                    <ContentTab previewState={preview} item={item} onOpenAttachment={onSelect} />
+                  ),
                 },
                 ...((item.kind as string) === 'audit_batch'
                   ? [{ id: 'audit', label: 'Audit', panel: <AuditTab itemId={item.id} /> }]
@@ -1019,7 +1027,7 @@ function PreviewPane({
                       <ul>
                         {item.family.map((f) => (
                           <li key={f.id}>
-                            {f.relationship}: {f.name} ({f.kind})
+                            {humanizeToken(f.relationship)} ({f.direction}): {f.name} ({f.kind})
                           </li>
                         ))}
                       </ul>
@@ -1116,14 +1124,16 @@ function PreviewPane({
 
 function ContentTab({
   previewState,
-  itemKind,
+  item,
+  onOpenAttachment,
 }: {
   previewState: ReturnType<typeof useEvidencePreview>;
-  itemKind: string;
+  item: EvidenceDetail;
+  onOpenAttachment: (id: string) => void;
 }) {
   // Uploaded PST/OST containers are preserved whole and never previewed
   // inline; their extracted messages are separate evidence items.
-  if (itemKind === 'container')
+  if (item.kind === 'container')
     return (
       <p>
         Container file — see extracted messages in Family. The preserved container is the
@@ -1134,20 +1144,38 @@ function ContentTab({
   if (previewState.error != null)
     return <p role="alert">Preview unavailable: {errorMessage(previewState.error)}</p>;
   const preview = previewState.data;
-  if (!preview || preview.kind === 'none')
-    return <p>No safe preview is available for this item.</p>;
-  if (preview.kind === 'safe_html') {
-    // sandbox="" (fully restrictive): no scripts, no same-origin, no forms.
-    return (
+
+  const body =
+    !preview || preview.kind === 'none' ? (
+      <p>No safe preview is available for this item.</p>
+    ) : preview.kind === 'safe_html' ? (
+      // sandbox="" (fully restrictive): no scripts, no same-origin, no forms.
       <iframe
         className="preview-frame"
         sandbox=""
         srcDoc={preview.content}
         title="Sanitized evidence preview"
       />
+    ) : (
+      <pre className="preview-pre">{preview.content}</pre>
     );
-  }
-  return <pre className="preview-pre">{preview.content}</pre>;
+
+  // A message gets the header block above its body; anything else is unchanged.
+  if (!isEmailLike(item)) return body;
+  return (
+    <EmailView
+      item={item}
+      // Children only. A parent relationship is the container this message was
+      // extracted from, which is not one of its attachments.
+      attachments={item.family.filter(
+        (f) =>
+          f.direction === 'child' &&
+          (f.relationship === 'attachment' || f.relationship === 'inline_attachment'),
+      )}
+      body={body}
+      onOpenAttachment={onOpenAttachment}
+    />
+  );
 }
 
 function AuditTab({ itemId }: { itemId: string }) {

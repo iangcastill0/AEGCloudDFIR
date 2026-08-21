@@ -469,17 +469,60 @@ const rawChainResponse = z.object({
     .default([]),
 });
 
+const rawHeadersResponse = z.object({
+  items: z.array(z.object({ name: z.string(), value: z.string().default('') })).default([]),
+});
+
+const rawFamilyResponse = z.object({
+  items: z
+    .array(
+      z.object({
+        relationship: z.string(),
+        direction: z.enum(['parent', 'child']),
+        detail: z.string().default(''),
+        item: z.object({
+          id: z.string(),
+          kind: z.string(),
+          name: z.string(),
+          size: z.string().default('0'),
+          sha256: z.string().default(''),
+        }),
+      }),
+    )
+    .default([]),
+});
+
 export function useEvidence(id: string | null) {
   return useQuery({
     queryKey: ['evidence', id],
     queryFn: async () => {
-      // The custody chain lives on its own endpoint; merge it into the
-      // detail object the panel renders.
-      const [detail, chain] = await Promise.all([
+      // The custody chain, the raw headers and the family each live on their
+      // own endpoint; merge them into the detail object the panel renders. The
+      // headers and family calls were missing, which is why those two tabs were
+      // always empty — the schema defaulted them to [] and nothing filled them.
+      const [detail, chain, headers, family] = await Promise.all([
         apiFetch(`/api/v1/evidence/${id}`, { schema: evidenceDetail }),
         apiFetch(`/api/v1/evidence/${id}/chain`, { schema: rawChainResponse }).catch(() => null),
+        apiFetch(`/api/v1/evidence/${id}/headers`, { schema: rawHeadersResponse }).catch(
+          () => null,
+        ),
+        apiFetch(`/api/v1/evidence/${id}/family`, { schema: rawFamilyResponse }).catch(() => null),
       ]);
-      if (chain === null) return detail;
+      const extras = {
+        ...(headers === null ? {} : { headers: headers.items }),
+        ...(family === null
+          ? {}
+          : {
+              family: family.items.map((rel) => ({
+                id: rel.item.id,
+                name: rel.item.name,
+                kind: rel.item.kind,
+                relationship: rel.relationship,
+                direction: rel.direction,
+              })),
+            }),
+      };
+      if (chain === null) return { ...detail, ...extras };
       const acquisitionEntry = chain.acquisition
         ? [
             {
@@ -498,7 +541,7 @@ export function useEvidence(id: string | null) {
             },
           ]
         : [];
-      return { ...detail, custody: [...acquisitionEntry, ...chain.events] };
+      return { ...detail, ...extras, custody: [...acquisitionEntry, ...chain.events] };
     },
     enabled: id !== null,
   });

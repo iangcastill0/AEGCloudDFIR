@@ -163,6 +163,99 @@ describe('EvidenceService.native', () => {
   });
 });
 
+describe('EvidenceService.detail — the people on a message', () => {
+  function emailItem() {
+    return {
+      ...baseItem({ name: 'Q3 numbers', kind: 'email' }),
+      extension: 'eml',
+      mimeType: 'message/rfc822',
+      sha256: 'abcd',
+      custodian: { email: 'alice@example.com' },
+      sourcePath: '/Inbox/Q3',
+      sourceLabels: [],
+      primaryDate: new Date('2026-03-04T05:06:07Z'),
+      acquiredAt: new Date('2026-03-05T00:00:00Z'),
+      processingStatus: 'complete',
+      processingDetail: '',
+      isApiExportDerivative: false,
+      provider: 'microsoft',
+      tagAssignments: [],
+      driveMetadata: null,
+      emailMetadata: {
+        subject: 'Q3 numbers',
+        messageId: '<a@b>',
+        inReplyTo: '',
+        threadId: '',
+        conversationId: '',
+        sentAt: new Date('2026-03-04T05:06:07Z'),
+        receivedAt: null,
+        rawDateHeader: 'Wed, 4 Mar 2026 05:06:07 +0000',
+        folder: 'Inbox',
+        labels: [],
+        categories: [],
+        flags: [],
+        bccPresent: true,
+        hasAttachments: false,
+        isEncrypted: false,
+        smimeType: '',
+      },
+      participants: [
+        { role: 'from', rawName: 'Alice Smith', rawAddress: 'alice@example.com', position: 0 },
+        { role: 'to', rawName: '', rawAddress: 'bob@example.com', position: 1 },
+        { role: 'cc', rawName: 'Carol', rawAddress: 'carol@example.com', position: 2 },
+        { role: 'bcc', rawName: 'Dan', rawAddress: 'dan@example.com', position: 3 },
+      ],
+    };
+  }
+
+  it('returns who the message was from and to, in header order', async () => {
+    const { store } = makeStore();
+    const { service } = makeService(
+      { evidenceItem: { findFirst: vi.fn(async () => emailItem()) } },
+      store,
+    );
+    const detail = await service.detail(makeAuth([TenantRole.reviewer]), ITEM_A);
+    expect(detail.participants).toEqual([
+      { role: 'from', name: 'Alice Smith', address: 'alice@example.com' },
+      { role: 'to', name: '', address: 'bob@example.com' },
+      { role: 'cc', name: 'Carol', address: 'carol@example.com' },
+    ]);
+  });
+
+  it('never returns bcc addresses, only the fact that a bcc existed', async () => {
+    // A recovered bcc address is not a delivered header. Showing it as one is
+    // the exact claim TRUTHFULNESS_NOTICES.bcc exists to prevent.
+    const { store } = makeStore();
+    const { service } = makeService(
+      { evidenceItem: { findFirst: vi.fn(async () => emailItem()) } },
+      store,
+    );
+    const detail = await service.detail(makeAuth([TenantRole.reviewer]), ITEM_A);
+    expect(detail.participants.map((p) => p.role)).not.toContain('bcc');
+    expect(JSON.stringify(detail.participants)).not.toContain('dan@example.com');
+    expect(detail.emailMetadata?.['bccPresent']).toBe(true);
+  });
+
+  it('returns an empty participant list for a file, not null', async () => {
+    const { store } = makeStore();
+    const { service } = makeService(
+      {
+        evidenceItem: {
+          findFirst: vi.fn(async () => ({
+            ...emailItem(),
+            kind: 'file',
+            emailMetadata: null,
+            participants: [],
+          })),
+        },
+      },
+      store,
+    );
+    const detail = await service.detail(makeAuth([TenantRole.reviewer]), ITEM_A);
+    expect(detail.participants).toEqual([]);
+  });
+});
+
 describe('EvidenceService.preview', () => {
   it('presigns the latest preview per kind and includes the remote-content safety note', async () => {
     const { store, presignGet } = makeStore();

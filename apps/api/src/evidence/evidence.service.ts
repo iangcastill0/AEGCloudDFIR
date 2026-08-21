@@ -9,6 +9,7 @@ import type { AppConfig } from '@aeg-clouddfir/config';
 import {
   EvidenceKind,
   MalwareStatus,
+  ParticipantRole,
   TenantRole,
   withTenantContext,
   type PrismaClient,
@@ -64,6 +65,11 @@ export interface EvidenceDetailDto {
   tags: { id: string; name: string; color: string }[];
   emailMetadata: Record<string, unknown> | null;
   driveMetadata: Record<string, unknown> | null;
+  /**
+   * Who was on the message, in header order. Never includes bcc — see detail().
+   * Empty for anything that is not an email.
+   */
+  participants: { role: string; name: string; address: string }[];
   notices: string[];
 }
 
@@ -111,6 +117,7 @@ export class EvidenceService {
           custodian: { select: { email: true } },
           emailMetadata: true,
           driveMetadata: true,
+          participants: { orderBy: { position: 'asc' } },
           tagAssignments: { include: { tag: { select: { id: true, name: true, color: true } } } },
         },
       }),
@@ -139,6 +146,12 @@ export class EvidenceService {
       isApiExportDerivative: item.isApiExportDerivative,
       provider: item.provider,
       tags: item.tagAssignments.map((a) => a.tag),
+      // bcc is filtered out on purpose. An address recovered from a mailbox copy
+      // is not a delivered header, and showing it beside From and To would read
+      // as one. `emailMetadata.bccPresent` reports the fact without the claim.
+      participants: item.participants
+        .filter((p) => p.role !== ParticipantRole.bcc)
+        .map((p) => ({ role: p.role, name: p.rawName, address: p.rawAddress })),
       emailMetadata: item.emailMetadata
         ? {
             subject: item.emailMetadata.subject,

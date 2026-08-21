@@ -422,3 +422,57 @@ h2 {
   align-items: center;
   gap: var(--space-1);
 }
+
+/* Email view: the header block above a message body.
+   A definition list, because these are label/value pairs — the labels are read
+   out as such. Long address lists wrap instead of stretching the pane. */
+.eml {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.eml-header {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-subtle);
+}
+.eml-header__row {
+  display: grid;
+  grid-template-columns: 5.5rem minmax(0, 1fr);
+  gap: var(--space-2);
+  align-items: baseline;
+}
+.eml-header__row dt {
+  color: var(--color-text-muted);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+.eml-header__row dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.eml-header--context {
+  background: none;
+  border-style: dashed;
+  font-size: 0.8125rem;
+}
+.eml-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.eml-attachments__label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+.eml-body {
+  min-width: 0;
+}
