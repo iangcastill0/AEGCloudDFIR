@@ -15,6 +15,7 @@ import { PRISMA } from '../common/tokens.js';
 import type { CursorQuery } from '../common/pagination.js';
 import { zodValidate } from '../common/zod-validate.js';
 import { chunk, expandDescendants, expandFamilies } from '../common/families.js';
+import { enqueueReindex } from '../common/reindex.js';
 import { AuditService } from '../audit/audit.service.js';
 
 const BULK_CHUNK_SIZE = 500;
@@ -286,22 +287,12 @@ export class TagsService {
         }
       }
 
-      // Re-index affected items so tag facets update (worker contract shape).
-      const versions = await tx.evidenceItem.findMany({
-        where: { tenantId: auth.tenantId, id: { in: expandedIds } },
-        select: { id: true, version: true },
-      });
-      for (const rows of chunk(versions, BULK_CHUNK_SIZE)) {
-        await tx.outboxEvent.createMany({
-          data: rows.map((row) => ({
-            tenantId: auth.tenantId,
-            topic: 'search.index',
-            dedupKey: `index:${row.id}:v${row.version}`,
-            payload: { tenantId: auth.tenantId, evidenceItemId: row.id, version: row.version },
-          })),
-          skipDuplicates: true,
-        });
-      }
+      // Re-index affected items so tag facets update. This used to build the
+      // dedup key from the item and its version alone, which is a once-ever key:
+      // tagging does not bump the version, so applying a tag, removing it and
+      // applying it again re-indexed only the first time and the facets then
+      // disagreed with the database. See enqueueReindex for the full reason.
+      await enqueueReindex(tx, auth.tenantId, expandedIds, 'tag');
 
       await this.audit.appendTx(tx, {
         tenantId: auth.tenantId,

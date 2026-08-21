@@ -42,6 +42,19 @@ export class SearchController {
     return this.search.execute(requireAuth(request), body, request);
   }
 
+  /**
+   * The parameters the query builder can offer, with their types.
+   *
+   * Served from the same field registry the parser validates against, so the
+   * builder cannot offer a parameter or operator the API would then reject. A
+   * hardcoded copy in the browser would drift the first time a field is added.
+   */
+  @Get('fields')
+  @RequireRoles(TenantRole.case_manager, TenantRole.reviewer, TenantRole.read_only)
+  fields(): { items: { name: string; type: string }[] } {
+    return { items: this.search.searchableFields() };
+  }
+
   @Post('explain')
   @RequireRoles(TenantRole.case_manager, TenantRole.reviewer, TenantRole.read_only)
   @HttpCode(200)

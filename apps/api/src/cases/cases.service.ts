@@ -22,6 +22,7 @@ import { PRISMA } from '../common/tokens.js';
 import type { CursorQuery } from '../common/pagination.js';
 import { zodValidate } from '../common/zod-validate.js';
 import { chunk, expandFamilies } from '../common/families.js';
+import { enqueueReindex } from '../common/reindex.js';
 import { isCaseRestricted } from '../common/roles.js';
 import { AuditService } from '../audit/audit.service.js';
 import { SelectionService } from '../search/selection.service.js';
@@ -306,6 +307,13 @@ export class CasesService {
         });
         added += result.count;
       }
+
+      // The case filter in search reads `caseIds` from the index document, and
+      // that document is built from database truth at index time — so a new
+      // member of a case is invisible to search until the item is re-indexed.
+      // Every requested id is re-indexed, not just the newly inserted ones, so
+      // an item whose document is already stale is repaired by adding it again.
+      await enqueueReindex(tx, auth.tenantId, finalIds, 'case');
 
       await this.audit.appendTx(tx, {
         tenantId: auth.tenantId,

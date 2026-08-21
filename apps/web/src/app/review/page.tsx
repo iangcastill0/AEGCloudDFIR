@@ -16,6 +16,7 @@ import {
   VisuallyHidden,
 } from '@aeg-clouddfir/ui';
 import { HighlightText, QueryBoundary, TruthNotice } from '@/components/shared';
+import { QueryBuilder } from '@/components/QueryBuilder';
 import {
   useAuditRecords,
   useBulkTag,
@@ -27,45 +28,109 @@ import {
   useSaveSearch,
   useSavedSearches,
   useSearch,
+  useSearchFields,
   useTags,
 } from '@/lib/hooks';
 import type { SearchHit } from '@/lib/schemas';
-import { ADVANCED_QUERY_EXAMPLES, QUERY_EXAMPLES, QUERY_SYNTAX_OPTIONS } from '@/lib/query-help';
+import { ADVANCED_QUERY_EXAMPLES, QUERY_EXAMPLES } from '@/lib/query-help';
+import {
+  freshBuilder,
+  isPristine,
+  isRunnable,
+  toBuilderJson,
+  toPreview,
+  type BuilderGroup,
+  type FieldOption,
+  type FieldType,
+} from '@/lib/query-builder';
 import { errorMessage } from '@/lib/errors';
 import { formatBytes, formatDateTime, humanizeToken } from '@/lib/format';
 
+/**
+ * How the query is written. "build" is point-and-click; the other two are the
+ * two typed languages. The choice is made from a menu, never inferred, because
+ * the same text means different things to the two parsers.
+ */
+type QueryMode = 'build' | 'simple' | 'advanced';
+
+const QUERY_MODE_OPTIONS: Array<{ value: QueryMode; label: string }> = [
+  { value: 'build', label: 'Build it — pick from menus' },
+  { value: 'simple', label: 'Type it — simple language' },
+  { value: 'advanced', label: 'Type it — advanced language' },
+];
+
 interface Filters {
+  mode: QueryMode;
+  /** Used by the two typed modes. */
   queryText: string;
-  /** Which query language queryText is written in. */
-  syntax: 'simple' | 'advanced';
+  /** Used by build mode. */
+  builder: BuilderGroup;
   caseId: string;
   custodianEmail: string;
   source: string;
   facetFilters: Record<string, string[]>;
 }
 
-const EMPTY_FILTERS: Filters = {
-  queryText: '',
-  syntax: 'simple',
-  caseId: '',
-  custodianEmail: '',
-  source: '',
-  facetFilters: {},
-};
+/** A function, not a constant: each reset gets its own builder tree. */
+function emptyFilters(): Filters {
+  return {
+    mode: 'build',
+    queryText: '',
+    builder: freshBuilder(),
+    caseId: '',
+    custodianEmail: '',
+    source: '',
+    facetFilters: {},
+  };
+}
 
 export default function ReviewPage() {
-  const [draft, setDraft] = useState(EMPTY_FILTERS);
+  const [draft, setDraft] = useState(emptyFilters);
   const [submitted, setSubmitted] = useState<Filters | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
   const [items, setItems] = useState<SearchHit[]>([]);
   const [selection, setSelection] = useState<ReadonlySet<string>>(new Set());
   const [activeId, setActiveId] = useState<string | null>(null);
   const [statusText, setStatusText] = useState('');
+  // Incomplete conditions are only marked after a Search attempt, so the page
+  // does not open covered in warnings about a row nobody has filled in yet.
+  const [showProblems, setShowProblems] = useState(false);
+
+  // The parameter menu and the type of each parameter both come from the API's
+  // field registry, so the builder cannot offer something the API would reject.
+  const fieldsQuery = useSearchFields();
+  const fields: FieldOption[] = useMemo(
+    () => (fieldsQuery.data?.items ?? []) as FieldOption[],
+    [fieldsQuery.data],
+  );
+  const fieldTypes: Record<string, FieldType> = useMemo(
+    () => Object.fromEntries(fields.map((f) => [f.name, f.type])),
+    [fields],
+  );
+
+  // A built query is sent as structured JSON. An untouched or half-finished
+  // builder sends nothing, which searches everything — the same as an empty box.
+  const builderJson = useMemo(() => {
+    if (!submitted || submitted.mode !== 'build') return undefined;
+    if (!isRunnable(submitted.builder)) return undefined;
+    return toBuilderJson(submitted.builder, fieldTypes);
+  }, [submitted, fieldTypes]);
+
+  // Values that exist are offered as a list: a tag typed by hand that does not
+  // exist matches nothing, which reads as "no evidence" rather than "no tag".
+  const tags = useTags();
+  // Same query as the rail's; React Query serves both from one fetch.
+  const cases = useCases();
+  const tagSuggestions = useMemo(
+    () => ({ tags: (tags.data?.items ?? []).map((t) => t.name) }),
+    [tags.data],
+  );
 
   const search = useSearch(
     {
-      queryText: submitted?.queryText ?? '',
-      syntax: submitted?.syntax ?? 'simple',
+      queryText: submitted?.mode === 'build' ? '' : (submitted?.queryText ?? ''),
+      syntax: submitted?.mode === 'advanced' ? 'advanced' : 'simple',
+      ...(builderJson === undefined ? {} : { builder: builderJson }),
       ...(submitted?.caseId ? { caseId: submitted.caseId } : {}),
       ...(submitted?.custodianEmail ? { custodianEmail: submitted.custodianEmail } : {}),
       ...(submitted?.source ? { source: submitted.source } : {}),
@@ -98,168 +163,306 @@ export default function ReviewPage() {
     <>
       <h1>Review workspace</h1>
       <StatusLive politeness="polite">{statusText}</StatusLive>
-      <div className="review-layout">
-        <SearchRail
+      {/* One form around the query panel AND the rail, so pressing Enter in any
+          filter runs the search the same way the Search button does. Every other
+          button on the page is type="button". */}
+      <form
+        role="search"
+        aria-label="Evidence search"
+        onSubmit={(e) => {
+          e.preventDefault();
+          // A half-finished condition must not search: dropping it silently
+          // would return everything, which reads as "my query matched the whole
+          // archive" rather than "this row is incomplete". An UNTOUCHED builder
+          // is different — it means "no query", so the rail's filters alone
+          // still run, which is how "everything in this case" is searched.
+          if (draft.mode === 'build' && !isPristine(draft.builder) && !isRunnable(draft.builder)) {
+            setShowProblems(true);
+            return;
+          }
+          setShowProblems(false);
+          runSearch(draft);
+        }}
+      >
+        <QueryPanel
           draft={draft}
           setDraft={setDraft}
-          onSearch={() => runSearch(draft)}
           onShowAll={() => {
-            setDraft(EMPTY_FILTERS);
-            runSearch(EMPTY_FILTERS);
-          }}
-          facets={search.data?.facets ?? []}
-          submitted={submitted}
-          onFacetToggle={(field, value, checked) => {
-            if (!submitted) return;
-            const current = submitted.facetFilters[field] ?? [];
-            const nextValues = checked ? [...current, value] : current.filter((v) => v !== value);
-            const next = {
-              ...submitted,
-              facetFilters: { ...submitted.facetFilters, [field]: nextValues },
-            };
+            const next = emptyFilters();
             setDraft(next);
+            setShowProblems(false);
             runSearch(next);
           }}
-          onLoadSaved={(queryText, caseId) => {
-            const next = { ...EMPTY_FILTERS, queryText, caseId };
-            setDraft(next);
-            runSearch(next);
-          }}
+          canSave={submitted !== null && savedQueryText(draft).trim().length > 0}
+          fields={fields}
+          fieldsPending={fieldsQuery.isPending}
+          fieldsError={fieldsQuery.error}
+          showProblems={showProblems}
+          tagSuggestions={tagSuggestions}
         />
 
-        <ResultsPane
-          items={items}
-          total={search.data?.total ?? 0}
-          nextCursor={search.data?.nextCursor ?? null}
-          isPending={submitted !== null && search.isPending}
-          error={search.error}
-          onRetry={() => void search.refetch()}
-          hasSearched={submitted !== null}
-          selection={selection}
-          setSelection={setSelection}
-          activeId={activeId}
-          setActiveId={setActiveId}
-          onLoadMore={() => setCursor(search.data?.nextCursor ?? null)}
-          onStatus={setStatusText}
-        />
+        <div className="review-layout">
+          <SearchRail
+            draft={draft}
+            setDraft={setDraft}
+            facets={search.data?.facets ?? []}
+            submitted={submitted}
+            onFacetToggle={(field, value, checked) => {
+              if (!submitted) return;
+              const current = submitted.facetFilters[field] ?? [];
+              const nextValues = checked ? [...current, value] : current.filter((v) => v !== value);
+              const next = {
+                ...submitted,
+                facetFilters: { ...submitted.facetFilters, [field]: nextValues },
+              };
+              setDraft(next);
+              runSearch(next);
+            }}
+            onLoadSaved={(queryText, syntax, caseId) => {
+              // A saved search is text, so loading one switches to its language.
+              const next = { ...emptyFilters(), mode: syntax, queryText, caseId };
+              setDraft(next);
+              runSearch(next);
+            }}
+          />
 
-        <PreviewPane
-          activeId={activeId}
-          queryText={submitted?.queryText ?? ''}
-          onStatus={setStatusText}
-        />
-      </div>
+          <ResultsPane
+            items={items}
+            total={search.data?.total ?? 0}
+            // Named so the header says WHICH case these results are scoped to.
+            // Items can belong to several cases, so switching cases can show
+            // some of the same items again — that reads as "it added them"
+            // unless the scope is written down.
+            caseName={
+              submitted?.caseId
+                ? (cases.data?.items.find((c) => c.id === submitted.caseId)?.name ?? '')
+                : ''
+            }
+            nextCursor={search.data?.nextCursor ?? null}
+            isPending={submitted !== null && search.isPending}
+            error={search.error}
+            onRetry={() => void search.refetch()}
+            hasSearched={submitted !== null}
+            selection={selection}
+            setSelection={setSelection}
+            activeId={activeId}
+            setActiveId={setActiveId}
+            onLoadMore={() => setCursor(search.data?.nextCursor ?? null)}
+            onStatus={setStatusText}
+          />
+
+          <PreviewPane
+            activeId={activeId}
+            queryText={
+              submitted === null
+                ? ''
+                : submitted.mode === 'build'
+                  ? toPreview(submitted.builder)
+                  : submitted.queryText
+            }
+            onStatus={setStatusText}
+          />
+        </div>
+      </form>
     </>
   );
 }
 
-// --- Left rail ---
+/** The text form of whatever the rail currently holds, for saving. */
+function savedQueryText(draft: Filters): string {
+  return draft.mode === 'build' ? toPreview(draft.builder) : draft.queryText;
+}
 
-function SearchRail(props: {
+// --- Query panel (full width, above the three panes) ---
+
+/**
+ * How the query is written, and the buttons that run it.
+ *
+ * This is its own full-width panel rather than part of the left rail: a
+ * condition row is `[parameter] [operator] [value]`, and in an 18rem rail every
+ * one of those wrapped onto its own line, which made a three-condition query
+ * taller than the screen.
+ */
+function QueryPanel(props: {
   draft: Filters;
   setDraft: (f: Filters) => void;
   onShowAll: () => void;
-  onSearch: () => void;
-  facets: Array<{ field: string; label: string; values: Array<{ value: string; count: number }> }>;
-  submitted: Filters | null;
-  onFacetToggle: (field: string, value: string, checked: boolean) => void;
-  onLoadSaved: (queryText: string, caseId: string) => void;
+  canSave: boolean;
+  fields: FieldOption[];
+  fieldsPending: boolean;
+  fieldsError: unknown;
+  showProblems: boolean;
+  tagSuggestions: Record<string, string[]>;
 }) {
   const { draft, setDraft } = props;
-  const cases = useCases();
-  const savedSearches = useSavedSearches();
   const saveSearch = useSaveSearch();
   const [helpOpen, setHelpOpen] = useState(false);
   const [saveName, setSaveName] = useState('');
   const [saveOpen, setSaveOpen] = useState(false);
 
   return (
-    <div className="review-rail">
-      <form
-        role="search"
-        aria-label="Evidence search"
-        onSubmit={(e) => {
-          e.preventDefault();
-          props.onSearch();
-        }}
-      >
+    <section className="review-query" aria-label="Query">
+      <div className="review-query__mode">
         <Select
-          label="Query language"
-          value={draft.syntax}
+          label="How to search"
+          hint="Build it with menus, or type a query in one of the two languages."
+          value={draft.mode}
           onChange={(e) =>
-            // Only the language changes: the text is kept so the two spellings
-            // can be compared side by side rather than retyped.
-            setDraft({ ...draft, syntax: e.target.value as 'simple' | 'advanced' })
+            // Only the mode changes. Both the builder tree and any typed text
+            // are kept, so switching back and forth loses nothing.
+            setDraft({ ...draft, mode: e.target.value as QueryMode })
           }
-          options={QUERY_SYNTAX_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
-        />
-        <TextInput
-          label="Search query"
-          value={draft.queryText}
-          onChange={(e) => setDraft({ ...draft, queryText: e.target.value })}
-        />
-        <div className="help-popover">
-          <button
-            type="button"
-            className="cdfir-button cdfir-button--ghost cdfir-button--small"
-            aria-expanded={helpOpen}
-            onClick={() => setHelpOpen((o) => !o)}
-          >
-            Query language help
-          </button>
-          {helpOpen ? (
-            <div className="help-popover__panel">
-              <ul>
-                {(draft.syntax === 'advanced' ? ADVANCED_QUERY_EXAMPLES : QUERY_EXAMPLES).map(
-                  (ex) => (
-                    <li key={ex.query}>
-                      <code>{ex.query}</code> — {ex.description}
-                    </li>
-                  ),
-                )}
-              </ul>
-              <TruthNotice kind="bcc" />
-            </div>
-          ) : null}
-        </div>
-
-        <Select
-          label="Case"
-          value={draft.caseId}
-          placeholder="All cases"
-          onChange={(e) => setDraft({ ...draft, caseId: e.target.value })}
-          options={(cases.data?.items ?? []).map((c) => ({ value: c.id, label: c.name }))}
-        />
-        <TextInput
-          label="Custodian filter"
-          hint="Exact custodian email."
-          value={draft.custodianEmail}
-          onChange={(e) => setDraft({ ...draft, custodianEmail: e.target.value })}
-        />
-        <Select
-          label="Source"
-          value={draft.source}
-          placeholder="All sources"
-          onChange={(e) => setDraft({ ...draft, source: e.target.value })}
-          options={[
-            { value: 'email', label: 'Email' },
-            { value: 'drive', label: 'Drive' },
-          ]}
+          options={QUERY_MODE_OPTIONS}
         />
         <div className="button-row">
           <Button type="submit">Search</Button>
           <Button variant="secondary" onClick={props.onShowAll}>
             Show all
           </Button>
-          <Button
-            variant="secondary"
-            disabled={props.submitted === null || draft.queryText.trim().length === 0}
-            onClick={() => setSaveOpen(true)}
-          >
+          <Button variant="secondary" disabled={!props.canSave} onClick={() => setSaveOpen(true)}>
             Save current
           </Button>
         </div>
-      </form>
+      </div>
+
+      <div className="review-query__body">
+        {draft.mode === 'build' ? (
+          props.fieldsPending ? (
+            <Skeleton lines={3} label="Loading the parameter list" />
+          ) : props.fieldsError !== null ? (
+            // Without the registry the parameter menu would be empty, which
+            // reads as "there is nothing to search on" rather than a failed
+            // request.
+            <p role="alert" className="cdfir-field__error">
+              The parameter list could not be loaded, so the builder cannot be used:{' '}
+              {errorMessage(props.fieldsError)}
+            </p>
+          ) : (
+            <QueryBuilder
+              root={draft.builder}
+              fields={props.fields}
+              suggestions={props.tagSuggestions}
+              showProblems={props.showProblems}
+              onChange={(builder) => setDraft({ ...draft, builder })}
+            />
+          )
+        ) : (
+          <>
+            <TextInput
+              label="Search query"
+              value={draft.queryText}
+              onChange={(e) => setDraft({ ...draft, queryText: e.target.value })}
+            />
+            <div className="help-popover">
+              <button
+                type="button"
+                className="cdfir-button cdfir-button--ghost cdfir-button--small"
+                aria-expanded={helpOpen}
+                onClick={() => setHelpOpen((o) => !o)}
+              >
+                Query language help
+              </button>
+              {helpOpen ? (
+                <div className="help-popover__panel">
+                  <ul>
+                    {(draft.mode === 'advanced' ? ADVANCED_QUERY_EXAMPLES : QUERY_EXAMPLES).map(
+                      (ex) => (
+                        <li key={ex.query}>
+                          <code>{ex.query}</code> — {ex.description}
+                        </li>
+                      ),
+                    )}
+                  </ul>
+                  <TruthNotice kind="bcc" />
+                </div>
+              ) : null}
+            </div>
+          </>
+        )}
+      </div>
+
+      <Dialog
+        open={saveOpen}
+        onClose={() => setSaveOpen(false)}
+        title="Save current search"
+        actions={
+          <>
+            <Button variant="secondary" onClick={() => setSaveOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              disabled={saveName.trim().length === 0}
+              busy={saveSearch.isPending}
+              onClick={() =>
+                saveSearch.mutate(
+                  {
+                    name: saveName.trim(),
+                    ...(draft.caseId ? { caseId: draft.caseId } : {}),
+                    // A built query is saved as its advanced-language text, so
+                    // it re-parses to the same AST when it is loaded again.
+                    queryText: savedQueryText(draft),
+                    syntax: draft.mode === 'simple' ? 'simple' : 'advanced',
+                    queryAst: null,
+                  },
+                  { onSuccess: () => setSaveOpen(false) },
+                )
+              }
+            >
+              Save search
+            </Button>
+          </>
+        }
+      >
+        <TextInput label="Name" value={saveName} onChange={(e) => setSaveName(e.target.value)} />
+        {saveSearch.isError ? (
+          <p role="alert" className="cdfir-field__error">
+            {errorMessage(saveSearch.error)}
+          </p>
+        ) : null}
+      </Dialog>
+    </section>
+  );
+}
+
+// --- Left rail: everything that narrows the results ---
+
+function SearchRail(props: {
+  draft: Filters;
+  setDraft: (f: Filters) => void;
+  facets: Array<{ field: string; label: string; values: Array<{ value: string; count: number }> }>;
+  submitted: Filters | null;
+  onFacetToggle: (field: string, value: string, checked: boolean) => void;
+  onLoadSaved: (queryText: string, syntax: 'simple' | 'advanced', caseId: string) => void;
+}) {
+  const { draft, setDraft } = props;
+  const cases = useCases();
+  const savedSearches = useSavedSearches();
+
+  return (
+    <div className="review-rail">
+      <Select
+        label="Case"
+        value={draft.caseId}
+        placeholder="All cases"
+        onChange={(e) => setDraft({ ...draft, caseId: e.target.value })}
+        options={(cases.data?.items ?? []).map((c) => ({ value: c.id, label: c.name }))}
+      />
+      <TextInput
+        label="Custodian filter"
+        hint="Exact custodian email."
+        value={draft.custodianEmail}
+        onChange={(e) => setDraft({ ...draft, custodianEmail: e.target.value })}
+      />
+      <Select
+        label="Source"
+        value={draft.source}
+        placeholder="All sources"
+        onChange={(e) => setDraft({ ...draft, source: e.target.value })}
+        options={[
+          { value: 'email', label: 'Email' },
+          { value: 'drive', label: 'Drive' },
+        ]}
+      />
 
       {props.facets.length > 0 ? (
         <section aria-label="Result facets">
@@ -291,7 +494,7 @@ function SearchRail(props: {
               <button
                 type="button"
                 className="cdfir-button cdfir-button--ghost cdfir-button--small"
-                onClick={() => props.onLoadSaved(s.queryText, s.caseId ?? '')}
+                onClick={() => props.onLoadSaved(s.queryText, s.syntax, s.caseId ?? '')}
               >
                 {s.name}
               </button>
@@ -299,43 +502,6 @@ function SearchRail(props: {
           ))}
         </ul>
       </section>
-
-      <Dialog
-        open={saveOpen}
-        onClose={() => setSaveOpen(false)}
-        title="Save current search"
-        actions={
-          <>
-            <Button variant="secondary" onClick={() => setSaveOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              disabled={saveName.trim().length === 0}
-              busy={saveSearch.isPending}
-              onClick={() =>
-                saveSearch.mutate(
-                  {
-                    name: saveName.trim(),
-                    ...(draft.caseId ? { caseId: draft.caseId } : {}),
-                    queryText: draft.queryText,
-                    queryAst: null,
-                  },
-                  { onSuccess: () => setSaveOpen(false) },
-                )
-              }
-            >
-              Save search
-            </Button>
-          </>
-        }
-      >
-        <TextInput label="Name" value={saveName} onChange={(e) => setSaveName(e.target.value)} />
-        {saveSearch.isError ? (
-          <p role="alert" className="cdfir-field__error">
-            {errorMessage(saveSearch.error)}
-          </p>
-        ) : null}
-      </Dialog>
     </div>
   );
 }
@@ -343,6 +509,8 @@ function SearchRail(props: {
 // --- Center results ---
 
 function ResultsPane(props: {
+  /** Empty when no case filter is applied. */
+  caseName: string;
   items: SearchHit[];
   total: number;
   nextCursor: string | null;
@@ -421,13 +589,18 @@ function ResultsPane(props: {
         <div style={{ padding: 'var(--space-4)' }}>
           <EmptyState
             title="No results"
-            description="Try broadening the query or clearing facets."
+            description={
+              props.caseName === ''
+                ? 'Try broadening the query or clearing facets.'
+                : `Nothing in the case “${props.caseName}” matches. Try broadening the query, clearing facets, or choosing “All cases”.`
+            }
           />
         </div>
       ) : (
         <>
           <p style={{ padding: '0 var(--space-3)' }}>
             Showing {props.items.length} of {props.total} results
+            {props.caseName === '' ? '' : ` in the case “${props.caseName}”`}
           </p>
           <div className="review-results__scroll" ref={scrollRef}>
             <div

@@ -90,6 +90,18 @@ export class SearchService {
     private readonly audit: AuditService,
   ) {}
 
+  /**
+   * Every parameter the query language accepts, with its type.
+   *
+   * `header.<name>` is left out: it is a pattern rather than a field, so it
+   * cannot be a dropdown entry.
+   */
+  searchableFields(): { name: string; type: string }[] {
+    return DEFAULT_FIELD_REGISTRY.allowedFields()
+      .filter((name) => name !== 'header.<name>')
+      .map((name) => ({ name, type: DEFAULT_FIELD_REGISTRY.resolve(name).type }));
+  }
+
   private parseToValidatedAst(input: SearchRequestInput): ValidatedAst {
     try {
       let ast: QueryNode;

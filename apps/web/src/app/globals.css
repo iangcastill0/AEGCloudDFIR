@@ -288,3 +288,137 @@ h2 {
   padding: var(--space-3);
   margin-top: var(--space-2);
 }
+
+/* The query panel sits above the three panes and spans the full width: a
+   condition row is three controls wide, and inside the 18rem rail every one of
+   them wrapped onto its own line. */
+.review-query {
+  display: grid;
+  grid-template-columns: minmax(13rem, 17rem) minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: start;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-raised);
+  padding: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+@media (max-width: 60rem) {
+  .review-query {
+    grid-template-columns: 1fr;
+  }
+}
+.review-query__body {
+  min-width: 0;
+}
+
+/* Visual query builder.
+   Nested groups are the whole point of the layout: each group is a box, and its
+   depth is visible, so the reader can see what AND/OR applies to what. */
+.qb {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.qb__preview {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-subtle);
+}
+.qb__preview-label {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+.qb__preview code {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.qb-group {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3) var(--space-3);
+  margin: 0;
+  min-width: 0;
+}
+/* Alternating tint by depth, so a nested group reads as inside its parent
+   without relying on colour alone — the border and indent carry it too. */
+.qb-group[data-depth='0'] {
+  background: var(--color-bg-raised);
+}
+.qb-group[data-depth='1'],
+.qb-group[data-depth='3'] {
+  background: var(--color-bg-subtle);
+}
+.qb-group[data-depth='2'],
+.qb-group[data-depth='4'] {
+  background: var(--color-bg-raised);
+}
+.qb-group__legend {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding-inline: var(--space-2);
+  font-weight: 600;
+}
+.qb-group__not {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+.qb-group__children {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.qb-group__actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-top: var(--space-2);
+}
+.qb-condition {
+  display: flex;
+  flex-wrap: wrap;
+  row-gap: var(--space-1);
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-raised);
+  min-width: 0;
+}
+.qb-condition[data-invalid='true'] {
+  border-color: var(--color-warning-border);
+  background: var(--color-warning-bg);
+}
+.qb-condition__problem {
+  flex-basis: 100%;
+  font-size: 0.8125rem;
+  color: var(--color-warning-text);
+}
+.qb-values {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.qb-values__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}

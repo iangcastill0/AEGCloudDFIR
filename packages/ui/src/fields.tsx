@@ -11,6 +11,14 @@ interface FieldChrome {
   label: string;
   hint?: ReactNode;
   error?: string;
+  /**
+   * Render the label for screen readers only.
+   *
+   * For dense rows — a query condition is parameter, operator, value on one line
+   * — a visible label on every control is noise, but the control still needs a
+   * name. This keeps the label in the accessibility tree rather than dropping it.
+   */
+  labelHidden?: boolean;
 }
 
 function useFieldIds(explicitId: string | undefined) {
@@ -29,11 +37,21 @@ function describedBy(hintId: string, errorId: string, hint?: ReactNode, error?: 
 export interface TextInputProps
   extends FieldChrome, Omit<InputHTMLAttributes<HTMLInputElement>, 'children'> {}
 
-export function TextInput({ label, hint, error, id: explicitId, ...rest }: TextInputProps) {
+export function TextInput({
+  label,
+  hint,
+  error,
+  labelHidden,
+  id: explicitId,
+  ...rest
+}: TextInputProps) {
   const { id, hintId, errorId } = useFieldIds(explicitId);
   return (
     <div className="cdfir-field">
-      <label className="cdfir-field__label" htmlFor={id}>
+      <label
+        className={labelHidden === true ? 'cdfir-visually-hidden' : 'cdfir-field__label'}
+        htmlFor={id}
+      >
         {label}
       </label>
       {hint ? (
@@ -106,13 +124,17 @@ export function Select({
   error,
   options,
   placeholder,
+  labelHidden,
   id: explicitId,
   ...rest
 }: SelectProps) {
   const { id, hintId, errorId } = useFieldIds(explicitId);
   return (
     <div className="cdfir-field">
-      <label className="cdfir-field__label" htmlFor={id}>
+      <label
+        className={labelHidden === true ? 'cdfir-visually-hidden' : 'cdfir-field__label'}
+        htmlFor={id}
+      >
         {label}
       </label>
       {hint ? (

@@ -55,6 +55,7 @@ import {
   submitProductionResponse,
   tagListResponse,
   savedSearchListResponse,
+  searchFieldListResponse,
   uploadResponse,
 } from './schemas';
 
@@ -248,6 +249,8 @@ export function useCollectionExceptions(id: string, kindFilter: string) {
 
 export interface SearchRequestInput {
   queryText: string;
+  /** Structured query from the visual builder; takes precedence over queryText. */
+  builder?: unknown;
   /** Which language queryText is written in; composed clauses must match it. */
   syntax?: 'simple' | 'advanced';
   caseId?: string;
@@ -294,6 +297,34 @@ export function composeQuery(input: SearchRequestInput): string {
     parts.push(values.length > 1 ? `(${clause})` : clause);
   }
   return parts.join(' AND ');
+}
+
+/**
+ * The same rail filters as `composeQuery`, but as builder JSON.
+ *
+ * A built query is sent as structured JSON, so the text clauses composeQuery
+ * produces would never be seen. Without this, ticking a facet in build mode
+ * changed nothing at all and the results looked unfiltered — the filter was
+ * dropped in silence.
+ */
+export function composeBuilder(input: SearchRequestInput, builder: unknown): unknown {
+  const eq = (field: string, value: string) => ({ field, operator: 'equals', value });
+  const extra: unknown[] = [];
+
+  if (input.custodianEmail) extra.push(eq('custodian', input.custodianEmail.trim()));
+  if (input.source === 'email') {
+    extra.push({ op: 'or', children: [eq('kind', 'email'), eq('kind', 'attachment')] });
+  }
+  if (input.source === 'drive') extra.push(eq('kind', 'file'));
+  for (const [field, values] of Object.entries(input.facetFilters ?? {})) {
+    const queryField = FACET_QUERY_FIELDS[field];
+    if (!queryField || values.length === 0) continue;
+    const children = values.map((v) => eq(queryField, v));
+    extra.push(children.length === 1 ? children[0] : { op: 'or', children });
+  }
+
+  if (extra.length === 0) return builder;
+  return { op: 'and', children: [builder, ...extra] };
 }
 
 function docString(doc: Record<string, unknown>, key: string): string {
@@ -346,6 +377,16 @@ export function adaptSearchResponse(raw: RawSearchResponse): SearchResponse {
   };
 }
 
+/** Parameters the query builder can offer, from the API's field registry. */
+export function useSearchFields() {
+  return useQuery({
+    queryKey: ['search-fields'],
+    queryFn: () => apiFetch('/api/v1/search/fields', { schema: searchFieldListResponse }),
+    // The registry only changes when the app is deployed.
+    staleTime: 60 * 60 * 1000,
+  });
+}
+
 export function useSearch(input: SearchRequestInput, enabled: boolean) {
   return useQuery({
     queryKey: ['search', input],
@@ -353,8 +394,11 @@ export function useSearch(input: SearchRequestInput, enabled: boolean) {
       const raw = await apiFetch('/api/v1/search', {
         method: 'POST',
         body: {
-          query: composeQuery(input),
-          syntax: input.syntax ?? 'simple',
+          // A built query is sent as structured JSON; a typed one as text. The
+          // API validates both into the same AST.
+          ...(input.builder === undefined
+            ? { query: composeQuery(input), syntax: input.syntax ?? 'simple' }
+            : { builder: composeBuilder(input, input.builder) }),
           ...(input.caseId ? { caseId: input.caseId } : {}),
           ...(input.cursor ? { searchAfter: JSON.parse(input.cursor) as unknown[] } : {}),
           limit: input.limit ?? 100,
@@ -547,8 +591,15 @@ export function useSavedSearches() {
 export function useSaveSearch() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { name: string; caseId?: string; queryText: string; queryAst: unknown }) =>
-      apiFetch('/api/v1/saved-searches', { method: 'POST', body, schema: savedSearchResponse }),
+    mutationFn: (body: {
+      name: string;
+      caseId?: string;
+      queryText: string;
+      // The language matters when the search is loaded again: re-parsing an
+      // advanced query with the simple parser changes what it means.
+      syntax?: 'simple' | 'advanced';
+      queryAst: unknown;
+    }) => apiFetch('/api/v1/saved-searches', { method: 'POST', body, schema: savedSearchResponse }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['saved-searches'] }),
   });
 }
@@ -586,6 +637,8 @@ export function useUpdateCase(id: string) {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['case', id] });
       void qc.invalidateQueries({ queryKey: ['cases'] });
+      // Placing or releasing a legal hold is audited, so the log changed.
+      void qc.invalidateQueries({ queryKey: ['case-activity', id] });
     },
   });
 }
@@ -611,7 +664,12 @@ export function useAddCaseNote(id: string) {
   return useMutation({
     mutationFn: (text: string) =>
       apiFetch(`/api/v1/cases/${id}/notes`, { method: 'POST', body: { text } }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['case-notes', id] }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['case-notes', id] });
+      // The summary counts notes, and the note is an audited event.
+      void qc.invalidateQueries({ queryKey: ['case-summary', id] });
+      void qc.invalidateQueries({ queryKey: ['case-activity', id] });
+    },
   });
 }
 
@@ -632,6 +690,29 @@ export function useCaseActivity(id: string) {
   });
 }
 
+/**
+ * Every query that goes stale when a case's contents change.
+ *
+ * Kept as a list rather than written out at each call site: the first version
+ * refreshed the item list but not the summary or the activity log, so the two
+ * panels a reviewer actually reads — "what is in this case" and its history —
+ * still showed the old numbers, and the only way to see the addition was to
+ * reload the page.
+ */
+export function caseContentQueryKeys(id: string): unknown[][] {
+  return [
+    ['case-items', id],
+    ['case-tags', id],
+    ['case', id],
+    // The counts panel.
+    ['case-summary', id],
+    // The case's own history, which just gained a "items added" entry.
+    ['case-activity', id],
+    // The case list shows per-case counts too.
+    ['cases'],
+  ];
+}
+
 export function useAddCaseItems(id: string) {
   const qc = useQueryClient();
   return useMutation({
@@ -642,11 +723,9 @@ export function useAddCaseItems(id: string) {
         schema: addCaseItemsResponse,
       }),
     onSuccess: () => {
-      // The item list and the case's tag set both change; without this the page
-      // shows the old counts and the addition looks like it did nothing.
-      void qc.invalidateQueries({ queryKey: ['case-items', id] });
-      void qc.invalidateQueries({ queryKey: ['case-tags', id] });
-      void qc.invalidateQueries({ queryKey: ['case', id] });
+      for (const queryKey of caseContentQueryKeys(id)) {
+        void qc.invalidateQueries({ queryKey });
+      }
     },
   });
 }

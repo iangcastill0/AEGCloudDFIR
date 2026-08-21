@@ -63,6 +63,16 @@ describe('CasesService.addItems', () => {
         findMany: vi.fn(async () => [{ evidenceItemId: ITEM_A }, { evidenceItemId: ITEM_B }]),
       },
       caseItem: { createMany },
+      // Adding to a case re-indexes the items; see the re-index test below.
+      evidenceItem: {
+        findMany: vi.fn(async () => [
+          { id: ITEM_A, version: 1 },
+          { id: ITEM_B, version: 1 },
+        ]),
+      },
+      outboxEvent: {
+        createMany: vi.fn(async (args: { data: unknown[] }) => ({ count: args.data.length })),
+      },
     });
 
     const result = await service.addItems(
@@ -95,12 +105,18 @@ describe('CasesService.addItems', () => {
     // a matter to what came back. Doing it by tag first meant tagging thousands
     // of items just to reference them.
     const createMany = vi.fn(async (args: { data: unknown[] }) => ({ count: args.data.length }));
-    const findMany = vi.fn(async () => [{ id: ITEM_A }, { id: ITEM_B }]);
+    const findMany = vi.fn(async () => [
+      { id: ITEM_A, version: 1 },
+      { id: ITEM_B, version: 1 },
+    ]);
     const { service, audit } = makeService({
       case: { findFirst: vi.fn(async () => caseRow()) },
       collection: { findFirst: vi.fn(async () => ({ id: COLLECTION_ID })) },
       evidenceItem: { findMany },
       caseItem: { createMany },
+      outboxEvent: {
+        createMany: vi.fn(async (args: { data: unknown[] }) => ({ count: args.data.length })),
+      },
     });
 
     const result = await service.addItems(
@@ -171,6 +187,43 @@ describe('CasesService.addItems', () => {
         fakeRequest(),
       ),
     ).rejects.toThrow(NotFoundException);
+  });
+
+  it('re-indexes every added item, so the case filter in search can find them', async () => {
+    // Case membership lives in the search document as `caseIds`. Without this
+    // the items are in the case in the database and the case filter in Review
+    // returns nothing at all.
+    const outboxCreateMany = vi.fn(async (args: { data: unknown[] }) => ({
+      count: args.data.length,
+    }));
+    const { service } = makeService({
+      case: { findFirst: vi.fn(async () => caseRow()) },
+      evidenceItem: {
+        findMany: vi.fn(async (args: { where: { id?: { in: string[] } } }) =>
+          (args.where.id?.in ?? [ITEM_A, ITEM_B]).map((id: string) => ({ id, version: 2 })),
+        ),
+      },
+      caseItem: {
+        createMany: vi.fn(async (args: { data: unknown[] }) => ({ count: args.data.length })),
+      },
+      outboxEvent: { createMany: outboxCreateMany },
+    });
+
+    await service.addItems(
+      auth,
+      CASE_ID,
+      { source: { kind: 'items', evidenceItemIds: [ITEM_A, ITEM_B] }, includeFamilies: false },
+      fakeRequest(),
+    );
+
+    const rows = (
+      outboxCreateMany.mock.calls[0]?.[0] as {
+        data: { topic: string; payload: Record<string, unknown> }[];
+      }
+    ).data;
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.topic).toBe('search.index');
+    expect(rows.map((r) => r.payload.evidenceItemId).sort()).toEqual([ITEM_A, ITEM_B].sort());
   });
 });
 

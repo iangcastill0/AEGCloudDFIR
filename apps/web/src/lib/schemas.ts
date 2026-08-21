@@ -316,3 +316,13 @@ export const memberEntry = z.object({
   roles: z.array(z.string()),
 });
 export const memberListResponse = paginated(memberEntry);
+
+/** GET /api/v1/search/fields — parameters the builder offers, with their types. */
+export const searchFieldListResponse = z.object({
+  items: z.array(
+    z.object({
+      name: z.string(),
+      type: z.enum(['text', 'keyword', 'date', 'size', 'address', 'header', 'ocr', 'boolean']),
+    }),
+  ),
+});

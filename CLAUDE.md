@@ -55,6 +55,13 @@ Local stack and dev servers: see README.md. Migrations are
 `pnpm --filter @aeg-clouddfir/database run migrate:deploy` and read
 `CDFIR_DATABASE_MIGRATION_URL` (the migrator role), not `CDFIR_DATABASE_URL`.
 
+**Never run `next build` while the web dev server is running.** Both write to
+`apps/web/.next`. The build deletes chunks the dev server is still handing out.
+The browser then says `Cannot find module ./vendor-chunks/...`, or
+`__webpack_modules__[moduleId] is not a function`. That reads like broken code.
+It is not. Stop the dev server, build, start it again. Already confused? Run
+`rm -rf apps/web/.next` first.
+
 `pnpm format:check` runs **before** lint and tests in CI, so unformatted code
 fails the pipeline in ~30s and nothing else ever runs. Between 2026-08-13 and
 2026-08-18 that hid a genuinely broken test on main. Run `pnpm format` before
@@ -70,13 +77,22 @@ span files and are easy to break:
   `FORCE ROW LEVEL SECURITY`. All tenant queries go through
   `withTenantContext(prisma, tenantId, fn)`, which sets `app.tenant_id` for the
   transaction; `withPlatformContext` sets `app.platform` and deliberately has
-  **no** policy on evidence tables. Consequence: `psql -U cdfir` with no tenant
-  context returns **zero rows from everything**, and `pg_dump` as the owner
-  silently produces a near-empty dump — always dump as superuser.
+  **no** policy on evidence tables. So `psql -U cdfir` with no tenant context
+  returns **zero rows from everything**. And `pg_dump` as the owner quietly
+  produces a near-empty dump. Always dump as superuser.
 - **Jobs are dispatched through a transactional outbox.** Services write an
   `outbox_events` row inside the same transaction as their state change; the
   worker dispatches to BullMQ. Never enqueue directly from a service. Dedup keys
   make retries idempotent (retries append `:retry<ts>`).
+  **A dedup key works once, ever.** Dispatched rows stay in the table, and
+  `(topic, dedupKey)` is unique. So `skipDuplicates` throws away a repeat key.
+  A key like `index:<id>:v<version>` re-indexes an item one time only. Tagging
+  and case membership do not change the version. The second change was dropped,
+  and search kept the old answer. Use `enqueueReindex()`
+  (`apps/api/src/common/reindex.ts`) for anything that changes what a search
+  should see; it adds a fresh token each call. Case membership had no re-index
+  at all. Items joined a case, and the case filter in Review found nothing,
+  because `caseIds` never reached the document.
 - **Evidence storage is content-addressed and write-once**: stage → verify hash →
   promote. `packages/evidence/src/store.ts` is the only thing that talks to S3.
   Server-side copies above 5 GiB must use `copySized()` (multipart
@@ -88,8 +104,8 @@ span files and are easy to break:
   (exports, production downloads) must append an event.
 - **`packages/contracts` is the API↔web boundary.** Shared Zod schemas; the client
   validates responses with the same schema the API is tested against. When an
-  endpoint's shape changes, change the contract and test the service against it —
-  a mismatch type-checks fine and fails at runtime in the browser.
+  endpoint's shape changes, change the contract and test the service against it.
+  A mismatch type-checks fine, then fails at runtime in the browser.
   In `apps/web/src/lib/schemas.ts` re-export with
   `export { name } from '@aeg-clouddfir/contracts'`, never
   `import` + `export { name }` — the latter passes tsc and unit tests but breaks
@@ -99,9 +115,9 @@ span files and are easy to break:
   OpenSearch auto-creates a dynamic mapping, and aggregations then fail on text
   fields. Reindex with `pnpm tsx scripts/reindex.ts`.
 - **`apps/api` uses type-based DI**, so it needs `emitDecoratorMetadata`. Its
-  `dev` script is `tsc --watch` + `node --watch`, **not** `tsx watch`: esbuild
-  silently drops that option and Nest then fails to resolve providers — guarded
-  routes return opaque 500s while `/healthz` still passes.
+  `dev` script is `tsc --watch` + `node --watch`, **not** `tsx watch`. esbuild
+  drops that option without a word. Nest then cannot resolve providers. Guarded
+  routes return blank 500s while `/healthz` still passes.
 
 Design docs are in `docs/architecture.md` and `docs/adr/`; threat model in
 `THREAT_MODEL.md`. Read the relevant ADR before changing one of the above.
@@ -130,9 +146,9 @@ rolls back to the previously deployed tag on failure. Full setup and rollback:
 
 Traps that have each caused an outage or silent breakage here:
 
-- **Never build images on the server.** It has no pnpm, and buildx cache reached
-  48 GB on a 98 GB disk and broke a deploy mid-`git pull`. CI builds; the host
-  pulls.
+- **Never build images on the server.** It has no pnpm. Its buildx cache once
+  reached 48 GB on a 98 GB disk and broke a deploy mid-`git pull`. CI builds; the
+  host pulls.
 - **Always pass `--env-file ../../.env` to compose** (or run from the repo root).
   Interpolation reads the `.env` in the _current_ directory, not the services'
   `env_file`. Omitting it applies every default: colliding host ports and
@@ -148,33 +164,33 @@ Traps that have each caused an outage or silent breakage here:
 
 ## Monitoring and backups
 
-`packages/monitoring` runs on the host every 5 minutes from cron and reports to a
-healthchecks.io dead-man's switch: failures ping `/fail`, and **silence is itself
+`packages/monitoring` runs on the host every 5 minutes from cron. It reports to a
+healthchecks.io dead-man's switch. Failures ping `/fail`, and **silence is itself
 an alert**. Prometheus + Grafana + node-exporter are in the `monitoring` compose
 profile, bound to localhost. Details, thresholds and the SSH tunnel:
 `docs/runbooks/monitoring.md`.
 
-Backups run 03:15 UTC (`scripts/backup-postgres.sh`), dump as superuser, verify by
-re-reading, and write `.last-backup` only after that verification — the monitor
-treats a stale stamp as a failed backup. Restore procedure:
+Backups run 03:15 UTC (`scripts/backup-postgres.sh`). They dump as superuser and
+verify by re-reading. `.last-backup` is written only after that check, because the
+monitor treats a stale stamp as a failed backup. Restore procedure:
 `docs/runbooks/backup-restore.md`.
 
 ## Working style in this repo
 
-- **Never report pipeline or deployment state from inference — check it.**
-  `gh run list --workflow=CI -L 5 --json headSha,status,conclusion`, the same for
-  `"Release images"`, and `grep CDFIR_IMAGE_TAG` in the server's `.env` /
-  `.env.staging` for what is actually running. Do not describe a queue, an ETA, or
-  what an environment "should" have; those claims have been wrong in both
-  directions — inventing a backlog that did not exist, and saying a change was
-  still waiting when its image had already shipped. One image contains every
-  commit up to its SHA, so a later green build supersedes earlier ones.
+- **Never report pipeline or deployment state from inference — check it.** Run
+  `gh run list --workflow=CI -L 5 --json headSha,status,conclusion`. Same for
+  `"Release images"`. For what is actually running, `grep CDFIR_IMAGE_TAG` in the
+  server's `.env` / `.env.staging`. Never describe a queue, an ETA, or what an
+  environment "should" have. Those guesses have been wrong both ways here: a
+  backlog that did not exist, and a change called "still waiting" after its image
+  had shipped. One image holds every commit up to its SHA, so a later green build
+  replaces earlier ones.
 
 - **Verify inside the running container or against the real artifact**, not by
-  build exit codes. Every fault found here had the signature "reports success,
-  silently broken": a healthy container with credentials that had never worked, a
-  web image that failed to build for several deploys, `docker ps` healthy while
-  the queue connection was refused, backups that stopped for a day.
+  build exit codes. Every fault found here looked the same: reports success,
+  silently broken. A healthy container whose credentials had never worked. A web
+  image that failed to build for several deploys. `docker ps` healthy while the
+  queue connection was refused. Backups that stopped for a day.
 - **Prefer a real-input test over more mocks** when behaviour depends on an
   external tool. Fully mocked tests passed for a LibreOffice conversion that
   produced no output at all.
@@ -190,6 +206,7 @@ treats a stale stamp as a failed backup. Restore procedure:
 
 ## Keeping this file current
 
-Add to it when something here is learned the hard way — a trap, an invariant, a
-command that is not discoverable. Keep entries short and say _why_, because the
-reason is what makes them stick. Do not duplicate `docs/`; link to it.
+Add to it when something is learned the hard way here: a trap, a rule, a command
+you would never guess. Keep entries short. Say _why_ — the reason is what makes
+them stick. Write plainly, in the same 5th-grade style as the top of this file;
+that rule applies to this file too. Do not duplicate `docs/`; link to it.

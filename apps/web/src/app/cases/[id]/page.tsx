@@ -4,6 +4,7 @@ import Link from 'next/link';
 import {
   Button,
   Checkbox,
+  Notice,
   Select,
   Skeleton,
   StatusLive,
@@ -24,6 +25,7 @@ import {
   useTags,
   useUpdateCase,
 } from '@/lib/hooks';
+import { addItemsMessage } from '@/lib/case-items';
 import { errorMessage } from '@/lib/errors';
 import { formatDateTime } from '@/lib/format';
 
@@ -277,6 +279,10 @@ function AddItemsCard({ caseId, onStatus }: { caseId: string; onStatus: (t: stri
   const [sourceKind, setSourceKind] = useState<SourceKind>('collection');
   const [sourceId, setSourceId] = useState('');
   const [includeFamilies, setIncludeFamilies] = useState(true);
+  // Shown inside this card. The page's live region sits above the fold, so a
+  // confirmation only announced there was invisible to anyone who had scrolled
+  // down to press this button.
+  const [outcome, setOutcome] = useState<{ text: string; failed: boolean } | null>(null);
 
   const options =
     sourceKind === 'tag'
@@ -348,28 +354,30 @@ function AddItemsCard({ caseId, onStatus }: { caseId: string; onStatus: (t: stri
               // wrong — the add is synchronous and already done — and it read the
               // same whether 500 items were added or none.
               onSuccess: (result) => {
-                if (result.added === 0) {
-                  onStatus(
-                    result.requested === 0
-                      ? 'Nothing matched that selection, so no items were added.'
-                      : `No new items added \u2014 all ${String(result.requested)} were already in the case.`,
-                  );
-                  return;
-                }
-                const already = result.requested - result.added;
-                onStatus(
-                  already > 0
-                    ? `Added ${String(result.added)} item(s). ${String(already)} were already in the case.`
-                    : `Added ${String(result.added)} item(s) to the case.`,
-                );
+                const text = addItemsMessage(result);
+                setOutcome({ text, failed: false });
+                onStatus(text);
               },
-              onError: (err) => onStatus(errorMessage(err)),
+              onError: (err) => {
+                setOutcome({ text: errorMessage(err), failed: true });
+                onStatus(errorMessage(err));
+              },
             },
           )
         }
       >
         Add to case
       </Button>
+
+      {addItems.isPending ? <p className="cdfir-field__hint">Adding…</p> : null}
+      {outcome !== null && !addItems.isPending ? (
+        <Notice variant={outcome.failed ? 'warning' : 'info'}>
+          {outcome.text}
+          {outcome.failed ? null : (
+            <> The counts and history above have been refreshed — no need to reload.</>
+          )}
+        </Notice>
+      ) : null}
     </section>
   );
 }

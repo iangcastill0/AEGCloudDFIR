@@ -3,7 +3,8 @@
   "configurations": [
     {
       "name": "web",
-      "url": "http://localhost:3000",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@aeg-clouddfir/web", "run", "dev"],
       "port": 3000
     }
   ]

@@ -106,14 +106,16 @@ describe('TagsService.bulk', () => {
     expect(result.affected).toBe(1200);
     expect(assignmentCreateMany).toHaveBeenCalledTimes(3); // 500 + 500 + 200
 
-    // Worker-contract index events: index:{id}:v{version}.
+    // Worker-contract index events. The dedup key carries the item, its version
+    // and a per-call token: keyed on item + version alone, a second tag change
+    // at the same version would be dropped as a duplicate and never re-index.
     const firstOutboxRows = (
       outboxCreateMany.mock.calls[0]?.[0] as {
         data: { topic: string; dedupKey: string; payload: Record<string, unknown> }[];
       }
     ).data;
     expect(firstOutboxRows[0]?.topic).toBe('search.index');
-    expect(firstOutboxRows[0]?.dedupKey).toBe(`index:${manyIds[0]}:v3`);
+    expect(firstOutboxRows[0]?.dedupKey).toMatch(new RegExp(`^index:${manyIds[0] ?? ''}:v3:tag-`));
     expect(firstOutboxRows[0]?.payload).toEqual({
       tenantId: TENANT_ID,
       evidenceItemId: manyIds[0],

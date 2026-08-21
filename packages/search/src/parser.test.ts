@@ -308,6 +308,27 @@ describe('astFromBuilder', () => {
     ).toEqual(parseQuery('from:*'));
   });
 
+  it('accepts the visual builder\'s "NONE OF" shape: a NOT group wrapping a group', () => {
+    // The builder expands "tags IS NONE OF (a, b)" into a negated group whose
+    // only child is an OR group. The API must read that as NOT (a OR b) — the
+    // shape reaches validation and compilation, so a mismatch here is a query
+    // that type-checks in the browser and 400s in production.
+    const fromBuilder = astFromBuilder({
+      op: 'and',
+      not: true,
+      children: [
+        {
+          op: 'or',
+          children: [
+            { field: 'tags', operator: 'equals', value: 'privileged' },
+            { field: 'tags', operator: 'equals', value: 'hot' },
+          ],
+        },
+      ],
+    });
+    expect(fromBuilder).toEqual(parseQuery('NOT (tags:privileged OR tags:hot)'));
+  });
+
   it('unwraps single-child groups like the string parser does', () => {
     expect(astFromBuilder({ op: 'and', children: [{ operator: 'contains', value: 'x' }] })).toEqual(
       { kind: 'term', value: 'x' },
