@@ -2,6 +2,7 @@
 import { useState } from 'react';
 import {
   Button,
+  Checkbox,
   Dialog,
   EmptyState,
   Notice,
@@ -28,7 +29,11 @@ import { errorMessage } from '@/lib/errors';
 type OrgSetup = { provider: 'microsoft' | 'google' } | null;
 
 export default function ConnectorsPage() {
-  const connectors = useConnectors();
+  // Revoked connectors are hidden by default. The row is kept in the database —
+  // collections reference it as the credential that collected them — so this
+  // toggle is the way back to it.
+  const [showRevoked, setShowRevoked] = useState(false);
+  const connectors = useConnectors(showRevoked);
   const create = useCreateConnector();
   const test = useTestConnector();
   const revoke = useRevokeConnector();
@@ -116,6 +121,11 @@ export default function ConnectorsPage() {
       </section>
 
       <section aria-labelledby="connector-list" style={{ marginTop: 'var(--space-4)' }}>
+        <Checkbox
+          label="Show revoked connectors"
+          checked={showRevoked}
+          onChange={(e) => setShowRevoked(e.target.checked)}
+        />
         <h2 id="connector-list">Configured connectors</h2>
         <QueryBoundary
           isPending={connectors.isPending}
@@ -215,7 +225,11 @@ export default function ConnectorsPage() {
           if (!revokeTarget) return;
           revoke.mutate(revokeTarget.id, {
             onSuccess: () => {
-              setStatusText('Connector revoked.');
+              setStatusText(
+                showRevoked
+                  ? 'Connector revoked. Its stored tokens are deleted.'
+                  : 'Connector revoked and removed from the list. Its stored tokens are deleted; the record is kept for collections that used it.',
+              );
               setRevokeTarget(null);
             },
             onError: (err) => setStatusText(errorMessage(err)),

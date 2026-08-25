@@ -66,6 +66,33 @@ function makeService(
   return { service, prisma, audit };
 }
 
+describe('ConnectorsService.list', () => {
+  /**
+   * A revoked connector is kept, not deleted: `Collection` and `Custodian`
+   * reference it without cascade, so the row is the record of which credential
+   * collected which evidence. It is hidden from the list instead.
+   */
+  it('leaves revoked connectors out by default', async () => {
+    const findMany = vi.fn(async () => [baseAccount()]);
+    const { service } = makeService({ connectorAccount: { findMany } });
+    await service.list(auth, { limit: 100, cursor: null });
+    expect(findMany.mock.calls[0]?.[0]).toMatchObject({
+      where: { tenantId: TENANT_ID, status: { not: ConnectorStatus.revoked } },
+    });
+  });
+
+  it('includes them when asked, so the record stays reachable', async () => {
+    const findMany = vi.fn(async () => [baseAccount({ status: ConnectorStatus.revoked })]);
+    const { service } = makeService({ connectorAccount: { findMany } });
+    const result = await service.list(auth, { limit: 100, cursor: null }, true);
+    expect(findMany.mock.calls[0]?.[0]).toMatchObject({ where: { tenantId: TENANT_ID } });
+    // No status filter at all when revoked rows are wanted.
+    const where = (findMany.mock.calls[0]?.[0] as { where: Record<string, unknown> }).where;
+    expect(where['status']).toBeUndefined();
+    expect(result.items).toHaveLength(1);
+  });
+});
+
 describe('ConnectorsService.create', () => {
   it('builds a Microsoft authorization URL with S256 PKCE and a flow cookie', async () => {
     const created = baseAccount();

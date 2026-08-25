@@ -48,7 +48,10 @@ export class ConnectorsController {
     @Query() query: Record<string, unknown>,
     @Req() request: FastifyRequest,
   ): Promise<{ items: ConnectorDto[]; nextCursor: string | null }> {
-    return this.connectors.list(requireAuth(request), parseCursorQuery(query));
+    // Revoked connectors are hidden unless asked for; the row itself is kept,
+    // because collections reference it as the credential that collected them.
+    const includeRevoked = query['includeRevoked'] === 'true' || query['includeRevoked'] === '1';
+    return this.connectors.list(requireAuth(request), parseCursorQuery(query), includeRevoked);
   }
 
   @Post()

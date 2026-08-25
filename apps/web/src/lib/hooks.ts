@@ -96,10 +96,14 @@ export function useLogout() {
 
 // --- Connectors ---
 
-export function useConnectors() {
+export function useConnectors(includeRevoked = false) {
   return useQuery({
-    queryKey: ['connectors'],
-    queryFn: () => apiFetch('/api/v1/connectors?limit=100', { schema: connectorListResponse }),
+    // The flag is part of the key: two different lists, cached separately.
+    queryKey: ['connectors', includeRevoked],
+    queryFn: () =>
+      apiFetch(`/api/v1/connectors?limit=100${includeRevoked ? '&includeRevoked=true' : ''}`, {
+        schema: connectorListResponse,
+      }),
   });
 }
 

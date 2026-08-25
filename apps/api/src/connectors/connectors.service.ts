@@ -192,13 +192,26 @@ export class ConnectorsService {
   // Listing
   // -------------------------------------------------------------------------
 
+  /**
+   * List connectors, revoked ones excluded by default.
+   *
+   * A revoked connector is NOT deleted. `Collection` and `Custodian` reference
+   * it without cascade, so the row is the record of which credential collected
+   * which evidence; removing it would erase that link or fail on the foreign
+   * key. Hiding it keeps the list clean and the provenance intact, and
+   * `includeRevoked` brings it back when someone needs to look.
+   */
   async list(
     auth: AuthContext,
     page: CursorQuery,
+    includeRevoked = false,
   ): Promise<{ items: ConnectorDto[]; nextCursor: string | null }> {
     const rows = await withTenantContext(this.prisma, auth.tenantId, (tx) =>
       tx.connectorAccount.findMany({
-        where: { tenantId: auth.tenantId },
+        where: {
+          tenantId: auth.tenantId,
+          ...(includeRevoked ? {} : { status: { not: ConnectorStatus.revoked } }),
+        },
         orderBy: { id: 'asc' },
         take: page.limit + 1,
         ...(page.cursor ? { cursor: { id: page.cursor }, skip: 1 } : {}),
