@@ -11,10 +11,14 @@ import { z } from 'zod';
 // while tsc and the unit tests pass — so it only surfaces in `next build`.
 export {
   // The connector shapes live in contracts so the browser cannot expect a body
-  // the API does not send. A local copy expected a top-level `id` when the API
-  // nests the connector, and it broke the moment the request became valid.
+  // the API does not send. Local copies caused both connector bugs: one expected
+  // a top-level `id` when the API nests the connector, and one left `upload` out
+  // of the provider enum, so a single automatic upload row broke the whole list.
   createConnectorResponse,
   orgConnectorSetupResponse,
+  connectorListResponse,
+  connectorListItem,
+  type ConnectorListItem,
   caseActivityEntry,
   caseActivityListResponse,
   caseMember,
@@ -68,20 +72,6 @@ export const logoutResponse = z.object({ logoutUrl: z.string().nullable() });
 export const csrfResponse = z.object({ token: z.string() });
 
 // --- Connectors ---
-
-export const connectorSummary = z.object({
-  id: z.string(),
-  provider: z.enum(['microsoft', 'google']),
-  mode: z.enum(['delegated', 'organization']),
-  label: z.string().default(''),
-  externalIdentity: z.string().default(''),
-  status: z.string().default('unknown'),
-  statusDetail: z.string().default(''),
-  createdAt: z.string().optional(),
-});
-export type ConnectorSummary = z.infer<typeof connectorSummary>;
-
-export const connectorListResponse = paginated(connectorSummary);
 
 export const connectorTestResponse = z.object({
   ok: z.boolean(),

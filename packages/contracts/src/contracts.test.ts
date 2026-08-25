@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   collectionScope,
+  connectorListResponse,
   completeness,
   createCollectionRequest,
   createExportRequest,
@@ -224,5 +225,68 @@ describe('truthfulness notices', () => {
     expect(TRUTHFULNESS_NOTICES.pstExtraction).toMatch(/reconstruction/);
     expect(TRUTHFULNESS_NOTICES.pstExtraction).toMatch(/not provider-native/);
     expect(TRUTHFULNESS_NOTICES.pstExtraction).toMatch(/authoritative source/);
+  });
+});
+
+describe('connector list', () => {
+  // Exactly what staging holds: an automatic upload connector alongside real
+  // Google ones. The web schema declared only microsoft and google, so this one
+  // upload row made the entire list fail to parse and the page showed
+  // "Something went wrong" with no connectors listed.
+  const rows = [
+    {
+      id: '00000000-0000-4000-8000-000000000001',
+      provider: 'upload',
+      mode: 'organization',
+      label: 'Uploads',
+      externalIdentity: '',
+      status: 'connected',
+      statusDetail: '',
+      createdAt: '2026-08-21T00:00:00.000Z',
+    },
+    {
+      id: '00000000-0000-4000-8000-000000000002',
+      provider: 'google',
+      mode: 'delegated',
+      label: 'Google Workspace (personal) 2026-08-21',
+      externalIdentity: 'ian@example.com',
+      status: 'connected',
+      statusDetail: '',
+      createdAt: '2026-08-21T01:00:00.000Z',
+    },
+    {
+      id: '00000000-0000-4000-8000-000000000003',
+      provider: 'google',
+      mode: 'delegated',
+      label: 'Google Workspace (personal) 2026-08-21',
+      externalIdentity: '',
+      status: 'pending_auth',
+      statusDetail: '',
+      createdAt: '2026-08-21T01:05:00.000Z',
+    },
+  ];
+
+  it('parses a list that includes the automatic upload connector', () => {
+    const parsed = connectorListResponse.safeParse({ items: rows, nextCursor: null });
+    expect(parsed.success).toBe(true);
+    expect(parsed.data?.items).toHaveLength(3);
+  });
+
+  it('accepts every status the database can hold', () => {
+    for (const status of ['pending_auth', 'connected', 'error', 'revoked']) {
+      const parsed = connectorListResponse.safeParse({
+        items: [{ ...rows[0], status }],
+        nextCursor: null,
+      });
+      expect(parsed.success).toBe(true);
+    }
+  });
+
+  it('still rejects a provider the app does not support', () => {
+    const parsed = connectorListResponse.safeParse({
+      items: [{ ...rows[0], provider: 'dropbox' }],
+      nextCursor: null,
+    });
+    expect(parsed.success).toBe(false);
   });
 });

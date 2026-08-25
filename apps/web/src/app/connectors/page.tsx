@@ -150,25 +150,36 @@ export default function ConnectorsPage() {
                         <StatusPill status={c.status} />
                       </td>
                       <td>
-                        <div className="button-row" style={{ margin: 0 }}>
-                          <Button
-                            small
-                            variant="secondary"
-                            onClick={() => runTest(c.id)}
-                            busy={test.isPending && test.variables === c.id}
-                          >
-                            Test
-                          </Button>
-                          <Button
-                            small
-                            variant="danger"
-                            onClick={() =>
-                              setRevokeTarget({ id: c.id, name: c.externalIdentity ?? c.provider })
-                            }
-                          >
-                            Revoke
-                          </Button>
-                        </div>
+                        {c.provider === 'upload' ? (
+                          // Created and reused automatically for preserved
+                          // container files. There is no provider-side grant to
+                          // test, and revoking it would only leave a revoked row
+                          // that the next upload collection reuses anyway.
+                          <span className="cdfir-field__hint">Managed automatically</span>
+                        ) : (
+                          <div className="button-row" style={{ margin: 0 }}>
+                            <Button
+                              small
+                              variant="secondary"
+                              onClick={() => runTest(c.id)}
+                              busy={test.isPending && test.variables === c.id}
+                            >
+                              Test
+                            </Button>
+                            <Button
+                              small
+                              variant="danger"
+                              onClick={() =>
+                                setRevokeTarget({
+                                  id: c.id,
+                                  name: c.externalIdentity ?? c.provider,
+                                })
+                              }
+                            >
+                              Revoke
+                            </Button>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   ))}

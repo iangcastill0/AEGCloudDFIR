@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { connectionMode, provider, uuid } from './common.js';
+import { connectionMode, paginated, provider, uuid } from './common.js';
 
 /**
  * Connector request shapes.
@@ -47,15 +47,20 @@ export type OrgGoogleSetupRequest = z.infer<typeof orgGoogleSetupRequest>;
  * `adminConsentUrl` is NOT here: it comes from the organization-setup step,
  * POST /connectors/:id/org, which is the only place a credential is supplied.
  */
+/** Matches the database's ConnectorStatus enum. */
+export const connectorStatus = z.enum(['pending_auth', 'connected', 'error', 'revoked']);
+
 export const connectorSummaryResponse = z.object({
   id: uuid,
-  provider: z.string(),
-  mode: z.string(),
+  // The FULL provider enum. `upload` is a real connector: every tenant gets one
+  // for preserved container files.
+  provider,
+  mode: connectionMode,
   label: z.string().default(''),
   externalIdentity: z.string().default(''),
   externalTenantId: z.string().default(''),
   allowedDomains: z.array(z.string()).default([]),
-  status: z.string(),
+  status: connectorStatus,
   statusDetail: z.string().default(''),
   createdAt: z.string(),
   revokedAt: z.string().nullable().default(null),
@@ -75,3 +80,25 @@ export const orgConnectorSetupResponse = z.object({
   adminConsentUrl: z.string().optional(),
   auditScopes: z.array(z.string()).optional(),
 });
+
+/**
+ * GET /connectors — one row per connector account.
+ *
+ * `provider` is the FULL enum, including `upload`. Every tenant gets an upload
+ * connector automatically for preserved container files, and the web used to
+ * declare only microsoft and google here — so one upload row made the whole
+ * list fail to parse and the page showed "Something went wrong" with no
+ * connectors at all.
+ */
+export const connectorListItem = connectorSummaryResponse.pick({
+  id: true,
+  provider: true,
+  mode: true,
+  label: true,
+  externalIdentity: true,
+  status: true,
+  statusDetail: true,
+  createdAt: true,
+});
+export const connectorListResponse = paginated(connectorListItem);
+export type ConnectorListItem = z.infer<typeof connectorListItem>;
