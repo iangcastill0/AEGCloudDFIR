@@ -74,6 +74,7 @@ export const PROVIDER_REVOCATION_NOTES: Record<Provider, string> = {
     'Stored tokens were deleted. To revoke the grant on the provider side, remove the app under https://myaccount.microsoft.com > App permissions (or via Entra admin center for organization connections).',
   google:
     'Stored tokens were deleted. To revoke the grant on the provider side, remove the app under https://myaccount.google.com/permissions (or delete the service-account key for organization connections).',
+  imap: 'The stored app password was deleted. Revoke it at the mail provider too — for Yahoo, iCloud or Gmail that means deleting the app password in the account security settings, which is the only thing that stops it being used again.',
   upload:
     'There is no provider-side grant for file uploads; nothing further to revoke. Already-preserved uploaded files remain in evidence storage.',
 };
@@ -744,6 +745,14 @@ export class ConnectorsService {
     if (account.provider === Provider.upload) {
       throw new ConflictException(
         'upload connectors have no provider tokens; uploaded files are processed locally',
+      );
+    }
+    // IMAP authenticates with a stored app password on every connection, so
+    // there is no OAuth token provider to build. The worker reads the secret
+    // directly when it opens a connection.
+    if (account.provider === Provider.imap) {
+      throw new ConflictException(
+        'imap connectors authenticate with a stored app password, not an OAuth token',
       );
     }
     return buildConnectorTokenProvider({

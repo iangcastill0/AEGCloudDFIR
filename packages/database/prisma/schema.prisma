@@ -163,6 +163,12 @@ model ConnectorAccount {
 enum Provider {
   microsoft
   google
+  /// Any host that speaks IMAP — Yahoo, iCloud, a client's own mail server.
+  /// Microsoft Graph and Gmail can only see mailboxes their own companies host,
+  /// so without this a Yahoo mailbox is unreachable: a Microsoft account signed
+  /// in with a Yahoo address returns an empty Outlook mailbox, not that
+  /// person's mail.
+  imap
   /// Synthetic provider for user-uploaded container files (PST/OST): no
   /// provider API is involved; originals arrive via the uploads endpoint.
   upload
@@ -210,6 +216,9 @@ enum SecretKind {
   oauth_access_token
   service_account_key
   client_secret
+  /// IMAP app password. Envelope-encrypted like every other secret; plaintext
+  /// exists only in connector process memory.
+  imap_password
 }
 
 model ConnectorScope {

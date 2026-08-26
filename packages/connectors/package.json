@@ -22,6 +22,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "imapflow": "1.7.6",
     "jose": "6.2.8",
     "zod": "^4.4.3"
   },
