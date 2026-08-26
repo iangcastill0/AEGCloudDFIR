@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { appendAuditEvent, withTenantContext, type Prisma } from '@aeg-clouddfir/database';
 import { sanitizeError, type WorkerContext } from '../context.js';
+import { pgText, pgTextList } from '../pg-text.js';
 import { incrementProgress, recordException } from '../progress.js';
 import { QUEUES, dedupKeys } from '../queues.js';
 import { PayloadTooLargeError, readAllCapped } from '../streams.js';
@@ -31,14 +32,15 @@ function participantRows(
   addresses: ParsedAddress[],
 ): Prisma.EmailParticipantCreateManyInput[] {
   return addresses.map((addr, position) => {
-    const raw = addr.address ?? '';
+    // Header text on its way to a text column: same NUL strip as everything else.
+    const raw = pgText(addr.address ?? '');
     const normalized = raw.trim().toLowerCase();
     const at = normalized.lastIndexOf('@');
     return {
       tenantId,
       evidenceItemId,
       role,
-      rawName: addr.name ?? '',
+      rawName: pgText(addr.name ?? ''),
       rawAddress: raw,
       normalizedAddress: normalized,
       domain: at > 0 ? normalized.slice(at + 1) : '',
@@ -213,16 +215,20 @@ export async function processParse(
   const parsedDate = parsed.date !== undefined ? new Date(parsed.date) : null;
 
   await withTenantContext(ctx.prisma, tenantId, async (tx) => {
+    // Every one of these is provider text on its way into a Postgres text
+    // column, and Postgres rejects a NUL byte outright. Two messages in a real
+    // 29,000 message Gmail collection carried one and killed this upsert, so the
+    // items stayed preserved and were never parsed.
     const metadataFields = {
-      subject: parsed.subject,
-      messageId: parsed.messageId,
-      inReplyTo: parsed.inReplyTo,
-      references: parsed.references,
-      rawDateHeader: parsed.rawDateHeader,
-      bodyPlain,
-      bodyHtmlToText,
+      subject: pgText(parsed.subject),
+      messageId: pgText(parsed.messageId),
+      inReplyTo: pgText(parsed.inReplyTo),
+      references: pgTextList(parsed.references),
+      rawDateHeader: pgText(parsed.rawDateHeader),
+      bodyPlain: pgText(bodyPlain),
+      bodyHtmlToText: pgText(bodyHtmlToText),
       isEncrypted: parsed.isEncrypted,
-      smimeType: parsed.smimeType,
+      smimeType: pgText(parsed.smimeType),
       hasAttachments:
         (item.emailMetadata?.hasAttachments ?? false) || parsed.attachments.length > 0,
       // bccPresent may ONLY be strengthened by an actual Bcc header.
@@ -241,9 +247,9 @@ export async function processParse(
         data: parsed.headers.slice(0, 1000).map((h, position) => ({
           tenantId,
           evidenceItemId,
-          name: h.name.toLowerCase(),
-          rawName: h.name,
-          value: h.value.slice(0, 4000),
+          name: pgText(h.name.toLowerCase()),
+          rawName: pgText(h.name),
+          value: pgText(h.value.slice(0, 4000)),
           position,
         })),
       });

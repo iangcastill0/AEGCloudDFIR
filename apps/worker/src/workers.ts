@@ -27,6 +27,7 @@ import {
   tenantOnlyPayload,
 } from './processors/payloads.js';
 import { BACKOFF_STRATEGIES, DEFAULT_JOB_OPTIONS, QUEUES, type QueueName } from './queues.js';
+import { failureTargetFor, isTerminalFailure, recordTerminalFailure } from './terminal-failure.js';
 
 /** Per-queue concurrency: IO-heavy stages fan out; run-level stages serialize. */
 export const QUEUE_CONCURRENCY: Record<QueueName, number> = {
@@ -126,7 +127,26 @@ export function createWorkers(ctx: WorkerContext, connection: Redis): Worker[] {
         'job attempt failed',
       );
       if (queueName === QUEUES.deadLetter) return;
-      if (job !== undefined && job.attemptsMade >= attempts) {
+      if (job === undefined) return;
+
+      // A STALLED job never reached the processor's catch — the worker was
+      // killed mid-execution, so nothing marked its row. Without this, the item
+      // sits in `fetching` forever, the collection cannot finalize, and the page
+      // reports zero failures. That is exactly what a deploy did on staging.
+      const reason = sanitizeError(err);
+      if (isTerminalFailure({ reason, attemptsMade: job.attemptsMade, attempts })) {
+        const target = failureTargetFor(queueName, job.data);
+        if (target !== null) {
+          void recordTerminalFailure(ctx, target, reason).catch((writeErr: unknown) => {
+            ctx.log.error(
+              { queue: queueName, jobId: job.id, err: sanitizeError(writeErr) },
+              'could not record a terminal job failure',
+            );
+          });
+        }
+      }
+
+      if (job.attemptsMade >= attempts) {
         void ctx.enqueuer
           .enqueue(QUEUES.deadLetter, `dl:${queueName}:${job.id ?? 'unknown'}`, {
             tenantId: (job.data as { tenantId?: string }).tenantId,
