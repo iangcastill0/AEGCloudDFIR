@@ -31,6 +31,7 @@ import {
   encodeUidCursor,
   nextUidRange,
   searchCriteria,
+  takeUidPage,
   type UidCursor,
 } from './uid.js';
 
@@ -149,7 +150,7 @@ export class ImapEmailConnector implements EmailConnector {
         const range = nextUidRange({ uidValidity, cursor });
 
         const searched = await client.search(
-          { uid: `${String(range.from)}:${String(range.to)}`, ...searchCriteria(opts) },
+          { uid: range.sequence, ...searchCriteria(opts) },
           { uid: true },
         );
         // imapflow returns false when the mailbox could not be searched, which
@@ -157,21 +158,17 @@ export class ImapEmailConnector implements EmailConnector {
         if (searched === false) {
           throw new Error(`search failed in mailbox ${folderId}`);
         }
-        const found = [...searched].sort((a: number, b: number) => a - b);
 
+        const taken = takeUidPage({ uidValidity, found: searched });
         // The id carries its mailbox: a UID alone is meaningless elsewhere.
-        const items = found.map((uid: number) => ({
+        const items = taken.uids.map((uid) => ({
           providerItemId: `${folderId}:${String(uid)}`,
           folderId,
         }));
 
-        // The window is advanced whether or not it held messages: gaps in UID
-        // space are normal (deleted mail), and stopping at an empty window would
-        // end the walk early and report a complete collection.
-        const exhausted = range.to >= Number(mailbox.uidNext ?? 0) - 1;
         const page: EmailListPage = { items };
-        if (!exhausted) {
-          page.nextCursor = encodeUidCursor({ uidValidity, lastUid: range.to });
+        if (taken.cursor !== null) {
+          page.nextCursor = encodeUidCursor(taken.cursor);
         }
         return page;
       } finally {

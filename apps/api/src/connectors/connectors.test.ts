@@ -349,6 +349,29 @@ describe('ConnectorsService.createImap', () => {
     expect(summary).toContain('imap.mail.yahoo.com');
   });
 
+  it('returns a body the browser can parse — the bug that made two connectors', async () => {
+    // The shared provider enum was missing 'imap', so the API created the
+    // connector and the BROWSER threw the response away with
+    // `path: ["connector","provider"]`. The operator clicked again and ended up
+    // with two connectors holding the same credential. Parsing the real return
+    // value with the same schema the browser uses is the check that was missing.
+    const m = models();
+    const { service } = makeService(m);
+    const result = await service.createImap(auth, body, fakeRequest());
+    const parsed = createConnectorResponse.safeParse(result);
+    expect(parsed.success).toBe(true);
+    expect(parsed.data?.connector.provider).toBe('imap');
+  });
+
+  it('refuses imap on the OAuth create route, naming the right one', async () => {
+    // There is no OAuth redirect for IMAP. Letting it through would create a
+    // connector with no credential and no way to reach the mailbox.
+    const { service } = makeService(models());
+    await expect(
+      service.create(auth, { provider: 'imap', mode: 'delegated', label: 'x' }, fakeRequest()),
+    ).rejects.toThrow(/connectors\/imap/);
+  });
+
   it('rejects a body missing the app password', async () => {
     const { service } = makeService(models());
     await expect(

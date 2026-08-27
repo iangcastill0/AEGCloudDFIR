@@ -44,19 +44,59 @@ export function decodeUidCursor(raw: string): UidCursor | null {
 
 export interface UidRange {
   from: number;
-  to: number;
+  /**
+   * IMAP sequence string, always open-ended: `<from>:*`.
+   *
+   * Measured against a real Yahoo mailbox: 10,000 messages with UIDs from
+   * 257,733 to 287,748. Fixed 500-wide windows starting at 1 meant 515 empty
+   * round trips before the first message — UIDs are never reused, so any
+   * long-lived mailbox looks like this, and a collection that spends minutes
+   * finding nothing reads as hung. Asking for everything at or above the cursor
+   * and keeping one page-worth skips the empty space entirely.
+   */
+  sequence: string;
   /** True when a UIDVALIDITY change forced the walk back to the start. */
   restarted: boolean;
 }
 
-/** The next window of UIDs to ask for. */
+/** Where the next page starts, as an open-ended UID range. */
 export function nextUidRange(input: { uidValidity: string; cursor: UidCursor | null }): UidRange {
   const stale = input.cursor !== null && input.cursor.uidValidity !== input.uidValidity;
-  if (input.cursor === null || stale) {
-    return { from: 1, to: UID_PAGE_SIZE, restarted: stale };
-  }
-  const from = input.cursor.lastUid + 1;
-  return { from, to: input.cursor.lastUid + UID_PAGE_SIZE, restarted: false };
+  const from = input.cursor === null || stale ? 1 : input.cursor.lastUid + 1;
+  return { from, sequence: `${String(from)}:*`, restarted: stale };
+}
+
+export interface UidPage {
+  /** The UIDs to fetch, in order. */
+  uids: number[];
+  /** Cursor for the next page, or null when this was the last one. */
+  cursor: UidCursor | null;
+}
+
+/**
+ * Take one page from the UIDs a search returned.
+ *
+ * A short result means the mailbox is exhausted: the search asked for everything
+ * at or above `from`, so nothing remains above the last UID taken. Deciding
+ * exhaustion from the result — rather than from UIDNEXT arithmetic — removes a
+ * class of off-by-one that would either stop early (mail missed, collection
+ * still reporting complete) or never stop at all.
+ */
+export function takeUidPage(input: {
+  uidValidity: string;
+  found: readonly number[];
+  pageSize?: number;
+}): UidPage {
+  const size = input.pageSize ?? UID_PAGE_SIZE;
+  const sorted = [...input.found].sort((a, b) => a - b);
+  const uids = sorted.slice(0, size);
+  const last = uids[uids.length - 1];
+  const exhausted = sorted.length <= size;
+  return {
+    uids,
+    cursor:
+      exhausted || last === undefined ? null : { uidValidity: input.uidValidity, lastUid: last },
+  };
 }
 
 export interface ImapSearchCriteria {

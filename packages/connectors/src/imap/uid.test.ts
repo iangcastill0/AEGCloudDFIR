@@ -4,7 +4,7 @@ import {
   encodeUidCursor,
   nextUidRange,
   searchCriteria,
-  UID_PAGE_SIZE,
+  takeUidPage,
   type UidCursor,
 } from './uid';
 
@@ -21,6 +21,39 @@ describe('encodeUidCursor / decodeUidCursor', () => {
   });
 });
 
+describe('takeUidPage', () => {
+  it('takes one page and points the cursor at the last UID taken', () => {
+    const page = takeUidPage({
+      uidValidity: '999',
+      found: [257733, 257734, 257735, 257736],
+      pageSize: 2,
+    });
+    expect(page.uids).toEqual([257733, 257734]);
+    expect(page.cursor).toEqual({ uidValidity: '999', lastUid: 257734 });
+  });
+
+  it('stops when the search returned no more than a page', () => {
+    // The search asked for everything at or above `from`, so a short result
+    // means there is nothing left. Deciding this from UIDNEXT arithmetic instead
+    // is how a walk either ends early or never ends.
+    const page = takeUidPage({ uidValidity: '999', found: [1, 2, 3], pageSize: 3 });
+    expect(page.uids).toEqual([1, 2, 3]);
+    expect(page.cursor).toBeNull();
+  });
+
+  it('handles an empty mailbox', () => {
+    const page = takeUidPage({ uidValidity: '999', found: [] });
+    expect(page.uids).toEqual([]);
+    expect(page.cursor).toBeNull();
+  });
+
+  it('sorts what the server returned, which is not guaranteed to be ordered', () => {
+    const page = takeUidPage({ uidValidity: '999', found: [9, 5, 7], pageSize: 2 });
+    expect(page.uids).toEqual([5, 7]);
+    expect(page.cursor?.lastUid).toBe(7);
+  });
+});
+
 describe('nextUidRange', () => {
   /**
    * UIDVALIDITY is the whole safety story in IMAP. When a server changes it,
@@ -33,13 +66,13 @@ describe('nextUidRange', () => {
       uidValidity: '999',
       cursor: { uidValidity: '111', lastUid: 5000 },
     });
-    expect(range).toEqual({ from: 1, to: UID_PAGE_SIZE, restarted: true });
+    expect(range).toEqual({ from: 1, sequence: '1:*', restarted: true });
   });
 
   it('starts from the beginning when there is no cursor', () => {
     expect(nextUidRange({ uidValidity: '999', cursor: null })).toEqual({
       from: 1,
-      to: UID_PAGE_SIZE,
+      sequence: '1:*',
       restarted: false,
     });
   });
@@ -47,7 +80,14 @@ describe('nextUidRange', () => {
   it('continues after the last UID it finished', () => {
     expect(
       nextUidRange({ uidValidity: '999', cursor: { uidValidity: '999', lastUid: 100 } }),
-    ).toEqual({ from: 101, to: 100 + UID_PAGE_SIZE, restarted: false });
+    ).toEqual({ from: 101, sequence: '101:*', restarted: false });
+  });
+
+  it('is always open-ended, so a high starting UID is not walked up to', () => {
+    // The real case: a Yahoo INBOX whose lowest UID is 257,733. A bounded window
+    // from 1 needed 515 empty round trips to reach it.
+    const range = nextUidRange({ uidValidity: '999', cursor: null });
+    expect(range.sequence.endsWith(':*')).toBe(true);
   });
 
   it('never re-fetches the last UID, which would duplicate an item', () => {

@@ -84,15 +84,18 @@ describe('ImapEmailConnector.listMessages', () => {
     expect(page.items.map((i) => i.providerItemId)).toEqual(['INBOX:5', 'INBOX:7', 'INBOX:9']);
   });
 
-  it('hands back a cursor while the mailbox has more UIDs to walk', async () => {
-    const { conn } = connector({ searchResult: [1], uidNext: 10_000 });
-    const page = await conn.listMessages('me', 'INBOX');
-    expect(page.nextCursor).toBeDefined();
+  it('asks open-ended, so a mailbox whose UIDs start high is not walked up to', async () => {
+    // Measured on a real Yahoo INBOX: 10,000 messages starting at UID 257,733.
+    // Bounded windows from 1 needed 515 empty round trips to reach the first one.
+    const { conn, calls } = connector({ searchResult: [257733, 257734] });
+    await conn.listMessages('me', 'INBOX');
+    const query = calls.search.mock.calls[0]?.[0] as { uid: string };
+    expect(query.uid).toBe('1:*');
   });
 
-  it('stops offering a cursor once the walk has passed the last UID', async () => {
+  it('stops offering a cursor when the search returned no more than a page', async () => {
     // Without this the walk never ends and the collection never finalizes.
-    const { conn } = connector({ searchResult: [1], uidNext: 10 });
+    const { conn } = connector({ searchResult: [1, 2, 3] });
     const page = await conn.listMessages('me', 'INBOX');
     expect(page.nextCursor).toBeUndefined();
   });

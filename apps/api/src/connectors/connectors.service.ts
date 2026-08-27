@@ -366,6 +366,15 @@ export class ConnectorsService {
       );
     }
 
+    // IMAP has no OAuth redirect to send anyone to. It takes a host and an app
+    // password, so it has its own route; letting it through here would create a
+    // connector with no credential and no way to reach the mailbox.
+    if (input.provider === 'imap') {
+      throw new BadRequestException(
+        'imap connectors are created with their credential via POST /api/v1/connectors/imap',
+      );
+    }
+
     if (input.mode === 'delegated' && this.clientIdFor(input.provider).length === 0) {
       throw new ConflictException(
         `provider OAuth is not configured: set ${

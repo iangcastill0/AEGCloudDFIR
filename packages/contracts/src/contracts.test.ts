@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   collectionScope,
   connectorListResponse,
+  provider,
   completeness,
   createCollectionRequest,
   createExportRequest,
@@ -288,5 +289,20 @@ describe('connector list', () => {
       nextCursor: null,
     });
     expect(parsed.success).toBe(false);
+  });
+});
+
+describe('the provider enum covers every provider a row can hold', () => {
+  // Adding a provider in three places and forgetting the fourth is what shipped
+  // twice now: once as `upload` breaking the connector list, once as `imap`
+  // making the browser discard a connector it had just created.
+  it('accepts every value the database Provider enum has', () => {
+    for (const value of ['microsoft', 'google', 'imap', 'upload']) {
+      expect(provider.safeParse(value).success).toBe(true);
+    }
+  });
+
+  it('still rejects a provider the app does not support', () => {
+    expect(provider.safeParse('dropbox').success).toBe(false);
   });
 });

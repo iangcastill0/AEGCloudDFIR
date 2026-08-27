@@ -26,7 +26,13 @@ export const completeness = z.enum([
 ]);
 export type Completeness = z.infer<typeof completeness>;
 
-export const provider = z.enum(['microsoft', 'google', 'upload']);
+/**
+ * Every provider a connector row can hold. `imap` was missing here after the
+ * IMAP connector shipped, so the API created the connector and the BROWSER threw
+ * the response away: `path: ["connector","provider"]`. The operator clicked
+ * again and got a second connector. Adding a provider means adding it here too.
+ */
+export const provider = z.enum(['microsoft', 'google', 'imap', 'upload']);
 export const connectionMode = z.enum(['delegated', 'organization']);
 export const collectionSource = z.enum(['email', 'drive', 'audit']);
 
