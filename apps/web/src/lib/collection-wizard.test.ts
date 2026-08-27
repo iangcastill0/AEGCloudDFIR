@@ -396,3 +396,56 @@ describe('audit source', () => {
     expect(req.scope.audit?.google).toBeUndefined();
   });
 });
+
+describe('IMAP collections', () => {
+  function imapWizard(): WizardState {
+    let s = freshWizard(KEY);
+    s = wizardReducer(s, {
+      type: 'patch',
+      patch: {
+        name: 'Yahoo mailbox sweep',
+        provider: 'imap',
+        connectorAccountId: '4f9a4f4e-7b8b-4b1c-9a3e-1c2d3e4f5a6b',
+        connectorMode: 'delegated',
+        sources: { email: true, drive: false, audit: false },
+        custodians: [{ id: '2f9a4f4e-7b8b-4b1c-9a3e-1c2d3e4f5a6b', email: 'someone@yahoo.com' }],
+      },
+    });
+    return s;
+  }
+
+  it('accepts an email-only IMAP collection', () => {
+    expect(validateStep(imapWizard(), STEP_SOURCES)).toEqual([]);
+  });
+
+  it('refuses drive on an IMAP connector, naming the reason', () => {
+    // IMAP is mail. Letting drive through would produce a collection that
+    // reports a source it never looked at.
+    const s = wizardReducer(imapWizard(), {
+      type: 'patch',
+      patch: { sources: { email: true, drive: true, audit: false } },
+    });
+    const errors = validateStep(s, STEP_SOURCES);
+    expect(errors.join(' ')).toMatch(/IMAP/i);
+    expect(errors.join(' ')).toMatch(/mail/i);
+  });
+
+  it('refuses audit logs on an IMAP connector', () => {
+    const s = wizardReducer(imapWizard(), {
+      type: 'patch',
+      patch: { sources: { email: false, drive: false, audit: true } },
+    });
+    expect(validateStep(s, STEP_SOURCES).length).toBeGreaterThan(0);
+  });
+
+  it('builds a request with the email source only', () => {
+    const s = wizardReducer(imapWizard(), {
+      type: 'patchScope',
+      patch: { emailAllFolders: true },
+    });
+    const body = buildCreateRequest(s);
+    expect(body.sources).toEqual(['email']);
+    expect(body.scope.drive).toBeUndefined();
+    expect(body.scope.audit).toBeUndefined();
+  });
+});

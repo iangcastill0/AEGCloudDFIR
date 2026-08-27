@@ -102,3 +102,47 @@ export const connectorListItem = connectorSummaryResponse.pick({
 });
 export const connectorListResponse = paginated(connectorListItem);
 export type ConnectorListItem = z.infer<typeof connectorListItem>;
+
+// --- IMAP ---
+
+/**
+ * Where a mailbox lives, for hosts that speak IMAP.
+ *
+ * Kept as presets plus a custom option because operators do not memorise IMAP
+ * hostnames, and a typo produces a connection error that reads like a
+ * credential problem.
+ */
+export const IMAP_PRESETS = [
+  { id: 'yahoo', label: 'Yahoo Mail', host: 'imap.mail.yahoo.com', port: 993, secure: true },
+  { id: 'icloud', label: 'iCloud Mail', host: 'imap.mail.me.com', port: 993, secure: true },
+  { id: 'gmail', label: 'Gmail (IMAP)', host: 'imap.gmail.com', port: 993, secure: true },
+  { id: 'aol', label: 'AOL Mail', host: 'imap.aol.com', port: 993, secure: true },
+  {
+    id: 'outlook',
+    label: 'Outlook.com (IMAP)',
+    host: 'outlook.office365.com',
+    port: 993,
+    secure: true,
+  },
+] as const;
+
+export type ImapPresetId = (typeof IMAP_PRESETS)[number]['id'];
+
+/**
+ * Create an IMAP connector.
+ *
+ * The password is an APP password. Yahoo, iCloud and Gmail all refuse an account
+ * password over IMAP, and sending one produces an authentication failure that
+ * looks like a wrong password rather than a wrong KIND of password.
+ */
+export const createImapConnectorRequest = z.object({
+  label: z.string().min(1).max(200),
+  host: z.string().min(1).max(255),
+  port: z.number().int().min(1).max(65535),
+  /** Implicit TLS (993). False means STARTTLS, normally on 143. */
+  secure: z.boolean(),
+  /** The full email address in almost every case. */
+  username: z.string().min(1).max(320),
+  appPassword: z.string().min(1).max(512),
+});
+export type CreateImapConnectorRequest = z.infer<typeof createImapConnectorRequest>;

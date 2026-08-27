@@ -8,7 +8,11 @@ import {
 } from '@aeg-clouddfir/connectors';
 import { appendAuditEvent, withTenantContext, type Prisma } from '@aeg-clouddfir/database';
 import { sanitizeError, type WorkerContext } from '../context.js';
-import { buildConnectorsForAccount, makeRateLimitObserver } from '../connector-factory.js';
+import {
+  buildConnectorsForAccount,
+  makeRateLimitObserver,
+  requireDrive,
+} from '../connector-factory.js';
 import { incrementProgress, recordException } from '../progress.js';
 import { QUEUES, dedupKeys } from '../queues.js';
 import type { FetchItemPayload } from './payloads.js';
@@ -126,7 +130,7 @@ export async function processCollectionFetchItem(
         });
       }
       const entry = payload.entry as DriveEntry;
-      const content = await bundle.drive.fetchContent(bundle.custodianRef, entry);
+      const content = await requireDrive(bundle).fetchContent(bundle.custodianRef, entry);
       fetched = {
         readable: toReadable(content.stream),
         contentType: content.contentType,

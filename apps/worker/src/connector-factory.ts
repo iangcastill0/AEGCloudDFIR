@@ -1,5 +1,7 @@
 import {
   GmailConnector,
+  ImapEmailConnector,
+  type ImapConnectorOptions,
   GoogleDelegatedTokenSource,
   GoogleDriveConnector,
   GoogleReportsConnector,
@@ -45,16 +47,37 @@ export function connectorSecretScope(connectorAccountId: string): string {
 }
 
 export interface ConnectorBundle {
-  provider: 'microsoft' | 'google';
+  provider: 'microsoft' | 'google' | 'imap';
   mode: 'delegated' | 'organization';
   email: EmailConnector;
-  drive: DriveConnector;
+  /**
+   * Null for providers with no file storage. IMAP is mail only, and handing back
+   * a stub that throws would let a collection claim it looked at a drive it
+   * cannot reach.
+   */
+  drive: DriveConnector | null;
   /**
    * Value to pass as the `custodian` argument of connector calls:
    * 'me' for delegated and all Google modes (DWD impersonates at the token
    * layer); the custodian externalId for Microsoft organization mode.
    */
   custodianRef: string;
+}
+
+/**
+ * The drive client, or a clear error naming the provider that has none.
+ *
+ * A collection that selected drive on a mail-only connector must fail loudly.
+ * Returning a stub that quietly yields nothing would report a complete
+ * collection of a source we never looked at.
+ */
+export function requireDrive(bundle: ConnectorBundle): DriveConnector {
+  if (bundle.drive === null) {
+    throw new Error(
+      `${bundle.provider} connectors collect mail only; this collection selected drive, which they cannot reach`,
+    );
+  }
+  return bundle.drive;
 }
 
 export interface BuildConnectorsArgs {
@@ -208,6 +231,34 @@ export async function buildConnectorsForAccount(
   }
 
   const secrets = account.secrets as unknown as SecretRow[];
+
+  // IMAP has no OAuth: the connection is opened with a stored app password, and
+  // the host and port live in the same encrypted blob because they are useless
+  // apart. Handled before the token-provider branches, which have nothing to
+  // give here.
+  if (account.provider === 'imap') {
+    const row = requireSecret(secrets, 'imap_password', 'IMAP credential');
+    const plaintext = (await decryptSecretRow(ctx, tenantId, connectorAccountId, row)).toString(
+      'utf8',
+    );
+    const settings = parseImapSettings(plaintext);
+    if (settings === null) {
+      throw new Error(
+        `connector account ${connectorAccountId} has a stored IMAP credential that could not be read`,
+      );
+    }
+    return {
+      provider: 'imap',
+      mode: 'delegated',
+      email: new ImapEmailConnector(settings),
+      // A mailbox is not a drive, and pretending otherwise would make a
+      // collection claim it looked somewhere it cannot reach.
+      drive: null,
+      // IMAP identifies the mailbox by its login name.
+      custodianRef: settings.username,
+    };
+  }
+
   let tokenProvider: TokenProvider;
   let custodianRef = 'me';
 
@@ -473,5 +524,38 @@ export function makeRateLimitObserver(
         retries: 1,
       }),
     ).catch(() => undefined);
+  };
+}
+
+/**
+ * Read the IMAP settings stored beside the app password.
+ *
+ * Returns null rather than throwing so the caller can say which connector is
+ * broken; a bare JSON error here names nothing useful.
+ */
+function parseImapSettings(plaintext: string): ImapConnectorOptions | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(plaintext);
+  } catch {
+    return null;
+  }
+  if (parsed === null || typeof parsed !== 'object') return null;
+  const data = parsed as Record<string, unknown>;
+  if (
+    typeof data['host'] !== 'string' ||
+    typeof data['port'] !== 'number' ||
+    typeof data['secure'] !== 'boolean' ||
+    typeof data['username'] !== 'string' ||
+    typeof data['password'] !== 'string'
+  ) {
+    return null;
+  }
+  return {
+    host: data['host'],
+    port: data['port'],
+    secure: data['secure'],
+    username: data['username'],
+    password: data['password'],
   };
 }

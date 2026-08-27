@@ -26,6 +26,8 @@ function fakeClient(state: FakeState) {
         flags: new Set(m.flags),
       })),
     ),
+    on: vi.fn(),
+    close: vi.fn(),
     getMailboxLock: vi.fn(async () => ({ release: vi.fn() })),
     search: vi.fn(async () => state.searchResult ?? []),
     fetchOne: vi.fn(async () => ({
@@ -157,5 +159,36 @@ describe('ImapEmailConnector connection failures', () => {
     expect(message).not.toBe('');
     expect(message).not.toContain('super-secret-app-pw');
     expect(message).toContain('someone@yahoo.com');
+  });
+});
+
+describe('socket lifecycle', () => {
+  /**
+   * Found against a real server, not imagined. Three refused logins behaved
+   * correctly, then a stray "Socket timeout" was emitted on an abandoned
+   * ImapFlow instance seconds later and, with no 'error' listener, Node killed
+   * the process. In the worker that is a dead process mid-collection — and a
+   * dead worker is what leaves items stuck in "fetching" with no failure
+   * recorded.
+   */
+  it('listens for error so a late socket fault cannot crash the process', async () => {
+    const { conn, calls } = connector({
+      mailboxes: [{ path: 'INBOX', delimiter: '/', flags: [] }],
+    });
+    await conn.listMailFolders('me');
+    expect(calls.on).toHaveBeenCalledWith('error', expect.any(Function));
+  });
+
+  it('closes the socket after a failed connect, so it cannot time out later', async () => {
+    const { conn, calls } = connector({ connectFails: true });
+    await expect(conn.listMailFolders('me')).rejects.toThrow(ProviderAuthError);
+    expect(calls.close).toHaveBeenCalled();
+  });
+
+  it('closes the socket after successful work too', async () => {
+    const { conn, calls } = connector({ mailboxes: [] });
+    await conn.listMailFolders('me');
+    expect(calls.logout).toHaveBeenCalled();
+    expect(calls.close).toHaveBeenCalled();
   });
 });

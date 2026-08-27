@@ -80,6 +80,21 @@ export class ConnectorsController {
     };
   }
 
+  /**
+   * IMAP is its own route because it takes a credential, not an OAuth redirect.
+   * Folding it into POST / would mean a create body that is valid for one
+   * provider and meaningless for the others.
+   */
+  @Post('imap')
+  @RequireRoles(TenantRole.org_admin)
+  @HttpCode(201)
+  async createImap(
+    @Body() body: unknown,
+    @Req() request: FastifyRequest,
+  ): Promise<{ connector: ConnectorDto }> {
+    return this.connectors.createImap(requireAuth(request), body, request);
+  }
+
   @Post(':id/org')
   @RequireRoles(TenantRole.org_admin)
   @HttpCode(200)

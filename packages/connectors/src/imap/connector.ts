@@ -34,6 +34,16 @@ import {
   type UidCursor,
 } from './uid.js';
 
+/**
+ * Bounds every phase of a connection. Without these a hung or silent host holds
+ * a worker job open until BullMQ decides the job stalled — which kills the job
+ * without recording a failure, the exact fault that left a collection stuck in
+ * "fetching" for twenty hours.
+ */
+const CONNECTION_TIMEOUT_MS = 30_000;
+const GREETING_TIMEOUT_MS = 15_000;
+const SOCKET_TIMEOUT_MS = 120_000;
+
 export interface ImapConnectorOptions {
   host: string;
   port: number;
@@ -56,6 +66,9 @@ function buildClient(options: ImapConnectorOptions): ImapFlow {
     port: options.port,
     secure: options.secure,
     auth: { user: options.username, pass: options.password },
+    connectionTimeout: CONNECTION_TIMEOUT_MS,
+    greetingTimeout: GREETING_TIMEOUT_MS,
+    socketTimeout: SOCKET_TIMEOUT_MS,
     // The library's own chatter is not our log; failures surface as thrown
     // errors and are recorded by the caller.
     logger: false,
@@ -69,15 +82,30 @@ export class ImapEmailConnector implements EmailConnector {
   /** One connection per call: a collection is long, and a held socket is not. */
   private async withClient<T>(fn: (client: ImapFlow) => Promise<T>): Promise<T> {
     const client = buildClient(this.options);
+
+    // ImapFlow is an EventEmitter and emits 'error' for late socket faults — a
+    // socket that times out AFTER a failed connect, for instance. With no
+    // listener, Node treats that as an unhandled 'error' event and kills the
+    // process. Observed for real against imap.mail.yahoo.com: three refused
+    // logins succeeded as designed, then a stray "Socket timeout" crashed the
+    // whole run seconds later. In the worker that is a dead process mid
+    // collection.
+    client.on('error', () => {
+      // Nothing to do: the operation that mattered already resolved or threw,
+      // and its error was reported by the caller.
+    });
+
     try {
       await client.connect();
     } catch (err) {
       // A bad app password and an unreachable host are different problems for
       // the operator, but both arrive here as a connect failure.
+      const message = err instanceof Error ? err.message : String(err);
+      // Close it, or the abandoned socket times out later and emits on a client
+      // nobody is holding any more.
+      client.close();
       throw new ProviderAuthError(
-        `IMAP connect failed for ${this.options.username} at ${this.options.host}: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
+        `IMAP connect failed for ${this.options.username} at ${this.options.host}: ${message}`,
       );
     }
     try {
@@ -86,6 +114,8 @@ export class ImapEmailConnector implements EmailConnector {
       await client.logout().catch(() => {
         // Losing the connection after the work is done changes nothing.
       });
+      // logout() is graceful; close() makes sure the socket is really gone.
+      client.close();
     }
   }
 

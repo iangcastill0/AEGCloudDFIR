@@ -7,6 +7,7 @@ import {
   buildConnectorsForAccount,
   makeRateLimitObserver,
   type ConnectorBundle,
+  requireDrive,
 } from '../connector-factory.js';
 import { AuditRequiresOrganizationModeError, composeAuditScopeKey } from '../audit.js';
 import { incrementProgress, recordException } from '../progress.js';
@@ -79,7 +80,7 @@ async function discoverDriveScopeKeys(
   if (!driveScope.includeSharedDrives) {
     return [DEFAULT_DRIVE_SCOPE_KEY];
   }
-  const drives = await bundle.drive.listDrives(bundle.custodianRef);
+  const drives = await requireDrive(bundle).listDrives(bundle.custodianRef);
   if (bundle.provider === 'google') {
     // Google listDrives returns shared drives only; My Drive is always included.
     return [DEFAULT_DRIVE_SCOPE_KEY, ...drives.map((d) => d.id)];

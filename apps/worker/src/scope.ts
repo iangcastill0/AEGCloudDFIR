@@ -103,11 +103,19 @@ export function dateRangeToInstants(scope: Pick<CollectionScope, 'dateRange'>): 
 /** Well-known folder / label filtering for email discovery. */
 export function emailFolderIncluded(
   folder: DiscoveredMailFolder,
-  provider: 'microsoft' | 'google',
+  provider: 'microsoft' | 'google' | 'imap',
   emailScope: NonNullable<CollectionScope['email']>,
 ): boolean {
   if (emailScope.folderIds !== null) {
     return emailScope.folderIds.includes(folder.id);
+  }
+  if (provider === 'imap') {
+    // The IMAP connector sets wellKnown from SPECIAL-USE flags, so this reads
+    // the flag rather than the folder's name — a trash folder called
+    // "Papierkorb" must still be excluded when trash is excluded.
+    if (!emailScope.includeTrash && folder.wellKnown === 'deleteditems') return false;
+    if (!emailScope.includeSpam && folder.wellKnown === 'junkemail') return false;
+    return true;
   }
   if (provider === 'google') {
     if (!emailScope.includeSpam && folder.wellKnown === 'SPAM') return false;

@@ -258,6 +258,11 @@ function ProviderStep({ state, dispatch }: StepProps) {
           },
           { value: 'google', label: 'Google Workspace', description: 'Gmail, Google Drive' },
           {
+            value: 'imap',
+            label: 'IMAP mailbox',
+            description: 'Yahoo, iCloud, AOL, or any mail server — mail only, no drive',
+          },
+          {
             value: 'upload',
             label: 'PST / mailbox file upload',
             description: 'Preserve and review Outlook data files (.pst, .ost)',
@@ -523,9 +528,13 @@ function SourcesStep({ state, dispatch }: StepProps) {
             })
           }
         />
+        {/* A mailbox has no drive and no provider audit log. Disabling these is
+            clearer than letting them be ticked and then failing validation. */}
         <Checkbox
           label="Drive files"
           checked={state.sources.drive}
+          disabled={state.provider === 'imap'}
+          hint={state.provider === 'imap' ? 'Not available: IMAP is mail only.' : undefined}
           onChange={(e) =>
             dispatch({
               type: 'patch',
@@ -536,6 +545,10 @@ function SourcesStep({ state, dispatch }: StepProps) {
         <Checkbox
           label="Audit logs (organization-wide)"
           checked={state.sources.audit}
+          disabled={state.provider === 'imap'}
+          hint={
+            state.provider === 'imap' ? 'Not available: IMAP has no provider audit log.' : undefined
+          }
           onChange={(e) =>
             dispatch({
               type: 'patch',
@@ -544,6 +557,12 @@ function SourcesStep({ state, dispatch }: StepProps) {
           }
         />
       </fieldset>
+      {state.provider === 'imap' ? (
+        <Notice variant="info">
+          IMAP collects mail only. Every selectable mailbox is walked by UID, and the original
+          message bytes are preserved exactly as the server returns them.
+        </Notice>
+      ) : null}
       {state.sources.audit ? (
         <Notice variant={auditNeedsOrg ? 'warning' : 'info'}>
           Audit logs are collected for the whole organization (app permission / domain-wide

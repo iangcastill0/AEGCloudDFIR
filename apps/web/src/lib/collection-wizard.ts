@@ -71,7 +71,7 @@ export const wizardStateSchema = z.object({
   /** Generated once per wizard run; reused across retries of the same start. */
   idempotencyKey: z.string().min(8),
   name: z.string(),
-  provider: z.enum(['microsoft', 'google', 'upload', '']),
+  provider: z.enum(['microsoft', 'google', 'imap', 'upload', '']),
   connectorAccountId: z.string(),
   connectorMode: z.enum(['delegated', 'organization', '']),
   sources: z.object({ email: z.boolean(), drive: z.boolean(), audit: z.boolean() }),
@@ -216,6 +216,17 @@ export function validateStep(state: WizardState, step: number): string[] {
     case STEP_SOURCES:
       // Uploads are fixed to the email source; nothing to validate.
       if (upload) break;
+      // IMAP speaks mail and nothing else. Allowing drive or audit here would
+      // produce a collection that claims a source it never looked at — the
+      // failure this product cares most about avoiding.
+      if (state.provider === 'imap') {
+        if (state.sources.drive) {
+          errors.push('IMAP connectors collect mail only; a mailbox has no drive to collect.');
+        }
+        if (state.sources.audit) {
+          errors.push('IMAP connectors collect mail only; there are no provider audit logs.');
+        }
+      }
       if (!state.sources.email && !state.sources.drive && !state.sources.audit)
         errors.push('Select at least one source (email, drive, or audit logs).');
       // Audit logs are organization-wide (app permission / domain-wide

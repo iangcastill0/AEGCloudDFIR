@@ -279,6 +279,84 @@ describe('ConnectorsService.configureOrg (google)', () => {
   });
 });
 
+describe('ConnectorsService.createImap', () => {
+  function models(over: Record<string, unknown> = {}) {
+    return {
+      tenant: { findUnique: vi.fn(async () => ({ id: TENANT_ID, quotas: {} })) },
+      connectorAccount: {
+        count: vi.fn(async () => 0),
+        create: vi.fn(async () => baseAccount({ provider: 'imap', mode: 'delegated' })),
+        update: vi.fn(async () => baseAccount({ provider: 'imap' })),
+      },
+      connectorSecret: {
+        deleteMany: vi.fn(async () => ({ count: 0 })),
+        create: vi.fn(async () => ({})),
+      },
+      ...over,
+    };
+  }
+
+  const body = {
+    label: 'Yahoo mailbox',
+    host: 'imap.mail.yahoo.com',
+    port: 993,
+    secure: true,
+    username: 'someone@yahoo.com',
+    appPassword: 'abcd efgh ijkl mnop',
+  };
+
+  it('stores the app password as ciphertext, with the plaintext nowhere in the row', async () => {
+    const m = models();
+    const { service } = makeService(m);
+    await service.createImap(auth, body, fakeRequest());
+
+    const args = (m.connectorSecret.create as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as {
+      data: Record<string, unknown>;
+    };
+    expect(args.data['kind']).toBe('imap_password');
+    // Envelope encryption: a wrapped DEK and ciphertext, like every other secret.
+    expect(args.data['ciphertext']).toBeInstanceOf(Uint8Array);
+    expect(args.data['wrappedDek']).toBeInstanceOf(Uint8Array);
+
+    // The password must not survive anywhere in the written row, including the
+    // ciphertext bytes read as text.
+    const asText = Object.values(args.data)
+      .map((v) => (v instanceof Uint8Array ? Buffer.from(v).toString('utf8') : String(v)))
+      .join(' | ');
+    expect(asText).not.toContain('abcd efgh ijkl mnop');
+    expect(asText).not.toContain('someone@yahoo.com');
+  });
+
+  it('records the username as the connector identity', async () => {
+    const m = models();
+    const { service } = makeService(m);
+    await service.createImap(auth, body, fakeRequest());
+    const args = (m.connectorAccount.create as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as {
+      data: Record<string, unknown>;
+    };
+    expect(args.data['provider']).toBe('imap');
+    expect(args.data['externalIdentity']).toBe('someone@yahoo.com');
+  });
+
+  it('never writes the app password into the audit summary', async () => {
+    // The audit chain is append-only and exportable. A secret in it cannot be
+    // taken back out.
+    const m = models();
+    const { service, audit } = makeService(m);
+    await service.createImap(auth, body, fakeRequest());
+    const summary = JSON.stringify((audit.appendTx as ReturnType<typeof vi.fn>).mock.calls[0]?.[1]);
+    expect(summary).not.toContain('abcd efgh ijkl mnop');
+    expect(summary).toContain('imap.mail.yahoo.com');
+  });
+
+  it('rejects a body missing the app password', async () => {
+    const { service } = makeService(models());
+    await expect(
+      service.createImap(auth, { ...body, appPassword: '' }, fakeRequest()),
+    ).rejects.toThrow();
+  });
+});
+
 describe('ConnectorsService.test', () => {
   it('refreshes a token, probes mail folders, and marks the account connected', async () => {
     const encrypted = await encryptSecret(

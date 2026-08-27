@@ -10,10 +10,12 @@ import {
 import { z } from 'zod';
 import type { AppConfig } from '@aeg-clouddfir/config';
 import {
+  ConnectionMode,
   ConnectorStatus,
   Provider,
   SecretKind,
   withTenantContext,
+  decryptSecret,
   encryptSecret,
   type EncryptedSecret,
   type KeyEncryptionProvider,
@@ -42,6 +44,7 @@ import {
 import {
   TRUTHFULNESS_NOTICES,
   createConnectorRequest,
+  createImapConnectorRequest,
   orgGoogleSetupRequest,
   orgMicrosoftSetupRequest,
 } from '@aeg-clouddfir/contracts';
@@ -59,6 +62,11 @@ import {
   sealConnectorFlow,
   type ConnectorFlowPayload,
 } from '../auth/session.js';
+import {
+  ImapEmailConnector,
+  ProviderAuthError,
+  type ImapConnectorOptions,
+} from '@aeg-clouddfir/connectors';
 import {
   buildConnectorTokenProvider,
   ConnectorCredentialsError,
@@ -202,6 +210,103 @@ export class ConnectorsService {
    * key. Hiding it keeps the list clean and the provenance intact, and
    * `includeRevoked` brings it back when someone needs to look.
    */
+  /**
+   * Create an IMAP connector.
+   *
+   * Unlike OAuth providers there is no browser round trip: the operator supplies
+   * a host and an app password, both are stored, and the connector is usable
+   * immediately. The app password is envelope-encrypted like every other secret
+   * and never appears in the audit summary — the chain is append-only and
+   * exportable, so a secret written into it cannot be taken back out.
+   *
+   * The status starts as pending_auth. "Test" proves the credential works and
+   * flips it to connected; claiming connected before anything has spoken to the
+   * server would be a guess.
+   */
+  async createImap(
+    auth: AuthContext,
+    body: unknown,
+    request: FastifyRequest,
+  ): Promise<{ connector: ConnectorDto }> {
+    const input = zodValidate(createImapConnectorRequest, body);
+
+    const row = await withTenantContext(this.prisma, auth.tenantId, async (tx) => {
+      const tenant = await tx.tenant.findUnique({ where: { id: auth.tenantId } });
+      if (!tenant) throw new NotFoundException();
+      const used = await tx.connectorAccount.count({
+        where: { tenantId: auth.tenantId, status: { not: ConnectorStatus.revoked } },
+      });
+      assertWithinQuota('maxConnectorAccounts', used, readQuota(tenant, 'maxConnectorAccounts'));
+
+      const created = await tx.connectorAccount.create({
+        data: {
+          tenantId: auth.tenantId,
+          provider: Provider.imap,
+          // One credential reaches exactly one mailbox, which is what delegated
+          // means everywhere else in this app.
+          mode: ConnectionMode.delegated,
+          label: input.label,
+          // IMAP has no account id; the login name IS the identity.
+          externalIdentity: input.username,
+          status: ConnectorStatus.pending_auth,
+          statusDetail: 'credential stored; run Test to confirm it works',
+          createdById: auth.userId,
+        },
+      });
+
+      // Host, port and TLS travel with the secret: they are useless apart, and
+      // keeping them together means one decrypt gives the worker everything it
+      // needs to open a connection.
+      const encrypted = await encryptSecret(
+        this.kek,
+        auth.tenantId,
+        connectorSecretScope(created.id),
+        Buffer.from(
+          JSON.stringify({
+            host: input.host,
+            port: input.port,
+            secure: input.secure,
+            username: input.username,
+            password: input.appPassword,
+          }),
+          'utf8',
+        ),
+      );
+      await tx.connectorSecret.create({
+        data: {
+          tenantId: auth.tenantId,
+          connectorAccountId: created.id,
+          kind: SecretKind.imap_password,
+          ...encryptedSecretColumns(encrypted),
+        },
+      });
+
+      await this.audit.appendTx(tx, {
+        tenantId: auth.tenantId,
+        actorUserId: auth.userId,
+        actorDisplay: auth.actorDisplay,
+        effectiveRoles: auth.roles,
+        action: 'connector.created',
+        targetType: 'connector_account',
+        targetId: created.id,
+        // Where and who, never the credential.
+        summary: {
+          provider: 'imap',
+          mode: 'delegated',
+          label: input.label,
+          host: input.host,
+          port: input.port,
+          secure: input.secure,
+          username: input.username,
+        },
+        request,
+      });
+      return created;
+    });
+
+    return { connector: toDto(row) };
+  }
+
   async list(
     auth: AuthContext,
     page: CursorQuery,
@@ -712,6 +817,50 @@ export class ConnectorsService {
     });
   }
 
+  /**
+   * Recover the IMAP host, port and app password from the stored secret.
+   *
+   * Host and port live inside the encrypted blob alongside the password because
+   * they are useless apart, and one decrypt then gives everything needed to open
+   * a connection. Returns null when the connector has no such secret, which is a
+   * connector that was never finished rather than an error.
+   */
+  private async imapSettings(account: {
+    id: string;
+    tenantId: string;
+    secrets: { kind: SecretKind }[];
+  }): Promise<ImapConnectorOptions | null> {
+    const record = (account.secrets as ConnectorSecretRecord[]).find(
+      (secret) => secret.kind === SecretKind.imap_password,
+    );
+    if (record === undefined) return null;
+    const plaintext = await decryptSecret(
+      this.kek,
+      account.tenantId,
+      connectorSecretScope(account.id),
+      record,
+    );
+    const parsed: unknown = JSON.parse(plaintext.toString('utf8'));
+    if (parsed === null || typeof parsed !== 'object') return null;
+    const data = parsed as Record<string, unknown>;
+    if (
+      typeof data['host'] !== 'string' ||
+      typeof data['port'] !== 'number' ||
+      typeof data['secure'] !== 'boolean' ||
+      typeof data['username'] !== 'string' ||
+      typeof data['password'] !== 'string'
+    ) {
+      return null;
+    }
+    return {
+      host: data['host'],
+      port: data['port'],
+      secure: data['secure'],
+      username: data['username'],
+      password: data['password'],
+    };
+  }
+
   private secretRecords(
     secrets: {
       id: string;
@@ -814,6 +963,28 @@ export class ConnectorsService {
       // Uploads have no provider side to test: never build provider clients.
       ok = true;
       detail = 'local uploads';
+    } else if (account.provider === Provider.imap) {
+      // A real connection and a real LIST. Anything less would report "ok" for a
+      // credential that has never spoken to the server.
+      const settings = await this.imapSettings(account);
+      if (settings === null) {
+        ok = false;
+        detail = 'no stored IMAP credential; recreate the connector';
+      } else {
+        try {
+          const discovery = await new ImapEmailConnector(settings).listMailFolders();
+          ok = true;
+          detail = `ok: ${String(discovery.folders.length)} mailboxes visible`;
+        } catch (err) {
+          ok = false;
+          // ProviderAuthError already names the host and login and never the
+          // password; anything else is not safe to echo back.
+          detail =
+            err instanceof ConnectorError || err instanceof ProviderAuthError
+              ? err.message
+              : 'IMAP connection failed';
+        }
+      }
     } else {
       try {
         const tokenProvider = await this.tokenProviderFor(account);

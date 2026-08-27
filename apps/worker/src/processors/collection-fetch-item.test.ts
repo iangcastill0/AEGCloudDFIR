@@ -15,6 +15,14 @@ import { processCollectionFetchItem } from './collection-fetch-item.js';
 vi.mock('../connector-factory.js', () => ({
   buildConnectorsForAccount: vi.fn(),
   makeRateLimitObserver: vi.fn(() => () => undefined),
+  // The real guard: it throws for a mail-only connector rather than returning a
+  // stub that would quietly collect nothing from a drive.
+  requireDrive: vi.fn((bundle: { drive: unknown; provider: string }) => {
+    if (bundle.drive === null) {
+      throw new Error(`${bundle.provider} connectors collect mail only`);
+    }
+    return bundle.drive;
+  }),
 }));
 const factory = await import('../connector-factory.js');
 const buildConnectors = vi.mocked(factory.buildConnectorsForAccount);

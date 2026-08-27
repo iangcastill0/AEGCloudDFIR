@@ -11,6 +11,7 @@ import {
   buildConnectorsForAccount,
   makeRateLimitObserver,
   type ConnectorBundle,
+  requireDrive,
 } from '../connector-factory.js';
 import { incrementProgress, recordException } from '../progress.js';
 import { QUEUES, dedupKeys } from '../queues.js';
@@ -27,10 +28,14 @@ type CheckpointKind = 'page' | 'delta' | 'history' | 'changes' | 'none';
 
 /** Checkpoint kind once a scope's enumeration is exhausted. */
 export function exhaustedCursorKind(
-  provider: 'microsoft' | 'google',
+  provider: 'microsoft' | 'google' | 'imap',
   source: 'email' | 'drive',
   deltaCursor: string | undefined,
 ): CheckpointKind {
+  // IMAP has no delta link at all: the only resume state is a UID position,
+  // which is a page cursor. Calling it a delta would imply the server can tell
+  // us what changed, and it cannot.
+  if (provider === 'imap') return 'page';
   if (deltaCursor === undefined || deltaCursor === '') return 'none';
   if (source === 'email') return provider === 'google' ? 'history' : 'delta';
   return provider === 'google' ? 'changes' : 'delta';
@@ -84,9 +89,9 @@ async function listOnePage(
 
   let page: DriveListPage;
   if (checkpoint.cursorKind === 'delta' || checkpoint.cursorKind === 'changes') {
-    page = await bundle.drive.getChangesDelta(bundle.custodianRef, cursor);
+    page = await requireDrive(bundle).getChangesDelta(bundle.custodianRef, cursor);
   } else {
-    page = await bundle.drive.listFiles(bundle.custodianRef, {
+    page = await requireDrive(bundle).listFiles(bundle.custodianRef, {
       cursor,
       driveId: payload.scopeKey === DEFAULT_DRIVE_SCOPE_KEY ? undefined : payload.scopeKey,
       includeTrashed: scope.drive?.includeTrashed ?? false,

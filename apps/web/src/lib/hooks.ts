@@ -10,6 +10,7 @@ import {
 import {
   addCaseItemsResponse,
   type CreateConnectorRequest,
+  type CreateImapConnectorRequest,
   caseActivityListResponse,
   caseSummary,
   caseTagListResponse,
@@ -113,6 +114,20 @@ export function useConnectors(includeRevoked = false) {
  * to POST /connectors/:id/org, a separate step, via useSetupOrgConnector below.
  */
 export type CreateConnectorInput = CreateConnectorRequest;
+
+/** POST /connectors/imap — a credential, not an OAuth redirect. */
+export function useCreateImapConnector() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateImapConnectorRequest) =>
+      apiFetch('/api/v1/connectors/imap', {
+        method: 'POST',
+        body,
+        schema: createConnectorResponse,
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['connectors'] }),
+  });
+}
 
 /** POST /connectors/:id/org — the second step for organization mode. */
 export function useSetupOrgConnector() {

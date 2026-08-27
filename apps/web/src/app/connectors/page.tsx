@@ -19,6 +19,7 @@ import {
   useSetupOrgConnector,
   useTestConnector,
 } from '@/lib/hooks';
+import { ImapConnectDialog } from '@/components/ImapConnectDialog';
 import {
   buildCreateConnector,
   buildGoogleOrgSetup,
@@ -39,6 +40,7 @@ export default function ConnectorsPage() {
   const revoke = useRevokeConnector();
 
   const [orgSetup, setOrgSetup] = useState<OrgSetup>(null);
+  const [imapOpen, setImapOpen] = useState(false);
   const [revokeTarget, setRevokeTarget] = useState<{ id: string; name: string } | null>(null);
   const [statusText, setStatusText] = useState('');
   const [label, setLabel] = useState('');
@@ -96,6 +98,24 @@ export default function ConnectorsPage() {
           </Button>
           <Button onClick={() => connectDelegated('google')} busy={create.isPending}>
             Connect Google account
+          </Button>
+        </div>
+      </section>
+
+      <section
+        className="card"
+        aria-labelledby="connect-imap"
+        style={{ marginTop: 'var(--space-4)' }}
+      >
+        <h2 id="connect-imap">Connect a mailbox by IMAP</h2>
+        <p>
+          For mail Microsoft and Google cannot see — Yahoo, iCloud, AOL, or a client&apos;s own mail
+          server. IMAP returns the original message bytes, so what is preserved is the message as
+          the server holds it.
+        </p>
+        <div className="button-row">
+          <Button variant="secondary" onClick={() => setImapOpen(true)}>
+            Connect IMAP mailbox
           </Button>
         </div>
       </section>
@@ -199,6 +219,10 @@ export default function ConnectorsPage() {
           }
         </QueryBoundary>
       </section>
+
+      {imapOpen ? (
+        <ImapConnectDialog onClose={() => setImapOpen(false)} onStatus={setStatusText} />
+      ) : null}
 
       {orgSetup ? (
         <OrgSetupDialog
