@@ -293,6 +293,7 @@ describe('ConnectorsService.createImap', () => {
         deleteMany: vi.fn(async () => ({ count: 0 })),
         create: vi.fn(async () => ({})),
       },
+      custodian: { upsert: vi.fn(async () => ({})) },
       ...over,
     };
   }
@@ -406,6 +407,59 @@ describe('ConnectorsService.createImap', () => {
     await expect(
       service.createImap(auth, { ...body, appPassword: '' }, fakeRequest()),
     ).rejects.toThrow();
+  });
+});
+
+describe('ConnectorsService.custodians for imap', () => {
+  it('fills in the missing custodian for a connector created before it was written', async () => {
+    // Four connectors already existed on staging with no custodian row, so the
+    // wizard waited on "Resolving the connected identity..." with nothing to
+    // resolve. The identity is known — it is the login — so heal rather than
+    // leave the operator stuck.
+    const upsert = vi.fn(async () => ({
+      id: 'cust-1',
+      externalId: 'someone@yahoo.com',
+      email: 'someone@yahoo.com',
+      displayName: 'someone@yahoo.com',
+    }));
+    const { service } = makeService({
+      connectorAccount: {
+        findFirst: vi.fn(async () =>
+          baseAccount({
+            provider: 'imap',
+            mode: 'delegated',
+            status: ConnectorStatus.pending_auth,
+            externalIdentity: 'someone@yahoo.com',
+          }),
+        ),
+      },
+      custodian: { findMany: vi.fn(async () => []), upsert },
+    });
+
+    const result = await service.custodians(auth, CONNECTOR_ID, {});
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]?.email).toBe('someone@yahoo.com');
+    expect(upsert).toHaveBeenCalled();
+  });
+
+  it('leaves an existing custodian alone', async () => {
+    const upsert = vi.fn(async () => ({}));
+    const { service } = makeService({
+      connectorAccount: {
+        findFirst: vi.fn(async () =>
+          baseAccount({ provider: 'imap', mode: 'delegated', externalIdentity: 'a@b.com' }),
+        ),
+      },
+      custodian: {
+        findMany: vi.fn(async () => [
+          { id: 'c1', externalId: 'a@b.com', email: 'a@b.com', displayName: '' },
+        ]),
+        upsert,
+      },
+    });
+    const result = await service.custodians(auth, CONNECTOR_ID, {});
+    expect(result.items).toHaveLength(1);
+    expect(upsert).not.toHaveBeenCalled();
   });
 });
 

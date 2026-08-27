@@ -301,6 +301,28 @@ export class ConnectorsService {
         },
       });
 
+      // The one selectable custodian, created now rather than discovered later.
+      // Delegated OAuth learns the identity from a profile call in its callback;
+      // IMAP has no directory and no callback — the login name IS the identity.
+      // Without this row the Custodians step has nothing to offer and sits on
+      // "Resolving the connected identity..." forever.
+      await tx.custodian.upsert({
+        where: {
+          connectorAccountId_externalId: {
+            connectorAccountId: created.id,
+            externalId: input.username,
+          },
+        },
+        create: {
+          tenantId: auth.tenantId,
+          connectorAccountId: created.id,
+          externalId: input.username,
+          email: input.username,
+          displayName: input.username,
+        },
+        update: { email: input.username },
+      });
+
       await this.audit.appendTx(tx, {
         tenantId: auth.tenantId,
         actorUserId: auth.userId,
@@ -1111,12 +1133,36 @@ export class ConnectorsService {
     if (account.mode === 'delegated') {
       // The connected identity is the ONLY selectable custodian — the UI
       // must not suggest that delegated access reaches other accounts.
-      const rows = await withTenantContext(this.prisma, auth.tenantId, (tx) =>
-        tx.custodian.findMany({
+      const rows = await withTenantContext(this.prisma, auth.tenantId, async (tx) => {
+        const existing = await tx.custodian.findMany({
           where: { tenantId: auth.tenantId, connectorAccountId: account.id },
           orderBy: { id: 'asc' },
-        }),
-      );
+        });
+        if (existing.length > 0) return existing;
+
+        // An IMAP connector created before the custodian row was written has
+        // nothing to select, and the wizard waits on it indefinitely. The
+        // identity is known — it is the login — so fill it in rather than
+        // leaving the operator stuck.
+        if (account.provider !== Provider.imap || account.externalIdentity === '') return existing;
+        const healed = await tx.custodian.upsert({
+          where: {
+            connectorAccountId_externalId: {
+              connectorAccountId: account.id,
+              externalId: account.externalIdentity,
+            },
+          },
+          create: {
+            tenantId: auth.tenantId,
+            connectorAccountId: account.id,
+            externalId: account.externalIdentity,
+            email: account.externalIdentity,
+            displayName: account.externalIdentity,
+          },
+          update: {},
+        });
+        return [healed];
+      });
       return {
         items: rows.map((c) => ({
           id: c.id,
