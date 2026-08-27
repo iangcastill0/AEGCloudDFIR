@@ -238,6 +238,26 @@ export class ConnectorsService {
       });
       assertWithinQuota('maxConnectorAccounts', used, readQuota(tenant, 'maxConnectorAccounts'));
 
+      // One mailbox, one connector. Four connectors to the same Yahoo mailbox
+      // were created in eleven minutes because a response-parse bug made the
+      // page look like it had failed, and nothing here said "you already have
+      // this". A rotated app password is a legitimate reason to reconnect, so
+      // the existing one has to be revoked first rather than silently replaced.
+      const existing = await tx.connectorAccount.findFirst({
+        where: {
+          tenantId: auth.tenantId,
+          provider: Provider.imap,
+          externalIdentity: input.username,
+          status: { not: ConnectorStatus.revoked },
+        },
+        select: { id: true, label: true },
+      });
+      if (existing !== null) {
+        throw new ConflictException(
+          `a connector for ${input.username} already exists ("${existing.label}"); revoke it before adding another`,
+        );
+      }
+
       const created = await tx.connectorAccount.create({
         data: {
           tenantId: auth.tenantId,

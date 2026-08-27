@@ -285,6 +285,7 @@ describe('ConnectorsService.createImap', () => {
       tenant: { findUnique: vi.fn(async () => ({ id: TENANT_ID, quotas: {} })) },
       connectorAccount: {
         count: vi.fn(async () => 0),
+        findFirst: vi.fn(async () => null),
         create: vi.fn(async () => baseAccount({ provider: 'imap', mode: 'delegated' })),
         update: vi.fn(async () => baseAccount({ provider: 'imap' })),
       },
@@ -370,6 +371,34 @@ describe('ConnectorsService.createImap', () => {
     await expect(
       service.create(auth, { provider: 'imap', mode: 'delegated', label: 'x' }, fakeRequest()),
     ).rejects.toThrow(/connectors\/imap/);
+  });
+
+  it('refuses a second connector for a mailbox that already has one', async () => {
+    // Four connectors to one Yahoo mailbox in eleven minutes, because a
+    // response-parse bug made the page look like it had failed. The API is where
+    // that has to stop.
+    const m = models({
+      connectorAccount: {
+        count: vi.fn(async () => 0),
+        findFirst: vi.fn(async () => ({ id: 'existing-id', label: 'Yahoo mailbox' })),
+        create: vi.fn(async () => baseAccount({ provider: 'imap' })),
+        update: vi.fn(async () => baseAccount({ provider: 'imap' })),
+      },
+    });
+    const { service } = makeService(m);
+    await expect(service.createImap(auth, body, fakeRequest())).rejects.toThrow(/already exists/);
+  });
+
+  it('allows a new connector once the old one is revoked', async () => {
+    // A rotated app password is a real reason to reconnect. The guard looks only
+    // at connectors that are still live.
+    const m = models();
+    const { service } = makeService(m);
+    await expect(service.createImap(auth, body, fakeRequest())).resolves.toBeDefined();
+    const where = (m.connectorAccount.findFirst as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as {
+      where: Record<string, unknown>;
+    };
+    expect(where.where['status']).toEqual({ not: 'revoked' });
   });
 
   it('rejects a body missing the app password', async () => {

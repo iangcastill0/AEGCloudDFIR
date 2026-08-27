@@ -41,7 +41,17 @@ export {
   type GoogleReportsOptions,
 } from './google/reports.js';
 export { GoogleVaultConnector, type GoogleVaultOptions } from './google/vault.js';
-export { ImapEmailConnector, type ImapConnectorOptions } from './imap/connector.js';
+export {
+  ImapEmailConnector,
+  buildImapClient,
+  type ImapConnectorOptions,
+} from './imap/connector.js';
+export {
+  ImapConnectionPool,
+  poolKey,
+  type ImapConnectionSettings,
+  type ImapConnectionPoolOptions,
+} from './imap/pool.js';
 export { mapMailboxes, type RawMailbox } from './imap/folders.js';
 export {
   UID_PAGE_SIZE,

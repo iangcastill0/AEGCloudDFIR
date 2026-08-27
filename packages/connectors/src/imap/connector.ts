@@ -26,6 +26,7 @@ import type {
   MailFolderDiscovery,
 } from '../types.js';
 import { mapMailboxes, type RawMailbox } from './folders.js';
+import { ImapConnectionPool } from './pool.js';
 import {
   decodeUidCursor,
   encodeUidCursor,
@@ -58,9 +59,21 @@ export interface ImapConnectorOptions {
   password: string;
   /** Overridden in tests. */
   clientFactory?: (opts: ImapConnectorOptions) => ImapFlow;
+  /**
+   * Shared connection pool. Supply the SAME pool for every call in a collection
+   * or the connector logs in once per message — measured at 10,563 logins for
+   * one real mailbox, which providers treat as abuse.
+   */
+  pool?: ImapConnectionPool;
 }
 
-function buildClient(options: ImapConnectorOptions): ImapFlow {
+/**
+ * Build a client with the timeouts every caller needs.
+ *
+ * Exported so the worker can hand the same construction to a shared pool rather
+ * than reimplementing the timeout choices.
+ */
+export function buildImapClient(options: ImapConnectorOptions): ImapFlow {
   if (options.clientFactory !== undefined) return options.clientFactory(options);
   return new ImapFlow({
     host: options.host,
@@ -78,46 +91,38 @@ function buildClient(options: ImapConnectorOptions): ImapFlow {
 
 /** IMAP has no per-account id; the login name is the identity. */
 export class ImapEmailConnector implements EmailConnector {
-  constructor(private readonly options: ImapConnectorOptions) {}
+  private readonly pool: ImapConnectionPool;
 
-  /** One connection per call: a collection is long, and a held socket is not. */
-  private async withClient<T>(fn: (client: ImapFlow) => Promise<T>): Promise<T> {
-    const client = buildClient(this.options);
-
-    // ImapFlow is an EventEmitter and emits 'error' for late socket faults — a
-    // socket that times out AFTER a failed connect, for instance. With no
-    // listener, Node treats that as an unhandled 'error' event and kills the
-    // process. Observed for real against imap.mail.yahoo.com: three refused
-    // logins succeeded as designed, then a stray "Socket timeout" crashed the
-    // whole run seconds later. In the worker that is a dead process mid
-    // collection.
-    client.on('error', () => {
-      // Nothing to do: the operation that mattered already resolved or threw,
-      // and its error was reported by the caller.
-    });
-
-    try {
-      await client.connect();
-    } catch (err) {
-      // A bad app password and an unreachable host are different problems for
-      // the operator, but both arrive here as a connect failure.
-      const message = err instanceof Error ? err.message : String(err);
-      // Close it, or the abandoned socket times out later and emits on a client
-      // nobody is holding any more.
-      client.close();
-      throw new ProviderAuthError(
-        `IMAP connect failed for ${this.options.username} at ${this.options.host}: ${message}`,
-      );
-    }
-    try {
-      return await fn(client);
-    } finally {
-      await client.logout().catch(() => {
-        // Losing the connection after the work is done changes nothing.
+  constructor(private readonly options: ImapConnectorOptions) {
+    // Without a shared pool each connector owns one, which still beats a
+    // connection per call for anything that reuses the connector.
+    this.pool =
+      options.pool ??
+      new ImapConnectionPool({
+        createClient: () => buildImapClient(options),
       });
-      // logout() is graceful; close() makes sure the socket is really gone.
-      client.close();
+  }
+
+  private async withClient<T>(fn: (client: ImapFlow) => Promise<T>): Promise<T> {
+    try {
+      return await this.pool.withConnection(this.options, fn);
+    } catch (err) {
+      if (err instanceof ProviderAuthError) throw err;
+      const message = err instanceof Error ? err.message : String(err);
+      // Connect failures and command failures both land here. The message names
+      // the host and the login — never the password.
+      if (/auth|login|credential|connect/i.test(message)) {
+        throw new ProviderAuthError(
+          `IMAP connect failed for ${this.options.username} at ${this.options.host}: ${message}`,
+        );
+      }
+      throw err;
     }
+  }
+
+  /** Close the pooled connection when this connector owns its pool. */
+  async close(): Promise<void> {
+    if (this.options.pool === undefined) await this.pool.closeAll();
   }
 
   async listMailFolders(): Promise<MailFolderDiscovery> {

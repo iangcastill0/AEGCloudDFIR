@@ -7,6 +7,7 @@ import { buildWorkerContext } from './context.js';
 import { FinalizeSweeper } from './finalize-sweeper.js';
 import { startHealthServer } from './health.js';
 import { WorkerMetrics } from './metrics.js';
+import { closeImapPools } from './connector-factory.js';
 import { OutboxDispatcher } from './outbox/dispatcher.js';
 import { createWorkers } from './workers.js';
 
@@ -86,6 +87,9 @@ async function main(): Promise<void> {
     health.close();
     // Close queue workers BEFORE the connections they depend on.
     await Promise.all(workers.map((w) => w.close())).catch(() => undefined);
+    // Pooled IMAP logins are held for the life of the process; a provider counts
+    // an abandoned connection against the account's limit until it times out.
+    await closeImapPools().catch(() => undefined);
     await enqueuer.close();
     await redis.quit().catch(() => undefined);
     await prisma.$disconnect();

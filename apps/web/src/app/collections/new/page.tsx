@@ -33,6 +33,7 @@ import {
   type WizardAction,
   type WizardState,
 } from '@/lib/collection-wizard';
+import { connectorChoiceLabel } from '@/lib/connector-choice';
 import { useConnectors, useCreateCollection, useCustodians, useUpload } from '@/lib/hooks';
 import { errorMessage } from '@/lib/errors';
 import { formatBytes } from '@/lib/format';
@@ -311,9 +312,8 @@ function AccountStep({ state, dispatch }: StepProps) {
               }}
               options={usable.map((c) => ({
                 value: c.id,
-                label: `${c.externalIdentity || c.label || c.id} ${
-                  c.mode === 'organization' ? '(organization)' : '(personal/delegated)'
-                }`,
+                // Disambiguated when two connectors reach the same mailbox.
+                label: connectorChoiceLabel(c, usable),
                 description:
                   c.mode === 'organization'
                     ? 'Corporate account — collects any permitted user in the tenant via admin-consented app access.'

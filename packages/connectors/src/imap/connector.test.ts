@@ -188,9 +188,22 @@ describe('socket lifecycle', () => {
     expect(calls.close).toHaveBeenCalled();
   });
 
-  it('closes the socket after successful work too', async () => {
+  it('KEEPS the connection open after successful work, for the next call', async () => {
+    // The opposite of what this asserted before pooling, and deliberately so:
+    // closing after every call is what made a full collection 10,563 logins.
     const { conn, calls } = connector({ mailboxes: [] });
     await conn.listMailFolders('me');
+    await conn.listMailFolders('me');
+    expect(calls.logout).not.toHaveBeenCalled();
+    expect(calls.close).not.toHaveBeenCalled();
+    // One login serving both calls.
+    expect(calls.connect).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes the connection when asked, so a worker exit leaks nothing', async () => {
+    const { conn, calls } = connector({ mailboxes: [] });
+    await conn.listMailFolders('me');
+    await conn.close();
     expect(calls.logout).toHaveBeenCalled();
     expect(calls.close).toHaveBeenCalled();
   });

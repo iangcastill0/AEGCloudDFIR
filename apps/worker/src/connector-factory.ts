@@ -1,6 +1,8 @@
 import {
   GmailConnector,
+  ImapConnectionPool,
   ImapEmailConnector,
+  buildImapClient,
   type ImapConnectorOptions,
   GoogleDelegatedTokenSource,
   GoogleDriveConnector,
@@ -71,6 +73,38 @@ export interface ConnectorBundle {
  * Returning a stub that quietly yields nothing would report a complete
  * collection of a source we never looked at.
  */
+/**
+ * One IMAP connection pool per connector account, for the life of this worker
+ * process.
+ *
+ * Every message is a separate BullMQ job, and each job builds its clients fresh.
+ * Without a cache here the pool would be per job, which is the same as a login
+ * per message — measured at 10,563 logins for one real mailbox, a pattern
+ * providers treat as abuse. Keyed by connector account, so two custodians never
+ * share a credential's connection.
+ */
+const imapPools = new Map<string, ImapConnectionPool>();
+
+function imapPoolFor(
+  connectorAccountId: string,
+  settings: ImapConnectorOptions,
+): ImapConnectionPool {
+  const existing = imapPools.get(connectorAccountId);
+  if (existing !== undefined) return existing;
+  const pool = new ImapConnectionPool({
+    createClient: () => buildImapClient(settings),
+  });
+  imapPools.set(connectorAccountId, pool);
+  return pool;
+}
+
+/** Close every pooled IMAP connection. Called on worker shutdown. */
+export async function closeImapPools(): Promise<void> {
+  const pools = [...imapPools.values()];
+  imapPools.clear();
+  await Promise.all(pools.map((p) => p.closeAll()));
+}
+
 export function requireDrive(bundle: ConnectorBundle): DriveConnector {
   if (bundle.drive === null) {
     throw new Error(
@@ -250,7 +284,12 @@ export async function buildConnectorsForAccount(
     return {
       provider: 'imap',
       mode: 'delegated',
-      email: new ImapEmailConnector(settings),
+      // The pool is shared across every job for this connector, so a collection
+      // logs in once rather than once per message.
+      email: new ImapEmailConnector({
+        ...settings,
+        pool: imapPoolFor(connectorAccountId, settings),
+      }),
       // A mailbox is not a drive, and pretending otherwise would make a
       // collection claim it looked somewhere it cannot reach.
       drive: null,
