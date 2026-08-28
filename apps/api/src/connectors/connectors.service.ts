@@ -349,11 +349,51 @@ export class ConnectorsService {
     return { connector: toDto(row) };
   }
 
+  /**
+   * Retire connect flows that were started and never finished.
+   *
+   * An abandoned OAuth flow leaves a connector with no identity and no
+   * credential. The sealed state expires after CONNECT_FLOW_TTL_SECONDS, so it
+   * can never complete — yet it stayed in the list forever and could still be
+   * chosen in the collection wizard, where it fails at the first provider call.
+   *
+   * Marked revoked rather than deleted: the audit chain already records that
+   * someone created it, and "revoked" is the honest state for something that can
+   * no longer be used. The detail says which kind of dead it is. IMAP is
+   * excluded — it is created pending_auth too, but that only means "not tested
+   * yet", and it holds a credential from the moment it exists.
+   */
+  private async retireAbandonedFlows(auth: AuthContext): Promise<void> {
+    // A grace period past the flow TTL: a slow sign-in should not be swept away
+    // while the operator is still on the provider's page.
+    const cutoff = new Date(Date.now() - CONNECT_FLOW_TTL_SECONDS * 2 * 1000);
+    await withTenantContext(this.prisma, auth.tenantId, (tx) =>
+      tx.connectorAccount.updateMany({
+        where: {
+          tenantId: auth.tenantId,
+          provider: { in: [Provider.microsoft, Provider.google] },
+          status: { in: [ConnectorStatus.pending_auth, ConnectorStatus.error] },
+          // No identity means the provider never told us who this is, so the
+          // flow never reached the callback.
+          externalIdentity: '',
+          createdAt: { lt: cutoff },
+        },
+        data: {
+          status: ConnectorStatus.revoked,
+          statusDetail: 'sign-in was never completed; the connect link expired',
+        },
+      }),
+    );
+  }
+
   async list(
     auth: AuthContext,
     page: CursorQuery,
     includeRevoked = false,
   ): Promise<{ items: ConnectorDto[]; nextCursor: string | null }> {
+    // Before listing, so a dead flow never appears as something to choose.
+    await this.retireAbandonedFlows(auth);
+
     const rows = await withTenantContext(this.prisma, auth.tenantId, (tx) =>
       tx.connectorAccount.findMany({
         where: {

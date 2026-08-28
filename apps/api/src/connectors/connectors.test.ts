@@ -74,7 +74,9 @@ describe('ConnectorsService.list', () => {
    */
   it('leaves revoked connectors out by default', async () => {
     const findMany = vi.fn(async () => [baseAccount()]);
-    const { service } = makeService({ connectorAccount: { findMany } });
+    const { service } = makeService({
+      connectorAccount: { findMany, updateMany: vi.fn(async () => ({ count: 0 })) },
+    });
     await service.list(auth, { limit: 100, cursor: null });
     expect(findMany.mock.calls[0]?.[0]).toMatchObject({
       where: { tenantId: TENANT_ID, status: { not: ConnectorStatus.revoked } },
@@ -83,13 +85,76 @@ describe('ConnectorsService.list', () => {
 
   it('includes them when asked, so the record stays reachable', async () => {
     const findMany = vi.fn(async () => [baseAccount({ status: ConnectorStatus.revoked })]);
-    const { service } = makeService({ connectorAccount: { findMany } });
+    const { service } = makeService({
+      connectorAccount: { findMany, updateMany: vi.fn(async () => ({ count: 0 })) },
+    });
     const result = await service.list(auth, { limit: 100, cursor: null }, true);
     expect(findMany.mock.calls[0]?.[0]).toMatchObject({ where: { tenantId: TENANT_ID } });
     // No status filter at all when revoked rows are wanted.
     const where = (findMany.mock.calls[0]?.[0] as { where: Record<string, unknown> }).where;
     expect(where['status']).toBeUndefined();
     expect(result.items).toHaveLength(1);
+  });
+});
+
+describe('abandoned sign-ins', () => {
+  /**
+   * A connect flow that was never completed leaves a connector with no identity
+   * and no credential. The sealed state expires after CONNECT_FLOW_TTL_SECONDS,
+   * so it can NEVER complete — but it sat in the list forever and could still be
+   * picked in the collection wizard, where it would fail at the first call.
+   */
+  function abandoned(over: Record<string, unknown> = {}) {
+    return baseAccount({
+      provider: 'google',
+      mode: 'delegated',
+      status: ConnectorStatus.pending_auth,
+      externalIdentity: '',
+      createdAt: new Date(Date.now() - 60 * 60 * 1000),
+      ...over,
+    });
+  }
+
+  it('retires an OAuth connector whose sign-in was never completed', async () => {
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const { service } = makeService({
+      connectorAccount: { findMany: vi.fn(async () => []), updateMany },
+    });
+    await service.list(auth, { limit: 100, cursor: null });
+
+    expect(updateMany).toHaveBeenCalled();
+    const args = updateMany.mock.calls[0]?.[0] as {
+      where: Record<string, unknown>;
+      data: Record<string, unknown>;
+    };
+    expect(args.data['status']).toBe('revoked');
+    expect(String(args.data['statusDetail'])).toContain('never completed');
+    // Only OAuth providers, only ones with no identity.
+    expect(args.where['externalIdentity']).toBe('');
+  });
+
+  it('leaves a fresh sign-in alone — the operator may still be on the provider page', async () => {
+    const updateMany = vi.fn(async () => ({ count: 0 }));
+    const { service } = makeService({
+      connectorAccount: { findMany: vi.fn(async () => [abandoned()]), updateMany },
+    });
+    await service.list(auth, { limit: 100, cursor: null });
+    const args = updateMany.mock.calls[0]?.[0] as { where: { createdAt: { lt: Date } } };
+    // The cutoff is in the past, so anything started moments ago survives.
+    expect(args.where.createdAt.lt.getTime()).toBeLessThan(Date.now());
+  });
+
+  it('never retires an IMAP connector, which has its credential from the start', async () => {
+    // IMAP is created pending_auth too — that only means "not tested yet". It
+    // holds an app password and an identity, so it must not be swept away.
+    const updateMany = vi.fn(async () => ({ count: 0 }));
+    const { service } = makeService({
+      connectorAccount: { findMany: vi.fn(async () => []), updateMany },
+    });
+    await service.list(auth, { limit: 100, cursor: null });
+    const args = updateMany.mock.calls[0]?.[0] as { where: { provider: { in: string[] } } };
+    expect(args.where.provider.in).not.toContain('imap');
+    expect(args.where.provider.in).toEqual(['microsoft', 'google']);
   });
 });
 
