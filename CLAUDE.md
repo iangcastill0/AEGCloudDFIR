@@ -99,6 +99,14 @@ span files and are easy to break:
   `UploadPartCopy`); a plain `CopyObject` fails at that limit. Download filenames
   must be signed into the URL via `ResponseContentDisposition` — the HTML
   `download` attribute is ignored cross-origin.
+- **Every provider sign-in URL must force account selection.** Without
+  `prompt=select_account` the browser's current session is adopted silently, so
+  the connector ends up bound to whoever was signed in — the wrong custodian's
+  mailbox, collected with nothing in the product saying so. Google needs
+  `select_account consent`: `consent` alone forces the consent screen but not the
+  chooser, and dropping it loses the refresh token. A test in
+  `packages/connectors/src/oauth.test.ts` walks every exported `build*Url` and
+  fails if a new one skips this.
 - **The audit log is a hash chain** (`appendAuditEvent` / `audit.appendTx`), append
   only, verified by `pnpm audit:verify`. Anything that discloses evidence
   (exports, production downloads) must append an event.

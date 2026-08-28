@@ -13,6 +13,21 @@ import { DomainNotAllowedError, ProviderAuthError, type TokenProvider } from './
 // Scope constants (contract: least-privilege, read-only)
 // ---------------------------------------------------------------------------
 
+/**
+ * Never let a browser session decide which account gets connected.
+ *
+ * Reported from the field: connecting Microsoft 365 silently reused the account
+ * already signed in, with no chooser shown. For an evidence tool that is a
+ * chain-of-custody problem — the wrong custodian's mailbox is collected and
+ * nothing in the product says so. `select_account` makes the operator choose
+ * every time, even when only one session exists.
+ *
+ * Every authorization URL builder here sets it, and a test asserts that for all
+ * of them, so a provider added later inherits the rule instead of rediscovering
+ * the bug.
+ */
+export const FORCE_ACCOUNT_SELECTION = 'select_account';
+
 export const MICROSOFT_DELEGATED_SCOPES: readonly string[] = [
   'offline_access',
   'User.Read',
@@ -406,6 +421,9 @@ export function buildMicrosoftAuthorizationUrl(opts: MicrosoftAuthorizationUrlOp
   url.searchParams.set('state', opts.state);
   url.searchParams.set('code_challenge', opts.codeChallenge);
   url.searchParams.set('code_challenge_method', 'S256');
+  // Without this Microsoft reuses the browser's current session and never shows
+  // a chooser, so the connected identity is whoever happened to be signed in.
+  url.searchParams.set('prompt', FORCE_ACCOUNT_SELECTION);
   return url.toString();
 }
 
@@ -423,6 +441,9 @@ export function buildMicrosoftAdminConsentUrl(opts: MicrosoftAdminConsentUrlOpti
   url.searchParams.set('client_id', opts.clientId);
   url.searchParams.set('redirect_uri', opts.redirectUri);
   if (opts.state !== undefined) url.searchParams.set('state', opts.state);
+  // Same rule as the sign-in URLs: the admin granting tenant-wide access must be
+  // chosen deliberately, not inherited from whoever the browser is signed in as.
+  url.searchParams.set('prompt', FORCE_ACCOUNT_SELECTION);
   return url.toString();
 }
 
@@ -443,7 +464,10 @@ export function buildGoogleAuthorizationUrl(opts: GoogleAuthorizationUrlOptions)
   url.searchParams.set('scope', opts.scopes.join(' '));
   url.searchParams.set('state', opts.state);
   url.searchParams.set('access_type', 'offline');
-  url.searchParams.set('prompt', 'consent');
+  // Both, space separated: `consent` is what guarantees a refresh token, and
+  // `select_account` is what stops a single signed-in session being used
+  // silently. consent alone forces the consent screen but not the chooser.
+  url.searchParams.set('prompt', `${FORCE_ACCOUNT_SELECTION} consent`);
   return url.toString();
 }
 

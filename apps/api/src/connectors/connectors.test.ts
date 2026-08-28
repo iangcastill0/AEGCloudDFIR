@@ -131,7 +131,9 @@ describe('ConnectorsService.create', () => {
     );
     const url = new URL(result.authorizationUrl ?? '');
     expect(url.searchParams.get('access_type')).toBe('offline');
-    expect(url.searchParams.get('prompt')).toBe('consent');
+    // select_account so a signed-in browser session cannot decide which account
+    // gets connected; consent so a refresh token is still issued.
+    expect(url.searchParams.get('prompt')).toBe('select_account consent');
   });
 
   it('refuses with 409 when the provider OAuth app is not configured', async () => {

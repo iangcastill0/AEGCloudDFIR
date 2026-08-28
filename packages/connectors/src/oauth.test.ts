@@ -2,6 +2,7 @@ import { generateKeyPairSync } from 'node:crypto';
 import { decodeJwt } from 'jose';
 import { describe, expect, it } from 'vitest';
 import type { FetchLike } from './http.js';
+import * as oauthModule from './oauth.js';
 import {
   GOOGLE_DWD_SCOPES,
   GoogleDelegatedTokenSource,
@@ -206,7 +207,7 @@ describe('authorization URL builders', () => {
     expect(url.searchParams.get('state')).toBe('state-1');
   });
 
-  it('builds the Google URL with offline access and forced consent', () => {
+  it('builds the Google URL with offline access, forced consent and account choice', () => {
     const url = new URL(
       buildGoogleAuthorizationUrl({
         clientId: 'gc',
@@ -217,7 +218,9 @@ describe('authorization URL builders', () => {
     );
     expect(url.origin + url.pathname).toBe('https://accounts.google.com/o/oauth2/v2/auth');
     expect(url.searchParams.get('access_type')).toBe('offline');
-    expect(url.searchParams.get('prompt')).toBe('consent');
+    // consent keeps the refresh token; select_account stops a signed-in session
+    // being adopted silently.
+    expect(url.searchParams.get('prompt')).toBe('select_account consent');
   });
 
   it('builds the Entra admin-consent URL', () => {
@@ -268,5 +271,94 @@ describe('authorization code exchange', () => {
     expect(calls[0]?.url).toBe('https://oauth.example/token');
     expect(calls[0]?.body.get('grant_type')).toBe('authorization_code');
     expect(tokens.refreshToken).toBe('gr-new');
+  });
+});
+
+describe('account selection is always forced', () => {
+  /**
+   * A signed-in browser session must never decide which account gets connected.
+   * Reported from the field: connecting Microsoft 365 silently reused the
+   * account already signed in, with no chooser. For an evidence tool that is a
+   * chain-of-custody problem — the wrong custodian's mailbox gets collected and
+   * nothing in the product says so.
+   */
+  it('Microsoft shows the account chooser', () => {
+    const url = new URL(
+      buildMicrosoftAuthorizationUrl({
+        msLoginBaseUrl: 'https://login.test',
+        clientId: 'client',
+        redirectUri: 'https://api.test/callback',
+        scopes: ['User.Read'],
+        state: 'state',
+        codeChallenge: 'challenge',
+      }),
+    );
+    expect(url.searchParams.get('prompt')).toBe('select_account');
+  });
+
+  it('Google shows the account chooser AND still gets a refresh token', () => {
+    // prompt=consent alone forces the consent screen but not the chooser, so a
+    // single signed-in session is used silently. Both are needed: consent keeps
+    // the refresh token, select_account makes the operator choose.
+    const url = new URL(
+      buildGoogleAuthorizationUrl({
+        clientId: 'client',
+        redirectUri: 'https://api.test/callback',
+        scopes: ['openid'],
+        state: 'state',
+      }),
+    );
+    const prompt = url.searchParams.get('prompt') ?? '';
+    expect(prompt.split(' ')).toContain('select_account');
+    expect(prompt.split(' ')).toContain('consent');
+    expect(url.searchParams.get('access_type')).toBe('offline');
+  });
+
+  /**
+   * Every URL builder that sends a person to a provider, and the URL it makes.
+   *
+   * Adding a builder without adding it here fails the registry test below, which
+   * is the point: the rule has to outlive the two providers that prompted it.
+   */
+  const SIGN_IN_URL_BUILDERS: Record<string, () => string> = {
+    buildMicrosoftAuthorizationUrl: () =>
+      buildMicrosoftAuthorizationUrl({
+        msLoginBaseUrl: 'https://login.test',
+        clientId: 'c',
+        redirectUri: 'https://api.test/cb',
+        scopes: ['User.Read'],
+        state: 's',
+        codeChallenge: 'ch',
+      }),
+    buildMicrosoftAdminConsentUrl: () =>
+      buildMicrosoftAdminConsentUrl({
+        msLoginBaseUrl: 'https://login.test',
+        tenantId: 'tenant',
+        clientId: 'c',
+        redirectUri: 'https://api.test/cb',
+      }),
+    buildGoogleAuthorizationUrl: () =>
+      buildGoogleAuthorizationUrl({
+        clientId: 'c',
+        redirectUri: 'https://api.test/cb',
+        scopes: ['openid'],
+        state: 's',
+      }),
+  };
+
+  it('every URL that sends a person to a provider asks for account selection', () => {
+    for (const [name, build] of Object.entries(SIGN_IN_URL_BUILDERS)) {
+      const prompt = new URL(build()).searchParams.get('prompt') ?? '';
+      expect(prompt.split(' '), `${name} must force account selection`).toContain('select_account');
+    }
+  });
+
+  it('the registry covers every builder this module exports', () => {
+    // A new provider added later is caught here rather than in the field, where
+    // the symptom is a silently collected wrong mailbox.
+    const exported = Object.keys(oauthModule).filter((name) =>
+      /^build.*(AuthorizationUrl|ConsentUrl)$/.test(name),
+    );
+    expect(exported.sort()).toEqual(Object.keys(SIGN_IN_URL_BUILDERS).sort());
   });
 });
