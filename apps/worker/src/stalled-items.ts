@@ -36,7 +36,7 @@ export type ItemState =
 
 export type RecoveryAction =
   | { kind: 'wait' }
-  | { kind: 'requeue'; topic: string; stage: 'fetch' | 'parse' | 'extract' }
+  | { kind: 'requeue'; topic: string; stage: 'fetch' | 'index' }
   | { kind: 'give-up'; reason: string };
 
 export interface StalledItemInput {
@@ -71,19 +71,24 @@ export function recoveryPlan(input: StalledItemInput): RecoveryAction {
   }
 
   if (input.state === 'preserved') {
-    // The bytes are stored. Only the processing stage was lost.
+    // The bytes are stored, and indexing is the single step that settles the
+    // item (search-index.ts is the only writer of state 'indexed').
+    //
+    // Re-queueing parse instead was the first attempt, and it moved nothing on
+    // staging: parse ran, emitted its index job under a dedup key it had
+    // already used, and that job was dropped — a key works once, ever. Parse is
+    // also the stage that creates attachment children, so running it twice
+    // duplicates evidence. Index directly, with a fresh token.
     if (input.evidenceItemId === null) {
       return {
         kind: 'give-up',
-        // Retrying cannot help: there is nothing to point a parse job at.
+        // Retrying cannot help: there is nothing to index.
         reason:
-          'item was marked preserved but carries no evidence row to process, ' +
+          'item was marked preserved but carries no evidence row to index, ' +
           'so it cannot be recovered and is recorded as a failure',
       };
     }
-    return input.source === 'email'
-      ? { kind: 'requeue', topic: QUEUES.processParse, stage: 'parse' }
-      : { kind: 'requeue', topic: QUEUES.processExtract, stage: 'extract' };
+    return { kind: 'requeue', topic: QUEUES.searchIndex, stage: 'index' };
   }
 
   // discovered or fetching: the fetch never finished, so run it again.

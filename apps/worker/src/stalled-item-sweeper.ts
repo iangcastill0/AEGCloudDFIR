@@ -122,7 +122,11 @@ export class StalledItemSweeper {
             const dedupKey =
               plan.stage === 'fetch'
                 ? `${dedupKeys.collectionFetchItem(item.collectionId, item.custodianId, item.source, item.providerItemId)}:a${String(attempt)}`
-                : `${dedupKeys.processStage(plan.stage, item.evidenceItemId ?? item.id, 1)}:recover${String(attempt)}`;
+                : dedupKeys.searchIndex(
+                    item.evidenceItemId ?? item.id,
+                    1,
+                    `recover${String(attempt)}`,
+                  );
 
             await tx.collectionItem.update({
               where: { id: item.id },

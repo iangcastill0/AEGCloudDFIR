@@ -35,19 +35,28 @@ describe('recoveryPlan', () => {
     expect(item({ state: 'fetching' }).kind).toBe('requeue');
   });
 
-  it('resumes processing for a preserved item, by source', () => {
-    // Bytes are stored; only the processing stage was lost. Email parses,
-    // everything else extracts — the same split collection-fetch-item makes.
-    expect(item({ state: 'preserved', source: 'email', evidenceItemId: 'e1' })).toEqual({
-      kind: 'requeue',
-      topic: QUEUES.processParse,
-      stage: 'parse',
-    });
-    expect(item({ state: 'preserved', source: 'drive', evidenceItemId: 'e1' })).toEqual({
-      kind: 'requeue',
-      topic: QUEUES.processExtract,
-      stage: 'extract',
-    });
+  it('re-indexes a preserved item, because indexing is what settles it', () => {
+    // Learned on staging. Re-queueing parse looked right and moved nothing:
+    // search-index.ts is the ONLY thing that takes an item out of 'preserved',
+    // and parse's own index job carries a dedup key it already used, so it is
+    // silently dropped. 3,084 items climbed the attempt counter and stayed put.
+    for (const source of ['email', 'drive', 'audit'] as const) {
+      expect(item({ state: 'preserved', source, evidenceItemId: 'e1' }), source).toEqual({
+        kind: 'requeue',
+        topic: QUEUES.searchIndex,
+        stage: 'index',
+      });
+    }
+  });
+
+  it('never re-parses a preserved item', () => {
+    // Parse creates attachment children. Running it twice on stored bytes
+    // duplicates evidence, which is far worse than a stuck collection.
+    const plan = item({ state: 'preserved', source: 'email', evidenceItemId: 'e1' });
+    expect(plan.kind).toBe('requeue');
+    if (plan.kind !== 'requeue') return;
+    expect(plan.topic).not.toBe(QUEUES.processParse);
+    expect(plan.topic).not.toBe(QUEUES.processExtract);
   });
 
   it('gives up on a preserved item with no evidence row to process', () => {
