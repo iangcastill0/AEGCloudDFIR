@@ -7,6 +7,7 @@ import { sanitizeError, type WorkerContext } from '../context.js';
 import { incrementProgress, recordException } from '../progress.js';
 import { QUEUES, dedupKeys } from '../queues.js';
 import { readAllCapped } from '../streams.js';
+import { ocrDecision } from './ocr-policy.js';
 import type { EvidenceStagePayload } from './payloads.js';
 
 const MAX_INPUT_BYTES = 200 * 1024 * 1024;
@@ -24,6 +25,14 @@ export interface OcrRunner {
   pdfRasterAvailable(): Promise<boolean>;
   ocrImage(image: Buffer, langs: string): Promise<OcrPageResult>;
   pdfToImages(pdf: Buffer, maxPages: number): Promise<Buffer[]>;
+  /**
+   * Convert an Office document to PDF so it can be rasterised and read.
+   *
+   * Returns null when LibreOffice is unavailable or produced nothing, which is
+   * reported as an exception rather than treated as "no text found" — a scan
+   * that silently yields nothing is indistinguishable from an empty document.
+   */
+  documentToPdf(document: Buffer, extension: string): Promise<Buffer | null>;
 }
 
 function run(
@@ -128,9 +137,52 @@ class CliOcrRunner implements OcrRunner {
       await rm(dir, { recursive: true, force: true }).catch(() => undefined);
     }
   }
+
+  /**
+   * LibreOffice headless, document in and PDF out, in a private profile
+   * directory.
+   *
+   * The profile matters: concurrent soffice runs sharing the default profile
+   * fight over a lock and one of them silently produces no file. The extension
+   * matters too — LibreOffice picks its import filter from the file name, and a
+   * .docx handed over as `input` is not recognised at all.
+   */
+  async documentToPdf(document: Buffer, extension: string): Promise<Buffer | null> {
+    const dir = await mkdtemp(join(tmpdir(), 'cdfir-soffice-'));
+    try {
+      const safeExt = /^[a-z0-9]{1,8}$/i.test(extension) ? extension.toLowerCase() : 'doc';
+      const inputPath = join(dir, `input.${safeExt}`);
+      await writeFile(inputPath, document);
+      const result = await run('soffice', [
+        '--headless',
+        '--norestore',
+        `-env:UserInstallation=file://${join(dir, 'profile')}`,
+        '--convert-to',
+        'pdf',
+        '--outdir',
+        dir,
+        inputPath,
+      ]);
+      if (result.code !== 0) return null;
+      // Exit code 0 is not proof of output: LibreOffice reports success and
+      // writes nothing when it cannot read the file. Only the PDF counts.
+      const produced = (await readdir(dir)).find((f) => f.endsWith('.pdf'));
+      if (produced === undefined) return null;
+      return await readFile(join(dir, produced));
+    } catch {
+      return null;
+    } finally {
+      await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }
 }
 
 const defaultRunner = new CliOcrRunner();
+
+/** The real runner, for tests that must exercise the actual binaries. */
+export function createOcrRunner(): OcrRunner {
+  return new CliOcrRunner();
+}
 
 export interface OcrDeps {
   runner?: OcrRunner;
@@ -154,7 +206,11 @@ export async function processOcr(
   const item = await withTenantContext(ctx.prisma, tenantId, (tx) =>
     tx.evidenceItem.findUnique({
       where: { id: evidenceItemId },
-      include: { blob: true, ocrPages: { select: { id: true }, take: 1 } },
+      include: {
+        blob: true,
+        ocrPages: { select: { id: true }, take: 1 },
+        extractedTexts: { select: { charCount: true }, orderBy: { charCount: 'desc' }, take: 1 },
+      },
     }),
   );
   if (item === null) {
@@ -164,9 +220,15 @@ export async function processOcr(
   if (item.ocrPages.length > 0) return; // already OCRed (idempotent)
   if (item.blob === null) return;
 
-  const isPdf = item.mimeType === 'application/pdf';
-  const isImage = item.mimeType.startsWith('image/');
-  if (!isPdf && !isImage) return;
+  const decision = ocrDecision({
+    mimeType: item.mimeType,
+    // Extraction has already run by the time OCR is queued; this re-reads its
+    // result so a document with real text is never rasterised needlessly.
+    extractedChars: item.extractedTexts?.[0]?.charCount ?? 0,
+  });
+  if (!decision.run) return;
+  // A converted document becomes a PDF, so it takes the PDF path from there.
+  const isPdf = decision.reason === 'pdf' || decision.convertFirst;
 
   const engineVersion = await runner.tesseractVersion();
   const rasterOk = isPdf ? await runner.pdfRasterAvailable() : true;
@@ -198,8 +260,16 @@ export async function processOcr(
 
   let pages: OcrPageResult[];
   try {
+    let toRasterize = input;
+    if (decision.convertFirst) {
+      const converted = await runner.documentToPdf(input, item.extension);
+      if (converted === null) {
+        throw new Error('document could not be converted to pdf for ocr');
+      }
+      toRasterize = converted;
+    }
     if (isPdf) {
-      const images = await runner.pdfToImages(input, ctx.config.CDFIR_MAX_OCR_PAGES);
+      const images = await runner.pdfToImages(toRasterize, ctx.config.CDFIR_MAX_OCR_PAGES);
       pages = [];
       for (const image of images) {
         pages.push(await runner.ocrImage(image, ctx.config.CDFIR_OCR_LANGS));

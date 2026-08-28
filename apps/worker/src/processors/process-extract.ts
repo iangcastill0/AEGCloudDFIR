@@ -3,6 +3,7 @@ import { sanitizeError, type WorkerContext } from '../context.js';
 import { recordException } from '../progress.js';
 import { convertToPlainText, isConvertible } from './soffice.js';
 import { QUEUES, dedupKeys } from '../queues.js';
+import { ocrDecision } from './ocr-policy.js';
 import { PayloadTooLargeError, readAllCapped } from '../streams.js';
 import type { EvidenceStagePayload } from './payloads.js';
 
@@ -19,8 +20,13 @@ export interface ExtractDeps {
 }
 
 /** Mime types eligible for a follow-on OCR pass. */
-export function needsOcr(mimeType: string): boolean {
-  return mimeType.startsWith('image/') || mimeType === 'application/pdf';
+/**
+ * Kept as a thin wrapper over ocrDecision so existing callers and tests keep
+ * working; the rule itself, including the low-text fallback for documents that
+ * are really scans, lives in ocr-policy.ts.
+ */
+export function needsOcr(mimeType: string, extractedChars = 0): boolean {
+  return ocrDecision({ mimeType, extractedChars }).run;
 }
 
 /**
@@ -223,7 +229,9 @@ async function persistExtractedText(
     });
     await tx.outboxEvent.createMany({
       data: [
-        ...(needsOcr(item.mimeType)
+        // The character count matters now: a document that extracted to nothing
+        // is very likely a photograph of a page, and is otherwise unsearchable.
+        ...(needsOcr(item.mimeType, trimmed.length)
           ? [
               {
                 tenantId,
