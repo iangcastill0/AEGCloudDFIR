@@ -171,6 +171,15 @@ CI (`ci.yml`) → images (`release.yml`, only on green CI) → deploy. Both depl
 are manual and run from the Actions tab: `deploy-staging.yml` (one click) and
 `deploy.yml` (`production` environment, required reviewer, `main` only).
 **Do not commit until the operator asks**; they run every deploy themselves.
+When they say "commit", that means commit **and push**. A deploy can only ship
+what is on GitHub, so a commit left on the Mac silently does nothing — it has
+already made a staging deploy ship the previous commit and look like the change
+failed.
+
+**Never edit code on the server.** Every deploy runs `git reset --hard <sha>` on
+the host, so anything changed there is destroyed without a word. The server also
+has no pnpm and no `node_modules`, and CI builds the images from GitHub, not from
+the host's files. Code goes Mac → GitHub → CI → the host pulls images.
 `scripts/deploy.sh` runs on the host, verifies `/readyz` plus the public site, and
 rolls back to the previously deployed tag on failure. Full setup and rollback:
 `docs/runbooks/deploy.md`.
