@@ -51,16 +51,39 @@ pnpm --filter @aeg-clouddfir/api exec vitest run src/productions/productions.tes
 pnpm --filter @aeg-clouddfir/api exec vitest run src/productions/productions.test.ts -t "returns every run field"
 ```
 
-Local stack and dev servers: see README.md. Migrations are
-`pnpm --filter @aeg-clouddfir/database run migrate:deploy` and read
-`CDFIR_DATABASE_MIGRATION_URL` (the migrator role), not `CDFIR_DATABASE_URL`.
+Migrations are `pnpm --filter @aeg-clouddfir/database run migrate:deploy` and
+read `CDFIR_DATABASE_MIGRATION_URL` (the migrator role), not
+`CDFIR_DATABASE_URL`.
 
-**Never run `next build` while the web dev server is running.** Both write to
-`apps/web/.next`. The build deletes chunks the dev server is still handing out.
-The browser then says `Cannot find module ./vendor-chunks/...`, or
-`__webpack_modules__[moduleId] is not a function`. That reads like broken code.
-It is not. Stop the dev server, build, start it again. Already confused? Run
-`rm -rf apps/web/.next` first.
+## Where things get tested: staging, not a local stack
+
+**There is no local stack any more. Staging is the test environment.** Do not
+start docker compose, a database, or a dev server on the Mac, and do not ask the
+operator to. If a change needs a running system to prove it, it gets proved on
+staging.
+
+The split, and it is a hard line:
+
+| Machine              | What it is for                                                            |
+| -------------------- | ------------------------------------------------------------------------- |
+| **[MAC]**            | Write code. `pnpm format`, `lint`, `typecheck`, `test`. Commit. Push.     |
+| **CI**               | Build the images.                                                         |
+| **[SERVER]** staging | Run it. Prove it. Read logs, query the database, watch a real collection. |
+
+Why: the Mac is the only machine with pnpm and `node_modules`, so the unit gate
+can only run there — the server has neither. Everything past the unit gate needs
+real services, real data and real credentials, and only staging has them. A
+local stack was a third thing to keep true, and it drifted.
+
+So "verified" never means a green `pnpm test`. It means the behaviour was
+watched on staging. See the rule about not trusting exit codes below; this is
+the same rule, one level up.
+
+Practically, that means a change is not finished at the commit. It is finished
+after push → CI → Release images → **Deploy staging** → looked at on staging.
+Budget about 15 minutes for CI plus the image build; deploying earlier fails
+with `not found` on the image pull, which is harmless (`staging untouched`) but
+wastes the wait.
 
 `pnpm format:check` runs **before** lint and tests in CI, so unformatted code
 fails the pipeline in ~30s and nothing else ever runs. Between 2026-08-13 and
