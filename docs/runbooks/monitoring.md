@@ -29,6 +29,36 @@ Warnings (disk at 80%, cert at 21 days) are reported but do **not** page. An
 alert that fires for something you cannot act on today trains you to ignore
 alerts.
 
+## What a disk alert tells you now
+
+A disk warning or failure names the biggest thing you can delete, not just the
+percentage:
+
+```
+[FAIL] disk: root filesystem 96% used — docker: 25.1 GB reclaimable
+```
+
+That second half was added after a real outage. On 2026-08-27 the disk filled to
+100% and PostgreSQL on staging crashed. It then could not restart, because
+replaying its own write-ahead log also needs space. The monitor was working
+perfectly: it had said `root filesystem 96% used` every five minutes for over
+five hours. It just never said what to do, so nobody did anything.
+
+To act on one:
+
+```bash
+ssh cdfir-server 'docker system df; df -h /'
+```
+
+Then reclaim, biggest first:
+
+```bash
+ssh cdfir-server 'docker image prune -a -f'
+```
+
+Old image tags should no longer be the cause. Both deploy scripts now delete
+them after a healthy deploy — see `docs/runbooks/deploy.md`.
+
 **Set the schedule in healthchecks.io** so silence is actually noticed: Period
 `5 minutes`, Grace `15 minutes`. Without that, its default period is a day and a
 dead server would go unreported for hours.

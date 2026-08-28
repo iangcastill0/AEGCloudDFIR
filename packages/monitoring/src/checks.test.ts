@@ -7,6 +7,7 @@ import {
   evaluateDisk,
   evaluateReadyz,
   parseDfCapacity,
+  parseReclaimable,
   summarize,
   type CheckResult,
 } from './checks.js';
@@ -206,5 +207,83 @@ describe('summarize', () => {
     const s = summarize([]);
     expect(s.status).toBe('fail');
     expect(s.shouldAlert).toBe(true);
+  });
+});
+
+describe('evaluateDisk says what is filling the disk', () => {
+  /**
+   * The disk hit 100% and took a database down. The monitor had reported
+   * "[FAIL] disk: root filesystem 96% used" every five minutes for at least
+   * five hours beforehand — correct, and useless on its own: it says there is a
+   * problem, not what to do about it. The alert now carries the biggest
+   * reclaimable thing, which on that night was 25 GB of unused Docker images.
+   */
+  it('names the top consumer when one is supplied', () => {
+    const result = evaluateDisk(96, {
+      reclaimableDockerBytes: 25.05 * 1024 ** 3,
+      largestPaths: [
+        { path: '/var/lib/docker', bytes: 48.71 * 1024 ** 3 },
+        { path: '/home/ian', bytes: 16 * 1024 ** 3 },
+      ],
+    });
+    expect(result.status).toBe('fail');
+    expect(result.detail).toContain('96%');
+    expect(result.detail).toContain('25.1 GB reclaimable');
+    expect(result.detail).toContain('/var/lib/docker');
+  });
+
+  it('still works with no breakdown, so a missing probe cannot mute the alert', () => {
+    // If gathering the detail fails, the percentage alone must still fire.
+    const result = evaluateDisk(96);
+    expect(result.status).toBe('fail');
+    expect(result.detail).toBe('root filesystem 96% used');
+  });
+
+  it('mentions reclaimable space at warn level too, while there is still time', () => {
+    const result = evaluateDisk(82, { reclaimableDockerBytes: 30 * 1024 ** 3 });
+    expect(result.status).toBe('warn');
+    expect(result.detail).toContain('reclaimable');
+  });
+
+  it('stays quiet about a trivial amount of reclaimable space', () => {
+    // "0.1 GB reclaimable" on a full disk is noise that reads like a solution.
+    const result = evaluateDisk(96, { reclaimableDockerBytes: 100 * 1024 ** 2 });
+    expect(result.detail).not.toContain('reclaimable');
+  });
+
+  it('is unchanged when the disk is healthy', () => {
+    const result = evaluateDisk(40, { reclaimableDockerBytes: 30 * 1024 ** 3 });
+    expect(result.status).toBe('ok');
+    expect(result.detail).toBe('root filesystem 40% used');
+  });
+});
+
+describe('parseReclaimable', () => {
+  it('reads the real output of docker system df on the server', () => {
+    // Captured verbatim from gdf-cd06 on 2026-08-28, after the prune.
+    const real = ['8.003GB (33%)', '61.44kB (0%)', '0B (0%)', '0B'].join('\n');
+    const bytes = parseReclaimable(real);
+    expect(bytes).toBeDefined();
+    // 8.003 GiB-ish plus a rounding of kB; assert the number a human would read.
+    expect(((bytes ?? 0) / 1024 ** 3).toFixed(1)).toBe('8.0');
+  });
+
+  it('handles docker lower-case kB, which a naive /KB/ would miss', () => {
+    expect(parseReclaimable('61.44kB (0%)')).toBeCloseTo(61.44 * 1024, 0);
+  });
+
+  it('returns undefined rather than a confident zero when nothing parses', () => {
+    // A docker that errored, or a version whose format changed. The alert must
+    // still fire on the percentage alone.
+    expect(parseReclaimable('')).toBeUndefined();
+    expect(parseReclaimable('Cannot connect to the Docker daemon')).toBeUndefined();
+  });
+
+  it('produces the sentence the crash night would have sent', () => {
+    // 2026-08-27: 25.05GB was reclaimable while the alert said only "96% used".
+    const bytes = parseReclaimable('25.05GB (51%)\n0B\n0B');
+    const result = evaluateDisk(96, { reclaimableDockerBytes: bytes });
+    expect(result.status).toBe('fail');
+    expect(result.detail).toBe('root filesystem 96% used — docker: 25.1 GB reclaimable');
   });
 });

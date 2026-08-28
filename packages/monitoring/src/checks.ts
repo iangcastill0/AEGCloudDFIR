@@ -38,14 +38,92 @@ export function parseDfCapacity(dfOutput: string): number | null {
   return null;
 }
 
-export function evaluateDisk(usedPercent: number | null): CheckResult {
+/**
+ * Total reclaimable bytes from `docker system df --format "{{.Reclaimable}}"`.
+ *
+ * Real output from the server, one line per type:
+ *   8.003GB (33%)
+ *   61.44kB (0%)
+ *   0B (0%)
+ *   0B
+ *
+ * Note "kB", not "KB" — docker uses SI casing, so the match must ignore case.
+ * Returns undefined when nothing parses, so the caller can leave the alert as a
+ * plain percentage rather than print a confident zero.
+ */
+export function parseReclaimable(stdout: string): number | undefined {
+  const scale: Record<string, number> = {
+    B: 1,
+    KB: 1024,
+    MB: 1024 ** 2,
+    GB: 1024 ** 3,
+    TB: 1024 ** 4,
+  };
+  let total = 0;
+  let matched = false;
+  for (const line of stdout.split('\n')) {
+    const match = /^([\d.]+)\s*([KMGT]?B)\b/i.exec(line.trim());
+    const amount = match?.[1];
+    const unit = match?.[2];
+    if (amount === undefined || unit === undefined) continue;
+    matched = true;
+    total += Number(amount) * (scale[unit.toUpperCase()] ?? 1);
+  }
+  return matched ? total : undefined;
+}
+
+/** Anything smaller than this is not worth naming as a remedy. */
+const WORTH_MENTIONING_BYTES = 1024 ** 3;
+
+export interface DiskBreakdown {
+  /** Docker's own "reclaimable" figure across images, containers and cache. */
+  reclaimableDockerBytes?: number;
+  /** Largest directories, biggest first. */
+  largestPaths?: { path: string; bytes: number }[];
+}
+
+function gb(bytes: number): string {
+  return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+}
+
+/**
+ * Judge disk usage, and say what is filling it.
+ *
+ * The percentage alone is what this reported for at least five hours before a
+ * full disk took a database down: correct, repeated every five minutes, and
+ * impossible to act on without logging in to investigate. Carrying the biggest
+ * reclaimable thing turns the alert itself into the instruction — that night it
+ * would have read "25.1 GB reclaimable".
+ *
+ * The breakdown is optional on purpose: if gathering it fails, the alert still
+ * fires on the percentage. A detail probe must never be able to mute a warning.
+ */
+export function evaluateDisk(
+  usedPercent: number | null,
+  breakdown: DiskBreakdown = {},
+): CheckResult {
   if (usedPercent === null) {
     return { name: 'disk', status: 'fail', detail: 'could not read disk usage' };
   }
-  const detail = `root filesystem ${String(usedPercent)}% used`;
-  if (usedPercent >= DISK_FAIL_PERCENT) return { name: 'disk', status: 'fail', detail };
-  if (usedPercent >= DISK_WARN_PERCENT) return { name: 'disk', status: 'warn', detail };
-  return { name: 'disk', status: 'ok', detail };
+
+  const status =
+    usedPercent >= DISK_FAIL_PERCENT ? 'fail' : usedPercent >= DISK_WARN_PERCENT ? 'warn' : 'ok';
+
+  let detail = `root filesystem ${String(usedPercent)}% used`;
+  if (status !== 'ok') {
+    const parts: string[] = [];
+    const reclaimable = breakdown.reclaimableDockerBytes ?? 0;
+    if (reclaimable >= WORTH_MENTIONING_BYTES) {
+      parts.push(`docker: ${gb(reclaimable)} reclaimable`);
+    }
+    const largest = (breakdown.largestPaths ?? []).filter((p) => p.bytes >= WORTH_MENTIONING_BYTES);
+    if (largest.length > 0) {
+      parts.push(largest.map((p) => `${p.path} ${gb(p.bytes)}`).join(', '));
+    }
+    if (parts.length > 0) detail = `${detail} — ${parts.join('; ')}`;
+  }
+
+  return { name: 'disk', status, detail };
 }
 
 export function evaluateBackupAge(lastBackupAt: Date | null, now: Date): CheckResult {

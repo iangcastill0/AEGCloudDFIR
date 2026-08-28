@@ -19,7 +19,9 @@ import {
   evaluateBackupAge,
   evaluateCertExpiry,
   evaluateContainers,
+  DISK_WARN_PERCENT,
   evaluateDisk,
+  parseReclaimable,
   evaluateReadyz,
   parseDfCapacity,
   summarize,
@@ -67,9 +69,29 @@ async function checkSite(): Promise<CheckResult> {
   };
 }
 
+/**
+ * Docker's reclaimable bytes, or undefined when it cannot be read.
+ *
+ * Never throws: this is decoration on an alert, and a failed probe must not stop
+ * the alert firing. That is why the breakdown is optional in evaluateDisk.
+ */
+async function reclaimableDockerBytes(): Promise<number | undefined> {
+  try {
+    const { stdout } = await run('docker', ['system', 'df', '--format', '{{.Reclaimable}}']);
+    return parseReclaimable(stdout);
+  } catch {
+    return undefined;
+  }
+}
+
 async function checkDisk(): Promise<CheckResult> {
   const { stdout } = await run('df', ['-h', '/']);
-  return evaluateDisk(parseDfCapacity(stdout));
+  const usedPercent = parseDfCapacity(stdout);
+  // Only worth gathering when there is something to report.
+  if (usedPercent === null || usedPercent < DISK_WARN_PERCENT) {
+    return evaluateDisk(usedPercent);
+  }
+  return evaluateDisk(usedPercent, { reclaimableDockerBytes: await reclaimableDockerBytes() });
 }
 
 async function checkContainers(): Promise<CheckResult> {
