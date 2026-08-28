@@ -4,7 +4,9 @@ import { QUEUES, dedupKeys } from './queues.js';
 import {
   MAX_RECOVERY_ATTEMPTS,
   STALL_AFTER_MS,
+  pageWalkPlan,
   recoveryPlan,
+  unparsedParentPlan,
   type ItemState,
 } from './stalled-items.js';
 
@@ -157,6 +159,164 @@ export class StalledItemSweeper {
               skipDuplicates: true,
             });
             localRequeued += 1;
+          }
+
+          // --- page checkpoints ---------------------------------------------
+          // A checkpoint means "there is more in this scope that was never
+          // fetched". Finalize gates on it, and recovering only items left a
+          // collection stuck for 8h20m with five frozen folders.
+          const checkpoints = await tx.collectionCheckpoint.findMany({
+            where: {
+              cursorKind: 'page',
+              updatedAt: { lt: new Date(now.getTime() - STALL_AFTER_MS) },
+              collection: { status: { in: ['fetching', 'cancelling', 'finalizing'] } },
+            },
+            select: {
+              id: true,
+              collectionId: true,
+              custodianId: true,
+              source: true,
+              scopeKey: true,
+              updatedAt: true,
+            },
+            take: this.batchSize,
+          });
+
+          for (const cp of checkpoints) {
+            // Attempts come from the outbox, not a column: dispatched rows are
+            // kept, so the recovery keys already written ARE the attempt count.
+            // No migration, and it survives a worker restart.
+            const prefix = `${dedupKeys.collectionFetchPage(cp.collectionId, cp.custodianId, cp.source, cp.scopeKey, '')}`;
+            const priorAttempts = await tx.outboxEvent.count({
+              where: {
+                topic: QUEUES.collectionFetchPage,
+                dedupKey: { startsWith: prefix, contains: 'recover' },
+              },
+            });
+            const plan = pageWalkPlan({
+              idleMs: now.getTime() - cp.updatedAt.getTime(),
+              priorAttempts,
+            });
+            if (plan.kind === 'wait') continue;
+            touchedCollections.add(cp.collectionId);
+
+            if (plan.kind === 'give-up') {
+              // Removing the checkpoint unblocks finalize. It also means mail
+              // was left uncollected, so the exception is not optional — it is
+              // the only place that fact survives.
+              await tx.collectionException.create({
+                data: {
+                  tenantId: tenant.id,
+                  collectionId: cp.collectionId,
+                  custodianId: cp.custodianId,
+                  source: cp.source,
+                  providerItemId: cp.scopeKey,
+                  kind: 'expired_checkpoint',
+                  message: plan.reason,
+                  detail: { recoveredBy: 'stalled-item-sweeper', scopeKey: cp.scopeKey },
+                },
+              });
+              await tx.collectionCheckpoint.delete({ where: { id: cp.id } });
+              localGaveUp += 1;
+              continue;
+            }
+
+            await tx.outboxEvent.createMany({
+              data: [
+                {
+                  tenantId: tenant.id,
+                  topic: QUEUES.collectionFetchPage,
+                  dedupKey: `${prefix}recover${String(priorAttempts + 1)}`,
+                  payload: {
+                    tenantId: tenant.id,
+                    collectionId: cp.collectionId,
+                    custodianId: cp.custodianId,
+                    source: cp.source,
+                    scopeKey: cp.scopeKey,
+                  },
+                },
+              ],
+              skipDuplicates: true,
+            });
+            localRequeued += 1;
+          }
+
+          // --- parents still awaiting parse ---------------------------------
+          // Parse creates attachment children, so finalize gates on this
+          // directly: sealing the manifest first would omit them.
+          const activeCollections = await tx.collection.findMany({
+            where: { status: { in: ['fetching', 'cancelling', 'finalizing'] } },
+            select: { id: true },
+            take: 500,
+          });
+          const activeIds = activeCollections.map((c) => c.id);
+          if (activeIds.length > 0) {
+            const parents = await tx.evidenceItem.findMany({
+              where: {
+                collectionId: { in: activeIds },
+                processingStatus: 'pending',
+                kind: { in: ['email', 'container'] },
+                updatedAt: { lt: new Date(now.getTime() - STALL_AFTER_MS) },
+              },
+              select: { id: true, collectionId: true, updatedAt: true, version: true },
+              take: this.batchSize,
+            });
+
+            for (const parent of parents) {
+              const parsePrefix = `${dedupKeys.processStage('parse', parent.id, parent.version)}:`;
+              const priorAttempts = await tx.outboxEvent.count({
+                where: {
+                  topic: QUEUES.processParse,
+                  dedupKey: { startsWith: parsePrefix, contains: 'recover' },
+                },
+              });
+              const plan = unparsedParentPlan({
+                idleMs: now.getTime() - parent.updatedAt.getTime(),
+                priorAttempts,
+              });
+              if (plan.kind === 'wait') continue;
+              if (parent.collectionId !== null) touchedCollections.add(parent.collectionId);
+
+              if (plan.kind === 'give-up') {
+                await tx.evidenceItem.update({
+                  where: { id: parent.id },
+                  data: { processingStatus: 'exception' },
+                });
+                if (parent.collectionId !== null) {
+                  await tx.collectionException.create({
+                    data: {
+                      tenantId: tenant.id,
+                      collectionId: parent.collectionId,
+                      kind: 'corrupt_item',
+                      message: plan.reason,
+                      detail: {
+                        recoveredBy: 'stalled-item-sweeper',
+                        evidenceItemId: parent.id,
+                      },
+                    },
+                  });
+                }
+                localGaveUp += 1;
+                continue;
+              }
+
+              await tx.outboxEvent.createMany({
+                data: [
+                  {
+                    tenantId: tenant.id,
+                    topic: QUEUES.processParse,
+                    dedupKey: `${parsePrefix}recover${String(priorAttempts + 1)}`,
+                    payload: {
+                      tenantId: tenant.id,
+                      evidenceItemId: parent.id,
+                      version: parent.version,
+                    },
+                  },
+                ],
+                skipDuplicates: true,
+              });
+              localRequeued += 1;
+            }
           }
 
           // Giving up on the last blocker is exactly when finalize should look

@@ -36,7 +36,7 @@ export type ItemState =
 
 export type RecoveryAction =
   | { kind: 'wait' }
-  | { kind: 'requeue'; topic: string; stage: 'fetch' | 'index' }
+  | { kind: 'requeue'; topic: string; stage: 'fetch' | 'index' | 'page' | 'parse' }
   | { kind: 'give-up'; reason: string };
 
 export interface StalledItemInput {
@@ -93,4 +93,63 @@ export function recoveryPlan(input: StalledItemInput): RecoveryAction {
 
   // discovered or fetching: the fetch never finished, so run it again.
   return { kind: 'requeue', topic: QUEUES.collectionFetchItem, stage: 'fetch' };
+}
+
+/**
+ * The other two things finalize waits on.
+ *
+ * Recovering only collection items was not enough. A staging collection sat for
+ * 8h20m with every item settled and still would not close, because finalize
+ * also gates on page checkpoints (unfinished paging) and on parent evidence
+ * still awaiting parse. Both are the same illness: work abandoned mid-run.
+ *
+ * Attempts are counted from the outbox rather than a column. Dispatched rows
+ * are kept forever, so the number of recovery keys already written IS the
+ * attempt count — no migration, and it survives a worker restart.
+ */
+export interface StalledWorkInput {
+  idleMs: number;
+  priorAttempts: number;
+}
+
+/**
+ * A page checkpoint that stopped advancing.
+ *
+ * Resuming is the only correct first move: the checkpoint means "there is more
+ * mail in this folder that was never fetched". Dropping it would let the
+ * collection close while quietly leaving evidence uncollected, so giving up has
+ * to say so in words that end up in front of a person.
+ */
+export function pageWalkPlan(input: StalledWorkInput): RecoveryAction {
+  if (input.idleMs < STALL_AFTER_MS) return { kind: 'wait' };
+  if (input.priorAttempts >= MAX_RECOVERY_ATTEMPTS) {
+    return {
+      kind: 'give-up',
+      reason:
+        `paging this scope could not be resumed after ${String(MAX_RECOVERY_ATTEMPTS)} attempts. ` +
+        'Items beyond the last saved cursor were not collected, so this scope may be missing ' +
+        'messages. Re-run the collection to attempt them again.',
+    };
+  }
+  return { kind: 'requeue', topic: QUEUES.collectionFetchPage, stage: 'page' };
+}
+
+/**
+ * A parent evidence item still `pending`, meaning its parse never ran.
+ *
+ * Finalize gates on exactly this, and for a good reason: parse is what creates
+ * attachment children, so sealing the manifest first omits them.
+ */
+export function unparsedParentPlan(input: StalledWorkInput): RecoveryAction {
+  if (input.idleMs < STALL_AFTER_MS) return { kind: 'wait' };
+  if (input.priorAttempts >= MAX_RECOVERY_ATTEMPTS) {
+    return {
+      kind: 'give-up',
+      reason:
+        `parsing this item did not finish after ${String(MAX_RECOVERY_ATTEMPTS)} attempts. ` +
+        'Parse is what creates attachment children, so any attachments it carried are ' +
+        'missing from this collection.',
+    };
+  }
+  return { kind: 'requeue', topic: QUEUES.processParse, stage: 'parse' };
 }
