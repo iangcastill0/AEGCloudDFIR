@@ -132,4 +132,89 @@ if [ "$web_code" != "200" ]; then
   exit 1
 fi
 
+# Reclaim old image tags now that the new ones are proven healthy.
+#
+# Why this exists: this host is shared by staging and production on a 98 GB
+# disk, and each deploy pulls three images (~3.7 GB). Roughly ten deploys in one
+# day filled it to 100%, which panicked PostgreSQL mid-checkpoint and then
+# blocked its crash recovery, because replaying WAL also needs space. The
+# monitor had been failing on 96% for five hours and nobody was watching, so the
+# fix has to run where the images are created, not where the alert is read.
+#
+# Why a COUNT and not an age filter: the obvious `--filter until=72h` was
+# measured against this host and would have removed nothing at all, while 18 GB
+# of dead tags sat there — every one of them pulled that same day. Deploy
+# frequency, not age, is what piles them up.
+#
+# Safety, in order of importance:
+#  - only ever considers this project's own repositories, so a shared image like
+#    postgres or opensearch can never be selected, whatever its state
+#  - never touches an image any container references, running or exited
+#  - keeps the newest KEEP_PER_REPO tags per repository, so a manual rollback
+#    later still has somewhere to go
+#  - failures are logged and ignored: a full disk is bad, but a deploy that
+#    reports failure after the new version is already serving is worse
+#
+# Set PRUNE_DRY_RUN=1 to print the selection without deleting.
+KEEP_PER_REPO="${KEEP_PER_REPO:-3}"
+
+prune_old_images() {
+  echo "==> pruning old image tags (keeping $KEEP_PER_REPO per repository)"
+
+  local in_use
+  in_use="$(docker ps -a --format '{{.Image}}' | sort -u)"
+
+  local repos
+  repos="$(docker images --format '{{.Repository}}' | grep '/aegclouddfir/' | sort -u || true)"
+
+  local removed=0
+  local repo image kept
+  for repo in $repos; do
+    kept=0
+    # Newest first, so the survivors are the most recent tags.
+    while read -r image; do
+      [ -n "$image" ] || continue
+      case "$image" in *:'<none>') continue ;; esac
+
+      if printf '%s\n' "$in_use" | grep -qxF "$image"; then
+        continue                      # a container references it; not ours to remove
+      fi
+      # Prefix match, not equality: staging's web image is tagged
+      # "<sha>-staging", so "$repo:$PREVIOUS_TAG" alone silently fails to
+      # protect the one image a rollback would need most.
+      case "$image" in
+        "$repo:$TAG" | "$repo:$TAG"-*) continue ;;
+      esac
+      if [ -n "${PREVIOUS_TAG:-}" ]; then
+        case "$image" in
+          "$repo:$PREVIOUS_TAG" | "$repo:$PREVIOUS_TAG"-*) continue ;;
+        esac
+      fi
+
+      kept=$((kept + 1))
+      if [ "$kept" -le "$KEEP_PER_REPO" ]; then
+        continue
+      fi
+
+      if [ "${PRUNE_DRY_RUN:-0}" = "1" ]; then
+        echo "    would remove $image"
+      else
+        docker rmi "$image" >/dev/null 2>&1 && removed=$((removed + 1)) || \
+          echo "    warning: could not remove $image" >&2
+      fi
+    done <<EOF
+$(docker images "$repo" --format '{{.Repository}}:{{.Tag}}' 2>/dev/null)
+EOF
+  done
+
+  # Layers left behind by removed tags.
+  if [ "${PRUNE_DRY_RUN:-0}" != "1" ]; then
+    docker image prune -f >/dev/null 2>&1 || true
+    echo "    removed $removed image tag(s)"
+  fi
+  df -h / | tail -1
+}
+
+prune_old_images
+
 echo "==> deployed $TAG (api ready, web $web_code)"

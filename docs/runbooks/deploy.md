@@ -100,6 +100,36 @@ The tag currently deployed is recorded as `CDFIR_IMAGE_TAG` in the server's
 `.env`, so a later plain `docker compose up -d` brings back the same images
 rather than something else.
 
+## Disk cleanup, which the deploy does for you
+
+At the end of a healthy deploy — never a failed one — the script deletes old
+image tags. It keeps the newest 3 per repository, plus whatever any container is
+running, plus the tag it would roll back to.
+
+Why it is there: each deploy pulls three images, about 3.7 GB. Staging and
+production share one 98 GB disk. Around ten deploys in a day filled it on
+2026-08-27, and PostgreSQL on staging crashed and then could not restart,
+because replaying its own log needs space too.
+
+To see what it would delete without deleting anything, run only the prune
+function — do **not** source the whole script, that would run a real deploy.
+The host needs the updated `scripts/deploy.sh`, so this works after the first
+deploy that carries it:
+
+```bash
+ssh cdfir-server 'cd /var/www/AEGCloudDFIR && { echo "set -u; TAG=$(grep ^CDFIR_IMAGE_TAG= .env | cut -d= -f2); PREVIOUS_TAG=\$TAG; PRUNE_DRY_RUN=1"; awk "/^# Reclaim old image tags/,/^}\$/" scripts/deploy.sh; echo prune_old_images; } | bash'
+```
+
+Or simpler, just look at the space:
+
+```bash
+ssh cdfir-server 'docker system df; df -h /'
+```
+
+Keep more or fewer tags with `KEEP_PER_REPO`. It only ever considers this
+project's own repositories, so shared images like `postgres` and `opensearch`
+can never be selected.
+
 ## Things that will bite you
 
 - **`NEXT_PUBLIC_*` are baked into the browser bundle at image build time.**

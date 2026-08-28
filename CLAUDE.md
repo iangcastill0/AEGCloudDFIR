@@ -178,6 +178,17 @@ an alert**. Prometheus + Grafana + node-exporter are in the `monitoring` compose
 profile, bound to localhost. Details, thresholds and the SSH tunnel:
 `docs/runbooks/monitoring.md`.
 
+**A deploy deletes old image tags after it proves healthy.** Three images per
+deploy on a 98 GB disk shared by staging and prod. Ten deploys in a day filled
+it, PostgreSQL crashed, and it could not restart because replaying its log also
+needs space. The monitor had failed on 96% for five hours; nobody was watching.
+The prune keeps the newest 3 tags per repository plus anything running. Count,
+not age — `until=72h` was measured here and would have removed nothing.
+
+**A disk alert must name what to delete.** "96% used" is true and useless. It
+now reads `— docker: 25.1 GB reclaimable`. The breakdown is optional in the
+code on purpose: if reading it fails, the alert still fires.
+
 Backups run 03:15 UTC (`scripts/backup-postgres.sh`). They dump as superuser and
 verify by re-reading. `.last-backup` is written only after that check, because the
 monitor treats a stale stamp as a failed backup. Restore procedure:
