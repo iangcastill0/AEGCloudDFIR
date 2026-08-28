@@ -5,6 +5,7 @@ import { pino } from 'pino';
 import { BullMqEnqueuer } from './bullmq-enqueuer.js';
 import { buildWorkerContext } from './context.js';
 import { FinalizeSweeper } from './finalize-sweeper.js';
+import { StalledItemSweeper } from './stalled-item-sweeper.js';
 import { startHealthServer } from './health.js';
 import { WorkerMetrics } from './metrics.js';
 import { closeImapPools } from './connector-factory.js';
@@ -64,6 +65,11 @@ async function main(): Promise<void> {
   // did not emit a finalize check (finalize is idempotent and re-gates).
   const sweeper = new FinalizeSweeper(prisma, log);
   void sweeper.run(abort.signal);
+
+  // Finalize asks whether a collection is done. This moves the items that
+  // stopped answering, so the question can eventually be answered yes.
+  const stalledItems = new StalledItemSweeper(prisma, log);
+  void stalledItems.run(abort.signal);
   const health = startHealthServer(config.CDFIR_WORKER_HEALTH_PORT, {
     ready: async () => {
       const checks: Record<string, boolean> = {};
