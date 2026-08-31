@@ -22,9 +22,11 @@ import type {
   EmailConnector,
   EmailListPage,
   FetchedEmail,
+  ConnectorException,
   ListMessagesOptions,
   MailFolderDiscovery,
 } from '../types.js';
+import { coverageException } from './coverage.js';
 import { mapMailboxes, type RawMailbox } from './folders.js';
 import { ImapConnectionPool } from './pool.js';
 import {
@@ -128,12 +130,55 @@ export class ImapEmailConnector implements EmailConnector {
   async listMailFolders(): Promise<MailFolderDiscovery> {
     return this.withClient(async (client) => {
       const listed: ListResponse[] = await client.list();
-      const boxes: RawMailbox[] = listed.map((box) => ({
-        path: box.path,
-        delimiter: box.delimiter,
-        flags: box.flags,
-      }));
-      return mapMailboxes(boxes);
+      const boxes: RawMailbox[] = [];
+      const withheld: ConnectorException[] = [];
+
+      for (const box of listed) {
+        const selectable = !box.flags.has('\\Noselect') && !box.flags.has('\\NonExistent');
+        let serverTotal: number | undefined;
+        let exposed: number | undefined;
+
+        if (selectable) {
+          // Two numbers from two different commands, because they disagree and
+          // the disagreement is the whole point. STATUS is what the mailbox
+          // holds; EXISTS is what the server will actually let us walk. On
+          // Yahoo those were 113,039 and 10,000.
+          //
+          // Both are wrapped: a mailbox that cannot be measured must still be
+          // listed and walked. Losing a folder to a failed probe would be a far
+          // worse bug than not reporting its coverage.
+          try {
+            serverTotal = (await client.status(box.path, { messages: true })).messages;
+          } catch {
+            serverTotal = undefined;
+          }
+          try {
+            // Read-only: opening a mailbox to count it must never touch \Seen
+            // or clear \Recent on evidence.
+            const lock = await client.getMailboxLock(box.path, { readOnly: true });
+            try {
+              exposed = typeof client.mailbox === 'boolean' ? undefined : client.mailbox.exists;
+            } finally {
+              lock.release();
+            }
+          } catch {
+            exposed = undefined;
+          }
+        }
+
+        boxes.push({
+          path: box.path,
+          delimiter: box.delimiter,
+          flags: box.flags,
+          ...(serverTotal === undefined ? {} : { exists: serverTotal }),
+        });
+
+        const gap = coverageException({ path: box.path, serverTotal, exposed });
+        if (gap !== null) withheld.push(gap);
+      }
+
+      const discovery = mapMailboxes(boxes);
+      return { ...discovery, exceptions: [...discovery.exceptions, ...withheld] };
     });
   }
 

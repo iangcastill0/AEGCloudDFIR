@@ -53,6 +53,7 @@ export {
   type ImapConnectionPoolOptions,
 } from './imap/pool.js';
 export { mapMailboxes, type RawMailbox } from './imap/folders.js';
+export { coverageException, type FolderCoverage } from './imap/coverage.js';
 export {
   UID_PAGE_SIZE,
   decodeUidCursor,
