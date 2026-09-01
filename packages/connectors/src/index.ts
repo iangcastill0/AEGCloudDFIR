@@ -63,6 +63,34 @@ export {
 } from './dropbox/entries.js';
 export { dropboxApiArg } from './dropbox/api-arg.js';
 export {
+  SlackApiError,
+  nextSlackCursor,
+  readSlackEnvelope,
+  slackRetryAfterMs,
+} from './slack/envelope.js';
+export {
+  SLACK_PAGE_LIMIT,
+  SlackClient,
+  type SlackClientOptions,
+  type SlackParams,
+} from './slack/api.js';
+export {
+  SlackChatConnector,
+  conversationTypes,
+  mapConversation,
+  type SlackConnectorOptions,
+  type SlackConversation,
+  type SlackConversationScope,
+} from './slack/connector.js';
+export {
+  hasUnfetchedThread,
+  messageId,
+  slackTsToIso,
+  summarizeMessage,
+  type RawSlackMessage,
+  type SlackMessageSummary,
+} from './slack/messages.js';
+export {
   DropboxTeamLogConnector,
   TEAM_LOG_SCOPE_KEY,
   mapTeamLogPage,
