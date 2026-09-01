@@ -194,6 +194,39 @@ export function auditScopeConfigured(state: WizardState): boolean {
   return false;
 }
 
+/**
+ * Clamp the selected sources to what a provider can actually reach.
+ *
+ * Reported from staging: choosing Dropbox left "Email" ticked from the default,
+ * disabled so it could not be unticked, and validation then refused to advance.
+ * A dead end with no way out but starting the wizard again.
+ *
+ * A rule rather than another per-provider special case, because the same trap
+ * exists in every direction — switching from Dropbox to IMAP would have stranded
+ * "Drive files" the same way, and the next connector would inherit the bug.
+ *
+ * Two guarantees, both needed: nothing a provider cannot reach stays ticked, and
+ * at least one source is always ticked. Satisfying only the first swaps one dead
+ * end ("cannot untick email") for another ("select at least one source").
+ */
+export function sourcesForProvider(
+  provider: WizardState['provider'],
+  current: WizardState['sources'],
+): WizardState['sources'] {
+  // A PST holds messages and nothing else.
+  if (provider === 'upload') return { email: true, drive: false, audit: false };
+  // A mailbox has no drive and no provider audit log.
+  if (provider === 'imap') return { email: true, drive: false, audit: false };
+  // Dropbox stores files and nothing else.
+  if (provider === 'dropbox') return { email: false, drive: true, audit: false };
+  // Microsoft and Google reach all three; keep the operator's choices, but never
+  // hand back an empty selection.
+  if (!current.email && !current.drive && !current.audit) {
+    return { email: true, drive: false, audit: false };
+  }
+  return current;
+}
+
 /** Validation errors for a single step (empty array = step is valid). */
 export function validateStep(state: WizardState, step: number): string[] {
   const errors: string[] = [];

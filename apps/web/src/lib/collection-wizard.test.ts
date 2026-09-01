@@ -11,6 +11,7 @@ import {
   freshWizard,
   hydrateWizard,
   serializeWizard,
+  sourcesForProvider,
   validateStep,
   wizardReducer,
   wizardStepLabels,
@@ -489,5 +490,76 @@ describe('dropbox collections', () => {
   it('still requires at least one source', () => {
     const state = { ...dropboxState(), sources: { email: false, drive: false, audit: false } };
     expect(validateStep(state, STEP_SOURCES).length).toBeGreaterThan(0);
+  });
+});
+
+describe('sourcesForProvider', () => {
+  const ALL = { email: true, drive: true, audit: true };
+
+  /**
+   * Reported from staging: choosing Dropbox left "Email" ticked from the
+   * default, disabled so it could not be unticked, and validation then refused
+   * to advance. A dead end with no way out but starting over.
+   */
+  it('clears mail when the provider has none', () => {
+    expect(sourcesForProvider('dropbox', ALL)).toEqual({
+      email: false,
+      drive: true,
+      audit: false,
+    });
+  });
+
+  it('clears files and audit when the provider is mail only', () => {
+    expect(sourcesForProvider('imap', ALL)).toEqual({ email: true, drive: false, audit: false });
+  });
+
+  it('always leaves at least one source selected', () => {
+    // The other half of the dead end: clearing the only ticked box would fail
+    // validation with "select at least one source" and be just as stuck.
+    const fromMailOnly = { email: true, drive: false, audit: false };
+    expect(sourcesForProvider('dropbox', fromMailOnly).drive).toBe(true);
+    const fromFilesOnly = { email: false, drive: true, audit: false };
+    expect(sourcesForProvider('imap', fromFilesOnly).email).toBe(true);
+  });
+
+  it('leaves a full provider’s choices alone', () => {
+    for (const provider of ['microsoft', 'google'] as const) {
+      expect(sourcesForProvider(provider, ALL)).toEqual(ALL);
+    }
+  });
+
+  it('forces uploads to mail, which is all a PST contains', () => {
+    expect(sourcesForProvider('upload', ALL)).toEqual({
+      email: true,
+      drive: false,
+      audit: false,
+    });
+  });
+
+  it('never produces a selection its own validator would reject', () => {
+    // The property that matters: whatever the operator had ticked before, the
+    // result must be something they can actually proceed with.
+    const base = freshWizard('idem-clamp');
+    for (const provider of ['microsoft', 'google', 'imap', 'dropbox', 'upload'] as const) {
+      for (const before of [
+        ALL,
+        { email: true, drive: false, audit: false },
+        { email: false, drive: true, audit: false },
+        { email: false, drive: false, audit: true },
+      ]) {
+        const sources = sourcesForProvider(provider, before);
+        const state = {
+          ...base,
+          provider,
+          name: 'x',
+          connectorAccountId: '3f1a2b4c-5d6e-4f70-8a9b-0c1d2e3f4a5b',
+          connectorMode: 'organization' as const,
+          sources,
+          uploads: provider === 'upload' ? base.uploads : base.uploads,
+        };
+        const errors = validateStep(state, STEP_SOURCES);
+        expect(errors, `${provider} / ${JSON.stringify(before)}`).toEqual([]);
+      }
+    }
   });
 });

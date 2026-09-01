@@ -18,20 +18,21 @@ import {
 } from '@aeg-clouddfir/ui';
 import { QueryBoundary, TruthNotice } from '@/components/shared';
 import {
-  PST_EXTRACTION_NOTICE,
-  STEP_START,
   buildCreateRequest,
   canAdvance,
   freshWizard,
   hydrateWizard,
   isAuditOnly,
   isUploadCollection,
+  PST_EXTRACTION_NOTICE,
   serializeWizard,
+  sourcesForProvider,
+  STEP_START,
   validateStep,
-  wizardReducer,
-  wizardStepLabels,
   type WizardAction,
+  wizardReducer,
   type WizardState,
+  wizardStepLabels,
 } from '@/lib/collection-wizard';
 import { connectorChoiceLabel } from '@/lib/connector-choice';
 import { useConnectors, useCreateCollection, useCustodians, useUpload } from '@/lib/hooks';
@@ -241,13 +242,13 @@ function ProviderStep({ state, dispatch }: StepProps) {
               connectorAccountId: '',
               connectorMode: '',
               custodians: [],
-              // Uploads are always snapshot email collections.
-              ...(provider === 'upload'
-                ? {
-                    sources: { email: true, drive: false, audit: false },
-                    kind: 'snapshot' as const,
-                  }
-                : {}),
+              // Clamp the ticked sources to what this provider can reach.
+              // Without it, Dropbox inherited the default "Email" tick, could
+              // not untick it because the box is disabled, and validation then
+              // refused to advance — a dead end with no way out.
+              sources: sourcesForProvider(provider, state.sources),
+              // Uploads are always snapshot collections.
+              ...(provider === 'upload' ? { kind: 'snapshot' as const } : {}),
             },
           });
         }}
