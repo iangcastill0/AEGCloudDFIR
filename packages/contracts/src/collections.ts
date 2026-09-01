@@ -91,6 +91,18 @@ export const collectionScope = z.object({
           vaultMatterIds: z.array(z.string()).default([]),
         })
         .optional(),
+      dropbox: z
+        .object({
+          /**
+           * Collect the Dropbox Business team event log.
+           *
+           * Team only. A personal Dropbox has no event log any app can read —
+           * the call is refused with USER_AUTH_NOT_ALLOWED — so this requires an
+           * organization-mode connector holding a team grant.
+           */
+          includeTeamLog: z.boolean().default(false),
+        })
+        .optional(),
       /** Restrict to specific actor principals (UPN/email) when supported. */
       actorFilter: z.array(z.string()).default([]),
     })

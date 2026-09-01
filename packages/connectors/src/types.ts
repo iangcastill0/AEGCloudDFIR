@@ -259,7 +259,10 @@ export type AuditSystem =
   | 'graph_directory_audits'
   | 'graph_signins'
   | 'google_reports'
-  | 'google_vault';
+  | 'google_vault'
+  /** Dropbox Business team event log. Team only: a personal account's token is
+   *  refused with USER_AUTH_NOT_ALLOWED. */
+  | 'dropbox_team_log';
 
 /** A single normalized audit event. Provider-specific extras live in `raw`. */
 export interface AuditRecordRaw {

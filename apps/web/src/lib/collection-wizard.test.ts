@@ -482,9 +482,24 @@ describe('dropbox collections', () => {
     expect(errors.join(' ')).toMatch(/files only|no mailbox/i);
   });
 
-  it('refuses audit logs', () => {
+  it('refuses the team event log on a personal (delegated) connector', () => {
+    // Not a policy choice: Dropbox itself refuses a personal account's token
+    // with USER_AUTH_NOT_ALLOWED, "This token is not associated with a team".
     const state = { ...dropboxState(), sources: { email: false, drive: true, audit: true } };
-    expect(validateStep(state, STEP_SOURCES).length).toBeGreaterThan(0);
+    const errors = validateStep(state, STEP_SOURCES);
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors.join(' ')).toMatch(/business team/i);
+    // Must never claim the provider has no audit log — that is simply false.
+    expect(errors.join(' ')).not.toMatch(/has no (provider )?audit log/i);
+  });
+
+  it('allows the team event log on an organization connector', () => {
+    const state = {
+      ...dropboxState(),
+      connectorMode: 'organization' as const,
+      sources: { email: false, drive: false, audit: true },
+    };
+    expect(validateStep(state, STEP_SOURCES)).toEqual([]);
   });
 
   it('still requires at least one source', () => {
@@ -501,11 +516,13 @@ describe('sourcesForProvider', () => {
    * default, disabled so it could not be unticked, and validation then refused
    * to advance. A dead end with no way out but starting over.
    */
-  it('clears mail when the provider has none', () => {
+  it('clears mail when the provider has none, but keeps what it does have', () => {
+    // Dropbox has files and, for a Business team, an event log. Only mail is
+    // genuinely absent, so only mail should be cleared.
     expect(sourcesForProvider('dropbox', ALL)).toEqual({
       email: false,
       drive: true,
-      audit: false,
+      audit: true,
     });
   });
 

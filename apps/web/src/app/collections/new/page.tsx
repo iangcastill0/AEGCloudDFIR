@@ -556,7 +556,7 @@ function SourcesStep({ state, dispatch }: StepProps) {
         <Checkbox
           label="Audit logs (organization-wide)"
           checked={state.sources.audit}
-          disabled={state.provider === 'imap' || state.provider === 'dropbox'}
+          disabled={state.provider === 'imap'}
           hint={
             state.provider === 'imap'
               ? 'Not available: IMAP has no provider audit log.'

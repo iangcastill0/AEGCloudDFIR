@@ -492,6 +492,26 @@ export const DROPBOX_DELEGATED_SCOPES: readonly string[] = [
   'sharing.read',
 ];
 
+/**
+ * Scopes for a Dropbox Business team grant.
+ *
+ * `events.read` is the team event log — the provider-side forensic record. The
+ * member scopes are what let a collection address one custodian at a time
+ * through `Dropbox-API-Select-User`.
+ *
+ * Still read-only. A team token reaches every member of the team, which makes
+ * the absence of any write scope matter more here, not less.
+ */
+export const DROPBOX_TEAM_SCOPES: readonly string[] = [
+  'team_info.read',
+  'team_data.member',
+  'members.read',
+  'events.read',
+  'files.metadata.read',
+  'files.content.read',
+  'sharing.read',
+];
+
 export interface DropboxAuthorizationUrlOptions {
   clientId: string;
   redirectUri: string;

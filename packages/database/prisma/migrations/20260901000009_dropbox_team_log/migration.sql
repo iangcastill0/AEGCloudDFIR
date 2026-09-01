@@ -1,0 +1,14 @@
+-- AlterEnum
+-- The Dropbox Business team event log: sign-ins, file views and downloads,
+-- sharing changes, membership changes and admin actions. It is the Dropbox
+-- equivalent of the Office 365 Management Activity API and Google's Admin SDK
+-- Reports, and it is the provider-side forensic record for Dropbox.
+--
+-- Team only, verified against the live API: the same call with a personal
+-- account's token returns HTTP 400, "This token is not associated with a team",
+-- USER_AUTH_NOT_ALLOWED. So a delegated Dropbox connector can never produce
+-- records with this system.
+--
+-- ALTER TYPE ... ADD VALUE cannot run in a transaction alongside statements that
+-- use the new value, so this migration contains ONLY the enum addition.
+ALTER TYPE "AuditSystem" ADD VALUE IF NOT EXISTS 'dropbox_team_log';

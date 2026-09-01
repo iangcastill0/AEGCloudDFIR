@@ -217,8 +217,12 @@ export function sourcesForProvider(
   if (provider === 'upload') return { email: true, drive: false, audit: false };
   // A mailbox has no drive and no provider audit log.
   if (provider === 'imap') return { email: true, drive: false, audit: false };
-  // Dropbox stores files and nothing else.
-  if (provider === 'dropbox') return { email: false, drive: true, audit: false };
+  // Dropbox stores files and, for a Business team, keeps an event log. Mail is
+  // the only thing it genuinely does not have.
+  if (provider === 'dropbox') {
+    const keep = { email: false, drive: current.drive, audit: current.audit };
+    return keep.drive || keep.audit ? keep : { email: false, drive: true, audit: false };
+  }
   // Microsoft and Google reach all three; keep the operator's choices, but never
   // hand back an empty selection.
   if (!current.email && !current.drive && !current.audit) {
@@ -267,8 +271,13 @@ export function validateStep(state: WizardState, step: number): string[] {
         if (state.sources.email) {
           errors.push('Dropbox connectors collect files only; there is no mailbox to collect.');
         }
-        if (state.sources.audit) {
-          errors.push('Dropbox connectors collect files only; there are no provider audit logs.');
+        // The team event log exists, but only for a Business team. A personal
+        // account's token is refused by Dropbox itself, so an organization-mode
+        // connector is not a policy choice here — it is the only thing that works.
+        if (state.sources.audit && state.connectorMode !== 'organization') {
+          errors.push(
+            'The Dropbox team event log is only available to a Dropbox Business team. Connect an organization-mode Dropbox connector, or deselect audit logs.',
+          );
         }
       }
       if (!state.sources.email && !state.sources.drive && !state.sources.audit)

@@ -776,6 +776,10 @@ enum AuditSystem {
   graph_signins
   google_reports
   google_vault
+  /// Dropbox Business team event log (/2/team_log/get_events). Team only: the
+  /// same call on a personal account is refused with USER_AUTH_NOT_ALLOWED,
+  /// "This token is not associated with a team".
+  dropbox_team_log
 }
 
 /// A single parsed audit-log event. The immutable native is the raw provider

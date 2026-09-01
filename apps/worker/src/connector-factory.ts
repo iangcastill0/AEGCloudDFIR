@@ -11,6 +11,7 @@ import {
   GOOGLE_VAULT_READONLY_SCOPE,
   GoogleDelegatedTokenSource,
   GoogleDriveConnector,
+  DropboxTeamLogConnector,
   GoogleReportsConnector,
   GoogleServiceAccountTokenSource,
   GoogleVaultConnector,
@@ -511,6 +512,42 @@ export async function buildAuditConnectors(
 
   if (account.provider === 'upload') {
     throw new Error('upload connector accounts cannot collect audit logs');
+  }
+
+  if (account.provider === 'imap') {
+    // Not an oversight and not a gap to close later: IMAP is a mail-access
+    // protocol with no audit facility. There is nothing to call.
+    throw new Error('imap connectors have no provider audit log to collect');
+  }
+
+  if (account.provider === 'dropbox') {
+    if (account.mode !== 'organization') {
+      // Verified against the live API: a personal account's token is refused
+      // with USER_AUTH_NOT_ALLOWED, "This token is not associated with a team".
+      throw new Error(
+        'the Dropbox team event log requires an organization-mode connector holding a team grant',
+      );
+    }
+    if (auditScope?.dropbox?.includeTeamLog === true) {
+      const row = requireSecret(secrets, 'oauth_refresh_token', 'OAuth refresh token');
+      const refreshToken = (
+        await decryptSecretRow(ctx, tenantId, connectorAccountId, row)
+      ).toString('utf8');
+      connectors.push({
+        kind: 'dropbox_team_log',
+        connector: new DropboxTeamLogConnector({
+          tokenProvider: new DropboxDelegatedTokenSource({
+            tokenEndpoint: ctx.config.CDFIR_DROPBOX_OAUTH_TOKEN_URL,
+            clientId: ctx.config.CDFIR_DROPBOX_CLIENT_ID,
+            clientSecret: ctx.config.CDFIR_DROPBOX_CLIENT_SECRET,
+            refreshToken,
+          }),
+          rpcBase: ctx.config.CDFIR_DROPBOX_API_BASE_URL,
+          ...(args.onRateLimit === undefined ? {} : { onRateLimit: args.onRateLimit }),
+        }),
+      });
+    }
+    return { provider: 'dropbox', mode: account.mode, connectors };
   }
 
   if (account.provider === 'microsoft') {

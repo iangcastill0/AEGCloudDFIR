@@ -14,7 +14,11 @@ import type { AuditConnector } from '@aeg-clouddfir/connectors';
 
 /** Identifies which audit connector owns a scope (for routing, not the system). */
 export type AuditConnectorKind =
-  'o365_management_activity' | 'graph_audit' | 'google_reports' | 'google_vault';
+  | 'o365_management_activity'
+  | 'graph_audit'
+  | 'google_reports'
+  | 'google_vault'
+  | 'dropbox_team_log';
 
 /** An audit connector tagged with its routing kind. */
 export interface TaggedAuditConnector {
@@ -24,7 +28,7 @@ export interface TaggedAuditConnector {
 
 /** Bundle of the audit connectors constructed for one connector account. */
 export interface AuditConnectorBundle {
-  provider: 'microsoft' | 'google';
+  provider: 'microsoft' | 'google' | 'dropbox';
   mode: 'delegated' | 'organization';
   connectors: TaggedAuditConnector[];
 }

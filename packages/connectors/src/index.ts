@@ -62,6 +62,14 @@ export {
   type RawDropboxPage,
 } from './dropbox/entries.js';
 export { dropboxApiArg } from './dropbox/api-arg.js';
+export {
+  DropboxTeamLogConnector,
+  TEAM_LOG_SCOPE_KEY,
+  mapTeamLogPage,
+  teamLogRequest,
+  type DropboxTeamLogOptions,
+  type RawTeamLogPage,
+} from './dropbox/team-log.js';
 export { DropboxDriveConnector, type DropboxDriveConnectorOptions } from './dropbox/drive.js';
 export {
   UID_PAGE_SIZE,

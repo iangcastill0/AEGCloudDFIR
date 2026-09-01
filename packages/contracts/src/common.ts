@@ -43,6 +43,14 @@ export const auditSystem = z.enum([
   'graph_signins',
   'google_reports',
   'google_vault',
+  /**
+   * Dropbox Business team event log (/2/team_log/get_events).
+   *
+   * Team only. A personal Dropbox has no event log any app can read: the same
+   * call on a basic account returns USER_AUTH_NOT_ALLOWED, "This token is not
+   * associated with a team".
+   */
+  'dropbox_team_log',
 ]);
 export type AuditSystem = z.infer<typeof auditSystem>;
 
