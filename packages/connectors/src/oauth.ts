@@ -471,6 +471,141 @@ export function buildGoogleAuthorizationUrl(opts: GoogleAuthorizationUrlOptions)
   return url.toString();
 }
 
+// ---------------------------------------------------------------------------
+// Dropbox
+// ---------------------------------------------------------------------------
+
+export const DROPBOX_AUTHORIZATION_ENDPOINT = 'https://www.dropbox.com/oauth2/authorize';
+export const DROPBOX_TOKEN_ENDPOINT = 'https://api.dropboxapi.com/oauth2/token';
+
+/**
+ * Scopes for read-only collection.
+ *
+ * Deliberately no write scope of any kind. A forensic tool must not be able to
+ * change the custodian's Dropbox, and a scope that is never requested cannot be
+ * misused later by a bug or a stolen token.
+ */
+export const DROPBOX_DELEGATED_SCOPES: readonly string[] = [
+  'account_info.read',
+  'files.metadata.read',
+  'files.content.read',
+  'sharing.read',
+];
+
+export interface DropboxAuthorizationUrlOptions {
+  clientId: string;
+  redirectUri: string;
+  state: string;
+  scopes?: readonly string[];
+  /** S256 PKCE code challenge (base64url of SHA-256 of the verifier). */
+  codeChallenge: string;
+  /** Override for tests; defaults to the public Dropbox endpoint. */
+  authorizationEndpoint?: string;
+}
+
+export function buildDropboxAuthorizationUrl(opts: DropboxAuthorizationUrlOptions): string {
+  const url = new URL(opts.authorizationEndpoint ?? DROPBOX_AUTHORIZATION_ENDPOINT);
+  url.searchParams.set('client_id', opts.clientId);
+  url.searchParams.set('response_type', 'code');
+  url.searchParams.set('redirect_uri', opts.redirectUri);
+  url.searchParams.set('scope', (opts.scopes ?? DROPBOX_DELEGATED_SCOPES).join(' '));
+  url.searchParams.set('state', opts.state);
+  url.searchParams.set('code_challenge', opts.codeChallenge);
+  url.searchParams.set('code_challenge_method', 'S256');
+  // Without this a long-lived refresh token is never issued and the connector
+  // stops working after a few hours.
+  url.searchParams.set('token_access_type', 'offline');
+  // Dropbox has no `prompt` parameter. This is its equivalent, and it is the
+  // stronger of the two options: force_reapprove only re-shows the approval
+  // screen for the account already signed in, while this makes the person
+  // authenticate, so they choose the account deliberately.
+  url.searchParams.set('force_reauthentication', 'true');
+  return url.toString();
+}
+
+/**
+ * Does this sign-in URL stop the browser's current session being adopted?
+ *
+ * Providers spell this differently — Microsoft and Google use `prompt`, Dropbox
+ * uses `force_reauthentication` — so the rule is expressed once, here, rather
+ * than as a per-provider assertion that a new connector can quietly skip.
+ */
+export function forcesAccountSelection(rawUrl: string): boolean {
+  const params = new URL(rawUrl).searchParams;
+  const prompt = (params.get('prompt') ?? '').split(' ');
+  if (prompt.includes(FORCE_ACCOUNT_SELECTION)) return true;
+  if (params.get('force_reauthentication') === 'true') return true;
+  return false;
+}
+
+export interface DropboxCodeExchangeOptions {
+  clientId: string;
+  clientSecret: string;
+  code: string;
+  redirectUri: string;
+  /** The PKCE verifier whose challenge was sent to the authorize endpoint. */
+  codeVerifier: string;
+  /** Override for tests; defaults to the public Dropbox endpoint. */
+  tokenEndpoint?: string;
+  fetchImpl?: FetchLike;
+}
+
+export async function exchangeDropboxAuthorizationCode(
+  opts: DropboxCodeExchangeOptions,
+): Promise<ExchangedTokens> {
+  return postTokenForm(
+    opts.tokenEndpoint ?? DROPBOX_TOKEN_ENDPOINT,
+    {
+      grant_type: 'authorization_code',
+      client_id: opts.clientId,
+      client_secret: opts.clientSecret,
+      code: opts.code,
+      redirect_uri: opts.redirectUri,
+      code_verifier: opts.codeVerifier,
+    },
+    opts.fetchImpl ?? ((u, i) => fetch(u, i)),
+  );
+}
+
+export interface DropboxDelegatedTokenSourceOptions {
+  clientId: string;
+  clientSecret: string;
+  refreshToken: string;
+  tokenEndpoint?: string;
+  fetchImpl?: FetchLike;
+  now?: () => number;
+}
+
+/**
+ * Dropbox access tokens last about four hours, so every collection longer than
+ * that depends on the refresh grant working. The refresh token itself is only
+ * issued when the authorize URL carried `token_access_type=offline`.
+ */
+export class DropboxDelegatedTokenSource extends CachingTokenSource {
+  private readonly opts: DropboxDelegatedTokenSourceOptions;
+  private readonly fetchImpl: FetchLike;
+
+  constructor(opts: DropboxDelegatedTokenSourceOptions) {
+    super(opts.now);
+    this.opts = opts;
+    this.fetchImpl = opts.fetchImpl ?? ((u, i) => fetch(u, i));
+  }
+
+  protected async fetchToken(): Promise<{ accessToken: string; expiresInSeconds: number }> {
+    const tokens = await postTokenForm(
+      this.opts.tokenEndpoint ?? DROPBOX_TOKEN_ENDPOINT,
+      {
+        grant_type: 'refresh_token',
+        client_id: this.opts.clientId,
+        client_secret: this.opts.clientSecret,
+        refresh_token: this.opts.refreshToken,
+      },
+      this.fetchImpl,
+    );
+    return { accessToken: tokens.accessToken, expiresInSeconds: tokens.expiresInSeconds };
+  }
+}
+
 export interface MicrosoftCodeExchangeOptions {
   msLoginBaseUrl: string;
   tenant?: string;

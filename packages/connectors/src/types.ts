@@ -7,7 +7,7 @@
  * (Provider, ConnectionMode, ExceptionKind) without importing that package.
  */
 
-export type ProviderName = 'microsoft' | 'google' | 'imap';
+export type ProviderName = 'microsoft' | 'google' | 'imap' | 'dropbox';
 
 export type ConnectionMode = 'delegated' | 'organization';
 

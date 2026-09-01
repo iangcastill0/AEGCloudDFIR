@@ -83,12 +83,21 @@ export const configSchema = z.object({
   CDFIR_GOOGLE_CLIENT_ID: z.string().default(''),
   CDFIR_GOOGLE_CLIENT_SECRET: z.string().default(''),
   CDFIR_GOOGLE_REDIRECT_PATH: z.string().default('/api/v1/connectors/callback/google'),
+  CDFIR_DROPBOX_CLIENT_ID: z.string().default(''),
+  CDFIR_DROPBOX_CLIENT_SECRET: z.string().default(''),
+  CDFIR_DROPBOX_REDIRECT_PATH: z.string().default('/api/v1/connectors/callback/dropbox'),
 
   // --- Provider endpoint overrides (contract tests / fake server / demo) ---
   CDFIR_MS_GRAPH_BASE_URL: z.string().url().default('https://graph.microsoft.com/v1.0'),
   CDFIR_MS_LOGIN_BASE_URL: z.string().url().default('https://login.microsoftonline.com'),
   CDFIR_GOOGLE_API_BASE_URL: z.string().url().default('https://www.googleapis.com'),
   CDFIR_GOOGLE_OAUTH_TOKEN_URL: z.string().url().default('https://oauth2.googleapis.com/token'),
+  CDFIR_DROPBOX_API_BASE_URL: z.string().url().default('https://api.dropboxapi.com/2'),
+  CDFIR_DROPBOX_CONTENT_BASE_URL: z.string().url().default('https://content.dropboxapi.com/2'),
+  CDFIR_DROPBOX_OAUTH_TOKEN_URL: z
+    .string()
+    .url()
+    .default('https://api.dropboxapi.com/oauth2/token'),
 
   // --- ClamAV ---
   CDFIR_CLAMAV_HOST: z.string().default('clamav'),
@@ -147,6 +156,7 @@ const SECRET_KEYS: ReadonlySet<string> = new Set([
   'CDFIR_KEK_LOCAL_MASTER_KEY',
   'CDFIR_MS_CLIENT_SECRET',
   'CDFIR_GOOGLE_CLIENT_SECRET',
+  'CDFIR_DROPBOX_CLIENT_SECRET',
 ]);
 
 export class ConfigValidationError extends Error {

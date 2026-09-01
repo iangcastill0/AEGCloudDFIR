@@ -55,6 +55,15 @@ export {
 export { mapMailboxes, type RawMailbox } from './imap/folders.js';
 export { coverageException, type FolderCoverage } from './imap/coverage.js';
 export {
+  mapDropboxEntry,
+  mapDropboxPage,
+  mimeForFilename,
+  type RawDropboxEntry,
+  type RawDropboxPage,
+} from './dropbox/entries.js';
+export { dropboxApiArg } from './dropbox/api-arg.js';
+export { DropboxDriveConnector, type DropboxDriveConnectorOptions } from './dropbox/drive.js';
+export {
   UID_PAGE_SIZE,
   decodeUidCursor,
   encodeUidCursor,

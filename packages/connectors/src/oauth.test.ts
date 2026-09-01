@@ -10,9 +10,11 @@ import {
   MICROSOFT_DELEGATED_SCOPES,
   MicrosoftAppTokenSource,
   MicrosoftDelegatedTokenSource,
+  buildDropboxAuthorizationUrl,
   buildGoogleAuthorizationUrl,
   buildMicrosoftAdminConsentUrl,
   buildMicrosoftAuthorizationUrl,
+  forcesAccountSelection,
   exchangeGoogleAuthorizationCode,
   exchangeMicrosoftAuthorizationCode,
 } from './oauth.js';
@@ -344,13 +346,49 @@ describe('account selection is always forced', () => {
         scopes: ['openid'],
         state: 's',
       }),
+    buildDropboxAuthorizationUrl: () =>
+      buildDropboxAuthorizationUrl({
+        clientId: 'c',
+        redirectUri: 'https://api.test/cb',
+        state: 's',
+        codeChallenge: 'ch',
+      }),
   };
 
   it('every URL that sends a person to a provider asks for account selection', () => {
+    // Asserted through forcesAccountSelection, not by reading `prompt`: Dropbox
+    // has no prompt parameter and uses force_reauthentication instead. Checking
+    // one provider's spelling would have let the next connector past the rule.
     for (const [name, build] of Object.entries(SIGN_IN_URL_BUILDERS)) {
-      const prompt = new URL(build()).searchParams.get('prompt') ?? '';
-      expect(prompt.split(' '), `${name} must force account selection`).toContain('select_account');
+      expect(forcesAccountSelection(build()), `${name} must force account selection`).toBe(true);
     }
+  });
+
+  it('does not accept a URL that leaves the choice to the browser session', () => {
+    // The guard has to be able to FAIL, or it proves nothing.
+    expect(forcesAccountSelection('https://p.test/authorize?client_id=c')).toBe(false);
+    expect(forcesAccountSelection('https://p.test/authorize?prompt=consent')).toBe(false);
+    expect(forcesAccountSelection('https://p.test/authorize?force_reauthentication=false')).toBe(
+      false,
+    );
+  });
+
+  it('Dropbox makes the person authenticate rather than reusing the session', () => {
+    const url = new URL(
+      buildDropboxAuthorizationUrl({
+        clientId: 'c',
+        redirectUri: 'https://api.test/cb',
+        state: 's',
+        codeChallenge: 'ch',
+      }),
+    );
+    expect(url.searchParams.get('force_reauthentication')).toBe('true');
+    // offline is what yields a refresh token; without it the connector dies in hours.
+    expect(url.searchParams.get('token_access_type')).toBe('offline');
+    // Read-only: no write scope may ever be requested by a forensic tool.
+    const scopes = (url.searchParams.get('scope') ?? '').split(' ');
+    expect(scopes).toContain('files.content.read');
+    expect(scopes.some((s) => s.includes('write'))).toBe(false);
   });
 
   it('the registry covers every builder this module exports', () => {

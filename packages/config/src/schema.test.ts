@@ -78,3 +78,28 @@ describe('loadConfig', () => {
     expect(redacted.CDFIR_API_PORT).toBe(4000);
   });
 });
+
+describe('Dropbox connector configuration', () => {
+  it('defaults the redirect path to the route the API serves', () => {
+    // This exact string is pasted into the Dropbox app console. A mismatch of
+    // one character produces "redirect_uri did not match", which reads like a
+    // Dropbox problem rather than a config typo.
+    expect(loadConfig(validEnv).CDFIR_DROPBOX_REDIRECT_PATH).toBe(
+      '/api/v1/connectors/callback/dropbox',
+    );
+  });
+
+  it('starts empty, so an unconfigured Dropbox app cannot half-work', () => {
+    const config = loadConfig(validEnv);
+    expect(config.CDFIR_DROPBOX_CLIENT_ID).toBe('');
+    expect(config.CDFIR_DROPBOX_CLIENT_SECRET).toBe('');
+  });
+
+  it('never prints the app secret', () => {
+    // A secret in a log or an error page is a secret that has to be rotated.
+    const redacted = redactConfig(
+      loadConfig({ ...validEnv, CDFIR_DROPBOX_CLIENT_SECRET: 'the-real-secret' }),
+    );
+    expect(JSON.stringify(redacted)).not.toContain('the-real-secret');
+  });
+});
