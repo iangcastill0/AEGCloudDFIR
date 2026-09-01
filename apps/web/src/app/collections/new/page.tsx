@@ -264,6 +264,11 @@ function ProviderStep({ state, dispatch }: StepProps) {
             description: 'Yahoo, iCloud, AOL, or any mail server — mail only, no drive',
           },
           {
+            value: 'dropbox',
+            label: 'Dropbox',
+            description: 'Dropbox files — files only, no mailbox',
+          },
+          {
             value: 'upload',
             label: 'PST / mailbox file upload',
             description: 'Preserve and review Outlook data files (.pst, .ost)',
@@ -521,6 +526,10 @@ function SourcesStep({ state, dispatch }: StepProps) {
         <Checkbox
           label="Email"
           checked={state.sources.email}
+          disabled={state.provider === 'dropbox'}
+          hint={
+            state.provider === 'dropbox' ? 'Not available: Dropbox stores files only.' : undefined
+          }
           onChange={(e) =>
             dispatch({
               type: 'patch',
@@ -528,8 +537,9 @@ function SourcesStep({ state, dispatch }: StepProps) {
             })
           }
         />
-        {/* A mailbox has no drive and no provider audit log. Disabling these is
-            clearer than letting them be ticked and then failing validation. */}
+        {/* A mailbox has no drive and no provider audit log; Dropbox is the
+            mirror, with files and no mailbox. Disabling is clearer than letting
+            a box be ticked and then failing validation. */}
         <Checkbox
           label="Drive files"
           checked={state.sources.drive}
@@ -545,9 +555,13 @@ function SourcesStep({ state, dispatch }: StepProps) {
         <Checkbox
           label="Audit logs (organization-wide)"
           checked={state.sources.audit}
-          disabled={state.provider === 'imap'}
+          disabled={state.provider === 'imap' || state.provider === 'dropbox'}
           hint={
-            state.provider === 'imap' ? 'Not available: IMAP has no provider audit log.' : undefined
+            state.provider === 'imap'
+              ? 'Not available: IMAP has no provider audit log.'
+              : state.provider === 'dropbox'
+                ? 'Not available: Dropbox has no provider audit log.'
+                : undefined
           }
           onChange={(e) =>
             dispatch({
@@ -561,6 +575,13 @@ function SourcesStep({ state, dispatch }: StepProps) {
         <Notice variant="info">
           IMAP collects mail only. Every selectable mailbox is walked by UID, and the original
           message bytes are preserved exactly as the server returns them.
+        </Notice>
+      ) : null}
+      {state.provider === 'dropbox' ? (
+        <Notice variant="info">
+          Dropbox collects files only. Files are identified by their Dropbox id, so a rename or move
+          during collection does not duplicate them. Dropbox records no creation time, only when its
+          servers last saw the file change.
         </Notice>
       ) : null}
       {state.sources.audit ? (

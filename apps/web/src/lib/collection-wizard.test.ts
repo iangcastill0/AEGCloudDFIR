@@ -449,3 +449,45 @@ describe('IMAP collections', () => {
     expect(body.scope.audit).toBeUndefined();
   });
 });
+
+describe('dropbox collections', () => {
+  function dropboxState() {
+    return {
+      ...freshWizard('idem-dropbox-1'),
+      provider: 'dropbox' as const,
+      name: 'Dropbox files',
+      connectorAccountId: '3f1a2b4c-5d6e-4f70-8a9b-0c1d2e3f4a5b',
+      connectorMode: 'delegated' as const,
+    };
+  }
+
+  it('can be chosen as a provider at all', () => {
+    // Without this the connector exists, the account can be connected, and the
+    // wizard still cannot start a collection with it.
+    const state = { ...dropboxState(), sources: { email: false, drive: true, audit: false } };
+    expect(validateStep(state, STEP_TYPE)).toEqual([]);
+  });
+
+  it('collects files', () => {
+    const state = { ...dropboxState(), sources: { email: false, drive: true, audit: false } };
+    expect(validateStep(state, STEP_SOURCES)).toEqual([]);
+  });
+
+  it('refuses mail, because Dropbox has no mailbox', () => {
+    // The mirror of the IMAP rule. Allowing it would produce a collection that
+    // claims a source it never looked at.
+    const state = { ...dropboxState(), sources: { email: true, drive: true, audit: false } };
+    const errors = validateStep(state, STEP_SOURCES);
+    expect(errors.join(' ')).toMatch(/files only|no mailbox/i);
+  });
+
+  it('refuses audit logs', () => {
+    const state = { ...dropboxState(), sources: { email: false, drive: true, audit: true } };
+    expect(validateStep(state, STEP_SOURCES).length).toBeGreaterThan(0);
+  });
+
+  it('still requires at least one source', () => {
+    const state = { ...dropboxState(), sources: { email: false, drive: false, audit: false } };
+    expect(validateStep(state, STEP_SOURCES).length).toBeGreaterThan(0);
+  });
+});

@@ -71,7 +71,7 @@ export const wizardStateSchema = z.object({
   /** Generated once per wizard run; reused across retries of the same start. */
   idempotencyKey: z.string().min(8),
   name: z.string(),
-  provider: z.enum(['microsoft', 'google', 'imap', 'upload', '']),
+  provider: z.enum(['microsoft', 'google', 'imap', 'dropbox', 'upload', '']),
   connectorAccountId: z.string(),
   connectorMode: z.enum(['delegated', 'organization', '']),
   sources: z.object({ email: z.boolean(), drive: z.boolean(), audit: z.boolean() }),
@@ -225,6 +225,17 @@ export function validateStep(state: WizardState, step: number): string[] {
         }
         if (state.sources.audit) {
           errors.push('IMAP connectors collect mail only; there are no provider audit logs.');
+        }
+      }
+      // The mirror of the IMAP rule. Dropbox stores files and nothing else, so
+      // offering mail or audit would produce a collection that claims a source
+      // it never looked at.
+      if (state.provider === 'dropbox') {
+        if (state.sources.email) {
+          errors.push('Dropbox connectors collect files only; there is no mailbox to collect.');
+        }
+        if (state.sources.audit) {
+          errors.push('Dropbox connectors collect files only; there are no provider audit logs.');
         }
       }
       if (!state.sources.email && !state.sources.drive && !state.sources.audit)
