@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ensureOk,
+  type FetchLike,
   followRedirectWithoutAuth,
   parseRetryAfterMs,
   providerFetch,
+  redactProviderDetail,
   sanitizeUrl,
-  type FetchLike,
 } from './http.js';
 import {
   ProviderApiError,
@@ -226,5 +228,77 @@ describe('followRedirectWithoutAuth', () => {
     await expect(
       followRedirectWithoutAuth(new Response('x', { status: 200 })),
     ).rejects.toBeInstanceOf(ProviderApiError);
+  });
+});
+
+describe('a failed provider call keeps what the provider said', () => {
+  /**
+   * Dropbox answered a missing OAuth scope with a plain-text body naming the
+   * scope and how to enable it. readErrorBody called .json() first, which threw,
+   * and the whole message was discarded — so the worker logged only "provider
+   * returned HTTP 400" and diagnosing it took a probe script.
+   */
+  const DROPBOX_400 =
+    'Error in call to API function "files/list_folder": Your app (ID: 8261123) is not ' +
+    'permitted to access this endpoint because it does not have the required scope ' +
+    "'files.metadata.read'.";
+
+  it('includes a plain-text provider message in the error', async () => {
+    const response = new Response(DROPBOX_400, { status: 400 });
+    await expect(ensureOk(response, 'dropbox /files/list_folder')).rejects.toThrow(
+      /files\.metadata\.read/,
+    );
+  });
+
+  it('still includes the status and the context', async () => {
+    const response = new Response(DROPBOX_400, { status: 400 });
+    await expect(ensureOk(response, 'dropbox /files/list_folder')).rejects.toThrow(
+      /dropbox \/files\/list_folder: provider returned HTTP 400/,
+    );
+  });
+
+  it('keeps the JSON error code AND the text for JSON providers', async () => {
+    const response = new Response(JSON.stringify({ error: { code: 'itemNotFound' } }), {
+      status: 404,
+      headers: { 'content-type': 'application/json' },
+    });
+    await expect(ensureOk(response, 'graph /me')).rejects.toThrow(/itemNotFound/);
+  });
+
+  it('says nothing extra when the body is empty', async () => {
+    const response = new Response('', { status: 503 });
+    await expect(ensureOk(response, 'graph /me')).rejects.toThrow(
+      /graph \/me: provider returned HTTP 503$/,
+    );
+  });
+});
+
+describe('redactProviderDetail', () => {
+  it('removes a bearer token a provider echoed back', () => {
+    const text = 'bad request: Authorization: Bearer sl.ABCdefGHIjklMNOpqrSTUvwx.yz-123';
+    const out = redactProviderDetail(text);
+    expect(out).not.toContain('sl.ABCdefGHIjklMNOpqrSTUvwx');
+    expect(out).toContain('[redacted]');
+  });
+
+  it('removes long opaque strings, which are tokens more often than words', () => {
+    const token = 'A'.repeat(64);
+    expect(redactProviderDetail(`failed for ${token}`)).not.toContain(token);
+  });
+
+  it('leaves an ordinary diagnostic message readable', () => {
+    const out = redactProviderDetail(
+      "does not have the required scope 'files.metadata.read'. Enable it in the App Console.",
+    );
+    expect(out).toContain('files.metadata.read');
+    expect(out).toContain('App Console');
+  });
+
+  it('caps the length, because a log line is not a document', () => {
+    expect(redactProviderDetail('x'.repeat(5_000)).length).toBeLessThanOrEqual(301);
+  });
+
+  it('collapses newlines so one error stays one log line', () => {
+    expect(redactProviderDetail('line one\nline two')).toBe('line one line two');
   });
 });

@@ -11,6 +11,7 @@ import { redactConfig, type AppConfig } from '@aeg-clouddfir/config';
 import './common/http.js';
 import { getAppConfig } from './common/config.js';
 import { createLogger } from './common/logger.js';
+import { UnhandledErrorFilter } from './common/error-filter.js';
 import { resolveRequestId } from './common/request-id.js';
 import { AppModule } from './app.module.js';
 
@@ -124,6 +125,11 @@ async function bootstrap(): Promise<void> {
     }
     done();
   });
+
+  // NestFactory runs with `logger: false`, which also silences Nest's own
+  // exception logging. Without this filter a 500 leaves no trace at all: the
+  // access log records the status code and the error itself is discarded.
+  app.useGlobalFilters(new UnhandledErrorFilter(logger));
 
   app.enableShutdownHooks();
 

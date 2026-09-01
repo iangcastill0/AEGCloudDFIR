@@ -183,15 +183,47 @@ export async function providerFetch(
 interface ProviderErrorBody {
   code?: string;
   requestId?: string;
+  /** Redacted excerpt of what the provider actually said. */
+  detail?: string;
+}
+
+/**
+ * Strip anything that looks like a credential out of provider error text.
+ *
+ * Provider bodies are diagnostics, not secrets, but a body is attacker- and
+ * provider-controlled and must never be trusted to be clean before it reaches a
+ * log that people read and paste into tickets.
+ */
+export function redactProviderDetail(text: string, max = 300): string {
+  const cleaned = text
+    .replace(/Bearer\s+[A-Za-z0-9._~+/-]+=*/gi, 'Bearer [redacted]')
+    // Long opaque strings are tokens far more often than they are messages.
+    .replace(/[A-Za-z0-9_-]{40,}/g, '[redacted]')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned.length > max ? `${cleaned.slice(0, max)}…` : cleaned;
 }
 
 async function readErrorBody(response: Response): Promise<ProviderErrorBody> {
+  // Read once, as text: a body can only be consumed a single time, and not
+  // every provider answers with JSON. Dropbox returns plain text, so calling
+  // .json() first threw and the entire message was lost — the reason a missing
+  // OAuth scope surfaced only as "provider returned HTTP 400".
+  let raw: string;
   try {
-    const parsed: unknown = await response.json();
-    if (typeof parsed !== 'object' || parsed === null) return {};
+    raw = await response.text();
+  } catch {
+    return {};
+  }
+  const detail = redactProviderDetail(raw);
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null) {
+      return detail === '' ? {} : { detail };
+    }
     const error = (parsed as Record<string, unknown>)['error'];
-    if (typeof error === 'string') return { code: error };
-    if (typeof error !== 'object' || error === null) return {};
+    if (typeof error === 'string') return { code: error, detail };
+    if (typeof error !== 'object' || error === null) return { detail };
     const rec = error as Record<string, unknown>;
     const code =
       typeof rec['code'] === 'string'
@@ -206,9 +238,11 @@ async function readErrorBody(response: Response): Promise<ProviderErrorBody> {
       typeof inner === 'object' && inner !== null
         ? (inner as Record<string, unknown>)['request-id']
         : undefined;
-    return { code, requestId: typeof requestId === 'string' ? requestId : undefined };
+    return { code, requestId: typeof requestId === 'string' ? requestId : undefined, detail };
   } catch {
-    return {};
+    // Not JSON at all. The text is the whole message, which is exactly the
+    // case that was being thrown away.
+    return detail === '' ? {} : { detail };
   }
 }
 
@@ -219,7 +253,11 @@ async function readErrorBody(response: Response): Promise<ProviderErrorBody> {
 export async function ensureOk(response: Response, context: string): Promise<Response> {
   if (response.ok) return response;
   const body = await readErrorBody(response);
-  throw new ProviderApiError(`${context}: provider returned HTTP ${response.status}`, {
+  // The provider's own words go in the message. Dropbox answers a missing scope
+  // with the scope name and how to fix it; discarding that turned a one-line
+  // diagnosis into an investigation.
+  const detail = body.detail === undefined || body.detail === '' ? '' : ` — ${body.detail}`;
+  throw new ProviderApiError(`${context}: provider returned HTTP ${response.status}${detail}`, {
     status: response.status,
     providerCode: body.code,
     requestId: body.requestId ?? response.headers.get('request-id') ?? undefined,
