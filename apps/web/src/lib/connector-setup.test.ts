@@ -95,3 +95,35 @@ describe('buildGoogleOrgSetup', () => {
     ).toThrow();
   });
 });
+
+describe('dropbox', () => {
+  it('builds a create request the API schema accepts', () => {
+    // Parsed with the API's own schema. A shape the page invents on its own is
+    // how every Connect click once returned 400 without contacting a provider.
+    const body = buildCreateConnector({
+      provider: 'dropbox',
+      mode: 'delegated',
+      label: '',
+      now: NOW,
+    });
+    expect(body.provider).toBe('dropbox');
+    expect(body.mode).toBe('delegated');
+    expect(body.label.length).toBeGreaterThan(0);
+  });
+
+  it('names an unlabelled connector so repeated attempts stay distinguishable', () => {
+    expect(defaultConnectorLabel('dropbox', 'delegated', NOW)).toBe(
+      'Dropbox (personal) 2026-08-21',
+    );
+  });
+
+  it('keeps a label the operator typed', () => {
+    const body = buildCreateConnector({
+      provider: 'dropbox',
+      mode: 'delegated',
+      label: "  Jane's Dropbox  ",
+      now: NOW,
+    });
+    expect(body.label).toBe("Jane's Dropbox");
+  });
+});

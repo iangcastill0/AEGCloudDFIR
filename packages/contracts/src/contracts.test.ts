@@ -284,8 +284,11 @@ describe('connector list', () => {
   });
 
   it('still rejects a provider the app does not support', () => {
+    // 'dropbox' used to be the example here and became real, which is exactly
+    // what should happen: the guard failed loudly the moment support landed.
+    // The negative case must be a value that will never be a provider.
     const parsed = connectorListResponse.safeParse({
-      items: [{ ...rows[0], provider: 'dropbox' }],
+      items: [{ ...rows[0], provider: 'not-a-real-provider' }],
       nextCursor: null,
     });
     expect(parsed.success).toBe(false);
@@ -303,6 +306,7 @@ describe('the provider enum covers every provider a row can hold', () => {
   });
 
   it('still rejects a provider the app does not support', () => {
-    expect(provider.safeParse('dropbox').success).toBe(false);
+    expect(provider.safeParse('not-a-real-provider').success).toBe(false);
+    expect(provider.safeParse('').success).toBe(false);
   });
 });

@@ -653,3 +653,81 @@ describe('ConnectorsService.revoke', () => {
     );
   });
 });
+
+describe('ConnectorsService.create (dropbox)', () => {
+  it('builds a Dropbox authorization URL with PKCE and a flow cookie', async () => {
+    const created = baseAccount({ provider: 'dropbox' });
+    const { service } = makeService({
+      connectorAccount: {
+        count: vi.fn(async () => 0),
+        create: vi.fn(async () => created),
+      },
+    });
+    const result = await service.create(
+      auth,
+      { provider: 'dropbox', mode: 'delegated', label: 'Dropbox' },
+      fakeRequest(),
+    );
+    const url = new URL(result.authorizationUrl ?? '');
+    expect(url.origin + url.pathname).toBe('https://www.dropbox.com/oauth2/authorize');
+    expect(url.searchParams.get('client_id')).toBe('dropbox-app-key');
+    expect(url.searchParams.get('code_challenge_method')).toBe('S256');
+    expect(url.searchParams.get('code_challenge')).toBeTruthy();
+    // Bound to this browser, like every other provider.
+    expect(result.flowCookie?.value).toBe(url.searchParams.get('state'));
+  });
+
+  it('forces re-authentication so a signed-in session cannot pick the account', async () => {
+    // Same rule as Microsoft and Google, different spelling. Reported from the
+    // field for Microsoft: the browser's current session was adopted silently,
+    // and the wrong custodian's data would have been collected.
+    const created = baseAccount({ provider: 'dropbox' });
+    const { service } = makeService({
+      connectorAccount: { count: vi.fn(async () => 0), create: vi.fn(async () => created) },
+    });
+    const result = await service.create(
+      auth,
+      { provider: 'dropbox', mode: 'delegated', label: 'Dropbox' },
+      fakeRequest(),
+    );
+    const url = new URL(result.authorizationUrl ?? '');
+    expect(url.searchParams.get('force_reauthentication')).toBe('true');
+    // offline, or there is no refresh token and the connector dies in hours.
+    expect(url.searchParams.get('token_access_type')).toBe('offline');
+  });
+
+  it('sends the redirect URI registered in the Dropbox app console', async () => {
+    // Dropbox compares this character for character. A mismatch reads as a
+    // Dropbox fault and is always configuration.
+    const created = baseAccount({ provider: 'dropbox' });
+    const { service } = makeService({
+      connectorAccount: { count: vi.fn(async () => 0), create: vi.fn(async () => created) },
+    });
+    const result = await service.create(
+      auth,
+      { provider: 'dropbox', mode: 'delegated', label: 'Dropbox' },
+      fakeRequest(),
+    );
+    const url = new URL(result.authorizationUrl ?? '');
+    expect(url.searchParams.get('redirect_uri')).toBe(
+      'https://api.ev.test/api/v1/connectors/callback/dropbox',
+    );
+  });
+
+  it('asks for read scopes only', async () => {
+    const created = baseAccount({ provider: 'dropbox' });
+    const { service } = makeService({
+      connectorAccount: { count: vi.fn(async () => 0), create: vi.fn(async () => created) },
+    });
+    const result = await service.create(
+      auth,
+      { provider: 'dropbox', mode: 'delegated', label: 'Dropbox' },
+      fakeRequest(),
+    );
+    const scopes = (new URL(result.authorizationUrl ?? '').searchParams.get('scope') ?? '').split(
+      ' ',
+    );
+    expect(scopes).toContain('files.content.read');
+    expect(scopes.some((s) => s.includes('write') || s.includes('delete'))).toBe(false);
+  });
+});

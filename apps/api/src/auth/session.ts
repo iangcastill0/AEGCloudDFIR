@@ -47,7 +47,8 @@ export type AuthFlowPayload = z.infer<typeof authFlowSchema>;
 /**
  * Provider-OAuth connect flow, sealed into the `state` parameter AND a
  * short-TTL cookie: the callback requires both to match, binding the flow to
- * the browser that started it. Carries the PKCE verifier for Microsoft.
+ * the browser that started it. Carries the PKCE verifier for Microsoft and
+ * Dropbox.
  */
 const connectorFlowSchema = z.object({
   v: z.literal(1),
@@ -55,7 +56,8 @@ const connectorFlowSchema = z.object({
   connectorId: z.string().uuid(),
   tenantId: z.string().uuid(),
   userId: z.string().uuid(),
-  provider: z.enum(['microsoft', 'google']),
+  provider: z.enum(['microsoft', 'google', 'dropbox']),
+  /** PKCE verifier. Microsoft and Dropbox use it; Google's flow does not. */
   verifier: z.string().default(''),
   iat: z.number().int(),
   exp: z.number().int(),

@@ -32,7 +32,7 @@ export type Completeness = z.infer<typeof completeness>;
  * the response away: `path: ["connector","provider"]`. The operator clicked
  * again and got a second connector. Adding a provider means adding it here too.
  */
-export const provider = z.enum(['microsoft', 'google', 'imap', 'upload']);
+export const provider = z.enum(['microsoft', 'google', 'imap', 'dropbox', 'upload']);
 export const connectionMode = z.enum(['delegated', 'organization']);
 export const collectionSource = z.enum(['email', 'drive', 'audit']);
 

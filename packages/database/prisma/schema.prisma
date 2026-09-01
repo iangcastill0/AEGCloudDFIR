@@ -169,6 +169,10 @@ enum Provider {
   /// in with a Yahoo address returns an empty Outlook mailbox, not that
   /// person's mail.
   imap
+  /// Dropbox file collection. Its own provider rather than a variant of
+  /// `google`/`microsoft` drive: identity is a Dropbox file id, its content
+  /// hash is not a plain SHA-256, and it has no notion of a creation time.
+  dropbox
   /// Synthetic provider for user-uploaded container files (PST/OST): no
   /// provider API is involved; originals arrive via the uploads endpoint.
   upload

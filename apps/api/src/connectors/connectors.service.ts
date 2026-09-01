@@ -27,6 +27,7 @@ import {
   buildMicrosoftAdminConsentUrl,
   buildMicrosoftAuthorizationUrl,
   ConnectorError,
+  exchangeDropboxAuthorizationCode,
   exchangeGoogleAuthorizationCode,
   exchangeMicrosoftAuthorizationCode,
   GmailConnector,
@@ -63,8 +64,10 @@ import {
   type ConnectorFlowPayload,
 } from '../auth/session.js';
 import {
+  DROPBOX_DELEGATED_SCOPES,
   ImapEmailConnector,
   ProviderAuthError,
+  buildDropboxAuthorizationUrl,
   type ImapConnectorOptions,
 } from '@aeg-clouddfir/connectors';
 import {
@@ -82,6 +85,8 @@ export const PROVIDER_REVOCATION_NOTES: Record<Provider, string> = {
     'Stored tokens were deleted. To revoke the grant on the provider side, remove the app under https://myaccount.microsoft.com > App permissions (or via Entra admin center for organization connections).',
   google:
     'Stored tokens were deleted. To revoke the grant on the provider side, remove the app under https://myaccount.google.com/permissions (or delete the service-account key for organization connections).',
+  dropbox:
+    'Stored tokens were deleted. To revoke the grant on the provider side, the custodian removes the app under https://www.dropbox.com/account/connected_apps (a team admin does it from the admin console for organization connections). Until they do, the refresh token would still work if it were ever recovered from a backup.',
   imap: 'The stored app password was deleted. Revoke it at the mail provider too — for Yahoo, iCloud or Gmail that means deleting the app password in the account security settings, which is the only thing that stops it being used again.',
   upload:
     'There is no provider-side grant for file uploads; nothing further to revoke. Already-preserved uploaded files remain in evidence storage.',
@@ -129,6 +134,16 @@ const googleProfileSchema = z.object({
   id: z.string().optional(),
   email: z.string().optional(),
   name: z.string().optional(),
+});
+
+/**
+ * Dropbox's /users/get_current_account. Its display name is nested under
+ * `name`, unlike the flat shape the other two providers return.
+ */
+const dropboxProfileSchema = z.object({
+  account_id: z.string().optional(),
+  email: z.string().optional(),
+  name: z.object({ display_name: z.string().optional() }).optional(),
 });
 
 /** Prisma Bytes columns want plain Uint8Array views over ArrayBuffer. */
@@ -424,10 +439,14 @@ export class ConnectorsService {
   }
 
   private redirectUriFor(providerName: Provider): string {
-    const path =
-      providerName === Provider.microsoft
-        ? this.config.CDFIR_MS_REDIRECT_PATH
-        : this.config.CDFIR_GOOGLE_REDIRECT_PATH;
+    // Must match the provider console character for character. A mismatch reads
+    // as a provider fault ("redirect_uri did not match") and is always config.
+    const paths: Partial<Record<Provider, string>> = {
+      [Provider.microsoft]: this.config.CDFIR_MS_REDIRECT_PATH,
+      [Provider.google]: this.config.CDFIR_GOOGLE_REDIRECT_PATH,
+      [Provider.dropbox]: this.config.CDFIR_DROPBOX_REDIRECT_PATH,
+    };
+    const path = paths[providerName] ?? this.config.CDFIR_GOOGLE_REDIRECT_PATH;
     return `${this.config.CDFIR_API_PUBLIC_URL}${path}`;
   }
 
@@ -503,7 +522,9 @@ export class ConnectorsService {
     }
 
     const iat = Math.floor(Date.now() / 1000);
-    const verifier = input.provider === 'microsoft' ? randomBytes(32).toString('base64url') : '';
+    // Microsoft and Dropbox both use PKCE; Google's delegated flow does not.
+    const usesPkce = input.provider === 'microsoft' || input.provider === 'dropbox';
+    const verifier = usesPkce ? randomBytes(32).toString('base64url') : '';
     const flow: ConnectorFlowPayload = {
       v: 1,
       kind: 'connectorflow',
@@ -525,6 +546,15 @@ export class ConnectorsService {
         clientId: this.config.CDFIR_MS_CLIENT_ID,
         redirectUri: this.redirectUriFor(Provider.microsoft),
         scopes: MICROSOFT_DELEGATED_SCOPES,
+        state,
+        codeChallenge,
+      });
+    } else if (input.provider === 'dropbox') {
+      const codeChallenge = createHash('sha256').update(verifier, 'utf8').digest('base64url');
+      authorizationUrl = buildDropboxAuthorizationUrl({
+        clientId: this.config.CDFIR_DROPBOX_CLIENT_ID,
+        redirectUri: this.redirectUriFor(Provider.dropbox),
+        scopes: DROPBOX_DELEGATED_SCOPES,
         state,
         codeChallenge,
       });
@@ -558,6 +588,29 @@ export class ConnectorsService {
   ): Promise<ProfileInfo | null> {
     const fetchFn: FetchLike = this.fetchImpl ?? ((url, init) => fetch(url, init));
     try {
+      if (providerName === Provider.dropbox) {
+        // Dropbox's account endpoint is POST with no body, not GET. A GET
+        // returns 400 and the connector would land as "connected" with an empty
+        // identity — the wrong-custodian failure this lookup exists to prevent.
+        const response = await fetchFn(
+          `${this.config.CDFIR_DROPBOX_API_BASE_URL}/users/get_current_account`,
+          {
+            method: 'POST',
+            headers: { authorization: `Bearer ${accessToken}` },
+            signal: AbortSignal.timeout(15_000),
+          },
+        );
+        if (!response.ok) return null;
+        const parsed = dropboxProfileSchema.safeParse(await response.json());
+        if (!parsed.success) return null;
+        const email = parsed.data.email ?? '';
+        return {
+          externalId: parsed.data.account_id ?? 'me',
+          email,
+          displayName: parsed.data.name?.display_name ?? email,
+        };
+      }
+
       const url =
         providerName === Provider.microsoft
           ? `${this.config.CDFIR_MS_GRAPH_BASE_URL}/me`
@@ -650,25 +703,35 @@ export class ConnectorsService {
     let tokens: ExchangedTokens;
     try {
       tokens =
-        providerName === Provider.microsoft
-          ? await exchangeMicrosoftAuthorizationCode({
-              msLoginBaseUrl: this.config.CDFIR_MS_LOGIN_BASE_URL,
-              clientId: this.config.CDFIR_MS_CLIENT_ID,
-              clientSecret: this.config.CDFIR_MS_CLIENT_SECRET,
+        providerName === Provider.dropbox
+          ? await exchangeDropboxAuthorizationCode({
+              tokenEndpoint: this.config.CDFIR_DROPBOX_OAUTH_TOKEN_URL,
+              clientId: this.config.CDFIR_DROPBOX_CLIENT_ID,
+              clientSecret: this.config.CDFIR_DROPBOX_CLIENT_SECRET,
               code,
-              redirectUri: this.redirectUriFor(Provider.microsoft),
+              redirectUri: this.redirectUriFor(Provider.dropbox),
               codeVerifier: flow.verifier,
-              scopes: MICROSOFT_DELEGATED_SCOPES,
               fetchImpl: this.fetchImpl,
             })
-          : await exchangeGoogleAuthorizationCode({
-              googleOauthTokenUrl: this.config.CDFIR_GOOGLE_OAUTH_TOKEN_URL,
-              clientId: this.config.CDFIR_GOOGLE_CLIENT_ID,
-              clientSecret: this.config.CDFIR_GOOGLE_CLIENT_SECRET,
-              code,
-              redirectUri: this.redirectUriFor(Provider.google),
-              fetchImpl: this.fetchImpl,
-            });
+          : providerName === Provider.microsoft
+            ? await exchangeMicrosoftAuthorizationCode({
+                msLoginBaseUrl: this.config.CDFIR_MS_LOGIN_BASE_URL,
+                clientId: this.config.CDFIR_MS_CLIENT_ID,
+                clientSecret: this.config.CDFIR_MS_CLIENT_SECRET,
+                code,
+                redirectUri: this.redirectUriFor(Provider.microsoft),
+                codeVerifier: flow.verifier,
+                scopes: MICROSOFT_DELEGATED_SCOPES,
+                fetchImpl: this.fetchImpl,
+              })
+            : await exchangeGoogleAuthorizationCode({
+                googleOauthTokenUrl: this.config.CDFIR_GOOGLE_OAUTH_TOKEN_URL,
+                clientId: this.config.CDFIR_GOOGLE_CLIENT_ID,
+                clientSecret: this.config.CDFIR_GOOGLE_CLIENT_SECRET,
+                code,
+                redirectUri: this.redirectUriFor(Provider.google),
+                fetchImpl: this.fetchImpl,
+              });
     } catch {
       await this.markError(flow, 'authorization code exchange failed');
       return { redirectUrl: this.webRedirect('connected=0&reason=exchange_failed') };
@@ -687,7 +750,9 @@ export class ConnectorsService {
         : [
             ...(providerName === Provider.microsoft
               ? MICROSOFT_DELEGATED_SCOPES
-              : GOOGLE_DELEGATED_SCOPES),
+              : providerName === Provider.dropbox
+                ? DROPBOX_DELEGATED_SCOPES
+                : GOOGLE_DELEGATED_SCOPES),
           ];
 
     await withTenantContext(this.prisma, flow.tenantId, async (tx) => {

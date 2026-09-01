@@ -178,4 +178,25 @@ export class ConnectorsCallbackController {
     reply.clearCookie(CONNECTOR_FLOW_COOKIE, { path: '/' });
     reply.redirect(302, redirectUrl);
   }
+
+  /**
+   * Must be reachable at exactly the path registered in the Dropbox app
+   * console. Dropbox compares the redirect URI character for character, and a
+   * mismatch surfaces as "redirect_uri did not match" — which reads as a
+   * Dropbox fault and is always configuration.
+   */
+  @Get('dropbox')
+  async dropbox(
+    @Query() query: Record<string, unknown>,
+    @Req() request: FastifyRequest,
+    @Res() reply: FastifyReply,
+  ): Promise<void> {
+    const { redirectUrl } = await this.connectors.completeCallback(
+      Provider.dropbox,
+      query,
+      request.cookies ?? {},
+    );
+    reply.clearCookie(CONNECTOR_FLOW_COOKIE, { path: '/' });
+    reply.redirect(302, redirectUrl);
+  }
 }

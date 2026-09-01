@@ -7,6 +7,7 @@ import {
   type KeyEncryptionProvider,
 } from '@aeg-clouddfir/database';
 import {
+  DropboxDelegatedTokenSource,
   GOOGLE_DWD_SCOPES,
   GoogleDelegatedTokenSource,
   GoogleServiceAccountTokenSource,
@@ -40,6 +41,9 @@ export type ConnectorOauthConfig = Pick<
   | 'CDFIR_GOOGLE_OAUTH_TOKEN_URL'
   | 'CDFIR_GOOGLE_CLIENT_ID'
   | 'CDFIR_GOOGLE_CLIENT_SECRET'
+  | 'CDFIR_DROPBOX_OAUTH_TOKEN_URL'
+  | 'CDFIR_DROPBOX_CLIENT_ID'
+  | 'CDFIR_DROPBOX_CLIENT_SECRET'
 >;
 
 export interface ConnectorSecretRecord extends EncryptedSecret {
@@ -50,7 +54,7 @@ export interface ConnectorSecretRecord extends EncryptedSecret {
 export interface ConnectorAccountRecord {
   id: string;
   tenantId: string;
-  provider: 'microsoft' | 'google';
+  provider: 'microsoft' | 'google' | 'dropbox';
   mode: 'delegated' | 'organization';
   externalIdentity: string;
   externalTenantId: string;
@@ -133,6 +137,19 @@ export async function buildConnectorTokenProvider(
         fetchImpl: input.fetchImpl,
       });
     }
+    if (account.provider === 'dropbox') {
+      // Dropbox does not rotate the refresh token, so there is no
+      // onTokensRotated callback to persist: the stored secret stays valid until
+      // the custodian revokes the app.
+      return new DropboxDelegatedTokenSource({
+        tokenEndpoint: config.CDFIR_DROPBOX_OAUTH_TOKEN_URL,
+        clientId: config.CDFIR_DROPBOX_CLIENT_ID,
+        clientSecret: config.CDFIR_DROPBOX_CLIENT_SECRET,
+        refreshToken,
+        fetchImpl: input.fetchImpl,
+      });
+    }
+
     return new GoogleDelegatedTokenSource({
       googleOauthTokenUrl: config.CDFIR_GOOGLE_OAUTH_TOKEN_URL,
       clientId: config.CDFIR_GOOGLE_CLIENT_ID,
@@ -143,6 +160,28 @@ export async function buildConnectorTokenProvider(
   }
 
   // organization mode
+  if (account.provider === 'dropbox') {
+    // A Dropbox Business team uses an ordinary refresh token; what makes it
+    // "organization" is the Dropbox-API-Select-User header the connector sets
+    // per custodian, NOT a different kind of credential. Keeping member choice
+    // out of the token is deliberate: one wrong header collects one wrong
+    // person, rather than minting a credential scoped to the wrong custodian.
+    const row = findSecret(secrets, SecretKind.oauth_refresh_token);
+    if (!row) {
+      throw new ConnectorCredentialsError('no stored refresh token for this dropbox team');
+    }
+    const refreshToken = (
+      await decryptSecret(kek, account.tenantId, connectorSecretScope(account.id), row)
+    ).toString('utf8');
+    return new DropboxDelegatedTokenSource({
+      tokenEndpoint: config.CDFIR_DROPBOX_OAUTH_TOKEN_URL,
+      clientId: config.CDFIR_DROPBOX_CLIENT_ID,
+      clientSecret: config.CDFIR_DROPBOX_CLIENT_SECRET,
+      refreshToken,
+      fetchImpl: input.fetchImpl,
+    });
+  }
+
   if (account.provider === 'microsoft') {
     if (account.externalTenantId.length === 0) {
       throw new ConnectorCredentialsError('organization connector has no external tenant id');

@@ -1,0 +1,18 @@
+-- AlterEnum
+-- 'dropbox' is its own provider rather than a flavour of the existing drive
+-- connectors, because three of its facts differ in ways that reach the
+-- evidence:
+--   * identity is a Dropbox file id, not a path — paths change on any rename or
+--     move, and keying on them would re-collect a moved file as new evidence
+--   * `content_hash` is NOT a SHA-256 of the file: it is SHA-256 over the
+--     concatenated SHA-256 of each 4 MiB block, so it is stored under its own
+--     name and never compared with ours
+--   * Dropbox records no creation time at all, only when its servers last saw
+--     the file change
+--
+-- No new SecretKind: Dropbox uses the ordinary OAuth refresh token, unlike IMAP
+-- which needed a password kind of its own.
+--
+-- ALTER TYPE ... ADD VALUE cannot run in a transaction alongside statements that
+-- use the new value, so this migration contains ONLY the enum addition.
+ALTER TYPE "Provider" ADD VALUE IF NOT EXISTS 'dropbox';

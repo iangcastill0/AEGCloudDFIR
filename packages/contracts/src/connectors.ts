@@ -146,3 +146,25 @@ export const createImapConnectorRequest = z.object({
   appPassword: z.string().min(1).max(512),
 });
 export type CreateImapConnectorRequest = z.infer<typeof createImapConnectorRequest>;
+
+/**
+ * Dropbox organization setup, POSTed to /connectors/:id/org.
+ *
+ * A Dropbox Business team is reached with a team access token plus a
+ * `Dropbox-API-Select-User` header naming the member to collect as. The team id
+ * is recorded so a reviewer can tell which team a collection came from, and so
+ * a token cannot be silently pointed at a different one later.
+ */
+export const orgDropboxSetupRequest = z.object({
+  /** Team id from Dropbox, e.g. 'dbtid:AAB...'. */
+  externalTeamId: z.string().min(1).max(200),
+  /**
+   * Members whose files may be collected, by Dropbox member id ('dbmid:...').
+   *
+   * An explicit list rather than "everyone on the team": a team token can reach
+   * every member, and an evidence tool should only ever reach the custodians
+   * someone deliberately named.
+   */
+  memberIds: z.array(z.string().min(1).max(200)).min(1).max(1000),
+});
+export type OrgDropboxSetupRequest = z.infer<typeof orgDropboxSetupRequest>;
