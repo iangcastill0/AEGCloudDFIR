@@ -14,6 +14,7 @@ import {
 } from '@aeg-clouddfir/ui';
 import type { ProductionParameters } from '@aeg-clouddfir/contracts';
 import {
+  isAcknowledgeable,
   productionParameters,
   stampPosition,
   validateProductionResponse,
@@ -785,17 +786,24 @@ function ValidateStep({
     warning: flags.filter((f) => f.severity === 'warning'),
     info: flags.filter((f) => f.severity === 'info'),
   };
-  const needsAck = flags.filter(
-    (f) => (f.severity === 'warning' || f.severity === 'security_critical') && f.overridable,
-  );
+  // Every overridable flag the API will demand an acknowledgement for. Blocking
+  // ones were missing here, so Submit could never be enabled for them.
+  const needsAck = flags.filter(isAcknowledgeable);
+  // These cannot be acknowledged at all — the selection has to change.
+  const hardBlocking = bySeverity.blocking.filter((f) => !isAcknowledgeable(f));
   const hasSecurityCritical = bySeverity.security_critical.length > 0;
   const securityBlocked = hasSecurityCritical && !canElevate;
   const allAcked = needsAck.every((f) => acks.has(f.code));
   const phraseOk = !hasSecurityCritical || secondConfirmation === SECURITY_PHRASE;
   const canSubmit =
     validation !== null &&
+    // The server's own verdict, kept as well as the checks below: if it says
+    // no, the UI must not try regardless of what the local flags look like.
     validation.canSubmit &&
-    bySeverity.blocking.length === 0 &&
+    // A blocking flag no longer disables submit by itself: the API requires an
+    // acknowledgement for each one, and allAcked is what proves it was given.
+    // Only a flag that cannot be overridden at all is a hard stop.
+    hardBlocking.length === 0 &&
     !securityBlocked &&
     allAcked &&
     phraseOk;
@@ -833,8 +841,10 @@ function ValidateStep({
                     <li key={f.code}>
                       <strong>{f.code.replaceAll('_', ' ')}</strong>: {f.message} (
                       {f.evidenceItemIds.length} item(s))
-                      {(severity === 'warning' || severity === 'security_critical') &&
-                      f.overridable ? (
+                      {/* Blocking flags need an acknowledgement too — the API
+                          refuses a submit without one. Withholding the checkbox
+                          made every overridable blocking flag a dead end. */}
+                      {isAcknowledgeable(f) ? (
                         <Checkbox
                           label={`Acknowledge and override "${f.code.replaceAll('_', ' ')}"`}
                           checked={acks.has(f.code)}
@@ -854,10 +864,16 @@ function ValidateStep({
             );
           })}
 
-          {bySeverity.blocking.length > 0 ? (
+          {bySeverity.blocking.some((f) => !isAcknowledgeable(f)) ? (
             <Notice variant="warning">
-              Blocking flags cannot be overridden. Adjust the selection or configuration, then
-              re-validate.
+              Some blocking flags cannot be overridden. Remove the affected items from the
+              selection, or change the configuration, then re-validate.
+            </Notice>
+          ) : null}
+          {bySeverity.blocking.length > 0 && bySeverity.blocking.every(isAcknowledgeable) ? (
+            <Notice variant="warning">
+              Blocking flags must each be acknowledged before this production can be submitted.
+              Acknowledging is recorded in the audit log against your name.
             </Notice>
           ) : null}
           {securityBlocked ? (

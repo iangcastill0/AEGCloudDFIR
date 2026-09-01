@@ -208,3 +208,31 @@ export const productionDetail = z.object({
   runs: z.array(productionRunStatusResponse).default([]),
 });
 export type ProductionDetail = z.infer<typeof productionDetail>;
+
+/**
+ * Can this validation flag be cleared by acknowledging it, rather than by
+ * changing the selection?
+ *
+ * Two different permissions hide behind one question, which is why this is a
+ * function and not a single boolean:
+ *
+ *  - `overridable` — any reviewer may accept it (family_split, unprocessed_item)
+ *  - `requiresElevatedOverride` — only an elevated role, with a second
+ *    confirmation, may accept it (redacted_native_leak)
+ *
+ * A flag with neither cannot be accepted by anyone: malware_item, a bates
+ * collision, unresolved preview redactions. Those need the selection or the
+ * configuration to change.
+ *
+ * It lives in contracts because it had already drifted into three answers: the
+ * submit endpoint demanded an acknowledgement for every blocking flag and
+ * checked neither field, the validator's canSubmit used both, and the web page
+ * used `overridable` alone — which is what made an overridable blocking flag a
+ * dead end in the UI while the API was waiting for exactly that acknowledgement.
+ */
+export function isAcknowledgeable(flag: {
+  overridable: boolean;
+  requiresElevatedOverride: boolean;
+}): boolean {
+  return flag.overridable || flag.requiresElevatedOverride;
+}

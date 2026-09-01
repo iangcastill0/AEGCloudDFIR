@@ -21,9 +21,10 @@ import {
 } from '@aeg-clouddfir/database';
 import {
   createProductionRequest,
+  isAcknowledgeable,
   productionParameters,
-  submitProductionRequest,
   type ProductionParameters,
+  submitProductionRequest,
 } from '@aeg-clouddfir/contracts';
 import { ProductionArchiveWriter } from '@aeg-clouddfir/production';
 import type { FastifyRequest } from 'fastify';
@@ -1105,6 +1106,24 @@ export class ProductionsService {
         missingAcknowledgements: missing.map((flag) => flag.code),
       });
     }
+    // A flag nobody may accept must not become acceptable by posting its code.
+    // Nothing enforced this before: submit demanded an acknowledgement for every
+    // blocking flag and never asked whether the flag was allowed to have one, so
+    // the rule lived only in the web page withholding a checkbox. A client
+    // calling the API directly could have produced items flagged as malware.
+    //
+    // The snapshot carries both permissions, so this reads them rather than the
+    // definitions table: the flag was classified when the draft was validated.
+    const notOverridable = needingAck.filter(
+      (flag) => !isAcknowledgeable(flag) && acksByCode.has(flag.code),
+    );
+    if (notOverridable.length > 0) {
+      throw new BadRequestException({
+        message: 'these validation flags cannot be overridden; change the selection instead',
+        codes: notOverridable.map((flag) => flag.code),
+      });
+    }
+
     for (const flag of needingAck) {
       if (flag.severity !== 'security_critical') continue;
       const ack = acksByCode.get(flag.code);
