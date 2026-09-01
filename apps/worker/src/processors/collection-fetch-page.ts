@@ -9,9 +9,10 @@ import { appendAuditEvent, withTenantContext, type Prisma } from '@aeg-clouddfir
 import { sanitizeError, type WorkerContext } from '../context.js';
 import {
   buildConnectorsForAccount,
-  makeRateLimitObserver,
   type ConnectorBundle,
+  makeRateLimitObserver,
   requireDrive,
+  requireEmail,
 } from '../connector-factory.js';
 import { incrementProgress, recordException } from '../progress.js';
 import { QUEUES, dedupKeys } from '../queues.js';
@@ -28,7 +29,7 @@ type CheckpointKind = 'page' | 'delta' | 'history' | 'changes' | 'none';
 
 /** Checkpoint kind once a scope's enumeration is exhausted. */
 export function exhaustedCursorKind(
-  provider: 'microsoft' | 'google' | 'imap',
+  provider: 'microsoft' | 'google' | 'imap' | 'dropbox',
   source: 'email' | 'drive',
   deltaCursor: string | undefined,
 ): CheckpointKind {
@@ -36,6 +37,11 @@ export function exhaustedCursorKind(
   // which is a page cursor. Calling it a delta would imply the server can tell
   // us what changed, and it cannot.
   if (provider === 'imap') return 'page';
+  // Dropbox's list_folder cursor really is a delta: once the walk is finished
+  // the SAME token returns what changed since. One cursor, both jobs.
+  if (provider === 'dropbox') {
+    return deltaCursor === undefined || deltaCursor === '' ? 'none' : 'delta';
+  }
   if (deltaCursor === undefined || deltaCursor === '') return 'none';
   if (source === 'email') return provider === 'google' ? 'history' : 'delta';
   return provider === 'google' ? 'changes' : 'delta';
@@ -65,10 +71,10 @@ async function listOnePage(
   if (payload.source === 'email') {
     let page: EmailListPage;
     if (checkpoint.cursorKind === 'delta' || checkpoint.cursorKind === 'history') {
-      page = await bundle.email.getMailDelta(bundle.custodianRef, payload.scopeKey, cursor);
+      page = await requireEmail(bundle).getMailDelta(bundle.custodianRef, payload.scopeKey, cursor);
     } else {
       const instants = dateRangeToInstants(scope);
-      page = await bundle.email.listMessages(bundle.custodianRef, payload.scopeKey, {
+      page = await requireEmail(bundle).listMessages(bundle.custodianRef, payload.scopeKey, {
         since: instants.since ?? undefined,
         until: instants.untilExclusive ?? undefined,
         includeDeleted: (scope.email?.includeSpam ?? false) || (scope.email?.includeTrash ?? false),

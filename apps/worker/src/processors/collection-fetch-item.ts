@@ -12,6 +12,7 @@ import {
   buildConnectorsForAccount,
   makeRateLimitObserver,
   requireDrive,
+  requireEmail,
 } from '../connector-factory.js';
 import { incrementProgress, recordException } from '../progress.js';
 import { QUEUES, dedupKeys } from '../queues.js';
@@ -115,7 +116,7 @@ export async function processCollectionFetchItem(
     let fetched: FetchedContent;
     const providerImmutableId = item.providerImmutableId;
     if (source === 'email') {
-      const message = await bundle.email.fetchMessage(bundle.custodianRef, providerItemId);
+      const message = await requireEmail(bundle).fetchMessage(bundle.custodianRef, providerItemId);
       fetched = {
         readable: Readable.from(Buffer.from(message.rfc822)),
         emailMetadata: message.metadata,

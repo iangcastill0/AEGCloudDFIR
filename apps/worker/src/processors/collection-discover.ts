@@ -5,9 +5,10 @@ import { sanitizeError, type WorkerContext } from '../context.js';
 import {
   buildAuditConnectors,
   buildConnectorsForAccount,
-  makeRateLimitObserver,
   type ConnectorBundle,
+  makeRateLimitObserver,
   requireDrive,
+  requireEmail,
 } from '../connector-factory.js';
 import { AuditRequiresOrganizationModeError, composeAuditScopeKey } from '../audit.js';
 import { incrementProgress, recordException } from '../progress.js';
@@ -53,7 +54,7 @@ async function discoverEmailScopeKeys(
     }
     return [GMAIL_ACCOUNT_FOLDER];
   }
-  const discovery = await bundle.email.listMailFolders(bundle.custodianRef);
+  const discovery = await requireEmail(bundle).listMailFolders(bundle.custodianRef);
   for (const exception of discovery.exceptions) {
     if (exception.kind === 'permission_denied' || exception.kind === 'unavailable_item') {
       await onPermissionException(exception.kind, exception.message);

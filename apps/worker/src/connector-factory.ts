@@ -1,9 +1,14 @@
 import {
-  GmailConnector,
-  ImapConnectionPool,
-  ImapEmailConnector,
   buildImapClient,
-  type ImapConnectorOptions,
+  type DriveConnector,
+  DropboxDelegatedTokenSource,
+  DropboxDriveConnector,
+  type EmailConnector,
+  GmailConnector,
+  GOOGLE_DWD_SCOPES,
+  GOOGLE_REPORTS_APPLICATIONS,
+  GOOGLE_REPORTS_AUDIT_SCOPE,
+  GOOGLE_VAULT_READONLY_SCOPE,
   GoogleDelegatedTokenSource,
   GoogleDriveConnector,
   GoogleReportsConnector,
@@ -12,10 +17,9 @@ import {
   GraphAuditConnector,
   GraphDriveConnector,
   GraphEmailConnector,
-  GOOGLE_DWD_SCOPES,
-  GOOGLE_REPORTS_APPLICATIONS,
-  GOOGLE_REPORTS_AUDIT_SCOPE,
-  GOOGLE_VAULT_READONLY_SCOPE,
+  ImapConnectionPool,
+  type ImapConnectorOptions,
+  ImapEmailConnector,
   MICROSOFT_DELEGATED_SCOPES,
   MICROSOFT_GRAPH_AUDIT_APP_SCOPE,
   MICROSOFT_MANAGEMENT_ACTIVITY_APP_SCOPE,
@@ -23,8 +27,6 @@ import {
   MicrosoftDelegatedTokenSource,
   O365_MANAGEMENT_CONTENT_TYPES,
   O365ManagementActivityConnector,
-  type DriveConnector,
-  type EmailConnector,
   type RateLimitObserver,
   type TokenProvider,
 } from '@aeg-clouddfir/connectors';
@@ -49,9 +51,15 @@ export function connectorSecretScope(connectorAccountId: string): string {
 }
 
 export interface ConnectorBundle {
-  provider: 'microsoft' | 'google' | 'imap';
+  provider: 'microsoft' | 'google' | 'imap' | 'dropbox';
   mode: 'delegated' | 'organization';
-  email: EmailConnector;
+  /**
+   * Null for providers with no mailbox. Dropbox is files only, and the same
+   * reasoning applies as for `drive` below: a stub that quietly returned no
+   * messages would let a collection report that it looked at mail it can never
+   * reach.
+   */
+  email: EmailConnector | null;
   /**
    * Null for providers with no file storage. IMAP is mail only, and handing back
    * a stub that throws would let a collection claim it looked at a drive it
@@ -112,6 +120,22 @@ export function requireDrive(bundle: ConnectorBundle): DriveConnector {
     );
   }
   return bundle.drive;
+}
+
+/**
+ * The mail client, or a clear error naming the provider that has none.
+ *
+ * The mirror of requireDrive, and for the same reason: a collection that
+ * selected mail on a files-only connector must fail loudly rather than report a
+ * complete collection of a source that was never looked at.
+ */
+export function requireEmail(bundle: ConnectorBundle): EmailConnector {
+  if (bundle.email === null) {
+    throw new Error(
+      `${bundle.provider} connectors collect files only; this collection selected mail, which they cannot reach`,
+    );
+  }
+  return bundle.email;
 }
 
 export interface BuildConnectorsArgs {
@@ -295,6 +319,50 @@ export async function buildConnectorsForAccount(
       drive: null,
       // IMAP identifies the mailbox by its login name.
       custodianRef: settings.username,
+    };
+  }
+
+  if (account.provider === 'dropbox') {
+    const row = requireSecret(secrets, 'oauth_refresh_token', 'OAuth refresh token');
+    const refreshToken = (await decryptSecretRow(ctx, tenantId, connectorAccountId, row)).toString(
+      'utf8',
+    );
+    // Dropbox does not rotate refresh tokens, so there is nothing to persist
+    // back: the stored secret stays valid until the custodian revokes the app.
+    const dropboxToken = new DropboxDelegatedTokenSource({
+      tokenEndpoint: ctx.config.CDFIR_DROPBOX_OAUTH_TOKEN_URL,
+      clientId: ctx.config.CDFIR_DROPBOX_CLIENT_ID,
+      clientSecret: ctx.config.CDFIR_DROPBOX_CLIENT_SECRET,
+      refreshToken,
+    });
+
+    // Organization mode addresses one team member per collection via a header.
+    // Refusing to guess is deliberate: a missing custodian would otherwise
+    // collect whichever account the team token defaults to.
+    let selectUserId: string | undefined;
+    if (account.mode === 'organization') {
+      if (args.custodian === undefined) {
+        throw new Error('dropbox organization mode requires a custodian to address');
+      }
+      selectUserId = args.custodian.externalId;
+    }
+
+    return {
+      provider: 'dropbox',
+      mode: account.mode,
+      // Dropbox has no mailbox. See the note on ConnectorBundle.email.
+      email: null,
+      drive: new DropboxDriveConnector({
+        tokenProvider: dropboxToken,
+        rpcBase: ctx.config.CDFIR_DROPBOX_API_BASE_URL,
+        contentBase: ctx.config.CDFIR_DROPBOX_CONTENT_BASE_URL,
+        ...(selectUserId === undefined ? {} : { selectUserId }),
+        ...(args.onRateLimit === undefined ? {} : { onRateLimit: args.onRateLimit }),
+      }),
+      // Delegated collects as the signed-in account; organization addresses the
+      // member through the header above, so the ref itself is never used to
+      // choose an identity.
+      custodianRef: selectUserId ?? 'me',
     };
   }
 

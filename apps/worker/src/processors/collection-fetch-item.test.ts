@@ -13,6 +13,14 @@ import {
 import { processCollectionFetchItem } from './collection-fetch-item.js';
 
 vi.mock('../connector-factory.js', () => ({
+  // Mirror of requireDrive for the other direction: a files-only connector has
+  // no mailbox, and must throw rather than quietly collect nothing.
+  requireEmail: vi.fn((bundle: { email: unknown; provider: string }) => {
+    if (bundle.email === null) {
+      throw new Error(`${bundle.provider} connectors collect files only`);
+    }
+    return bundle.email;
+  }),
   buildConnectorsForAccount: vi.fn(),
   makeRateLimitObserver: vi.fn(() => () => undefined),
   // The real guard: it throws for a mail-only connector rather than returning a
