@@ -5,6 +5,7 @@ import { TRUTHFULNESS_NOTICES } from '@aeg-clouddfir/contracts';
 import { appendAuditEvent, withTenantContext, type Prisma } from '@aeg-clouddfir/database';
 import { Sha256Stream, canonicalJson, sanitizeFilename } from '@aeg-clouddfir/evidence';
 import { ProductionArchiveWriter, csvEscape } from '@aeg-clouddfir/production';
+import { AUDIT_CSV_COLUMNS, auditRowsFor } from './audit-csv.js';
 import {
   DEFAULT_FIELD_REGISTRY,
   buildSearchRequest,
@@ -86,6 +87,9 @@ export const EXPORT_CSV_COLUMNS: readonly string[] = [
   'malwareStatus',
   'isApiExportDerivative',
   'tags',
+  // Audit events. Only ever filled for audit_batch items, which expand to one
+  // row per event rather than one row per page.
+  ...AUDIT_CSV_COLUMNS,
 ];
 
 async function resolveSelectionIds(
@@ -178,6 +182,8 @@ type LoadedExportItem = Prisma.EvidenceItemGetPayload<{
     participants: true;
     tagAssignments: { include: { tag: { select: { name: true } } } };
     childRelationships: { select: { parentId: true; kind: true } };
+    // Only ever populated for audit_batch items; every other kind loads none.
+    auditRecords: true;
   };
 }>;
 
@@ -276,6 +282,9 @@ export async function processExportRun(
           participants: true,
           tagAssignments: { include: { tag: { select: { name: true } } } },
           childRelationships: { select: { parentId: true, kind: true } },
+          // Ordered so the CSV reads as a timeline rather than in whatever
+          // order the rows happen to come back.
+          auditRecords: { orderBy: [{ occurredAt: 'asc' }, { providerRecordId: 'asc' }] },
         },
         orderBy: { id: 'asc' },
       }),
@@ -366,8 +375,19 @@ async function runCsvExport(
   const lines: string[] = [];
   lines.push(columns.map((c) => csvEscape(c, { delimiter })).join(delimiter));
   for (const item of items) {
-    const row = csvRowFor(item);
-    lines.push(columns.map((c) => csvEscape(row[c] ?? '', { delimiter })).join(delimiter));
+    // An audit batch is a page of up to 1,000 events. One row for the page
+    // would answer none of the questions a reviewer asks of an audit log, so it
+    // expands; everything else stays one row per item.
+    const rows =
+      item.kind === 'audit_batch'
+        ? auditRowsFor(
+            { id: item.id, kind: item.kind, sha256: item.sha256, name: item.name },
+            item.auditRecords ?? [],
+          ).map((auditRow) => ({ ...csvRowFor(item), ...auditRow }))
+        : [csvRowFor(item)];
+    for (const row of rows) {
+      lines.push(columns.map((c) => csvEscape(row[c] ?? '', { delimiter })).join(delimiter));
+    }
   }
   const csv = Buffer.from(lines.join('\r\n') + '\r\n', 'utf8');
   const put = await ctx.store.putDerivative(
