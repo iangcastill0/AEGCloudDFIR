@@ -4,6 +4,23 @@ import { RelationshipKind } from '@aeg-clouddfir/database';
 const FAMILY_KINDS: RelationshipKind[] = [RelationshipKind.family, RelationshipKind.attachment];
 
 /**
+ * Ids per query.
+ *
+ * PostgreSQL's wire protocol carries the bind-parameter count in an int16, so
+ * one statement can take at most 65,535 of them. expandFamilies sends each id
+ * TWICE — once for parentId, once for childId — so the real ceiling here is
+ * half of that.
+ *
+ * Found the hard way on staging: a production with an inverted selection and
+ * includeFamilies passed 50,000 ids into a single query, which is 100,000
+ * parameters. It failed in 618ms with a bare HTTP 500 and nothing in the log.
+ *
+ * 5,000 matches the chunk size productions already uses for the same reason,
+ * and leaves an order of magnitude of headroom.
+ */
+export const FAMILY_QUERY_CHUNK = 5_000;
+
+/**
  * Expand evidence item ids to their families (parents AND children via
  * family/attachment relationships, both directions). Returns the input ids
  * plus every direct family member, de-duplicated.
@@ -14,18 +31,20 @@ export async function expandFamilies(
   ids: readonly string[],
 ): Promise<string[]> {
   if (ids.length === 0) return [];
-  const relationships = await tx.evidenceRelationship.findMany({
-    where: {
-      tenantId,
-      kind: { in: FAMILY_KINDS },
-      OR: [{ parentId: { in: [...ids] } }, { childId: { in: [...ids] } }],
-    },
-    select: { parentId: true, childId: true },
-  });
   const expanded = new Set<string>(ids);
-  for (const rel of relationships) {
-    expanded.add(rel.parentId);
-    expanded.add(rel.childId);
+  for (const batch of chunk(ids, FAMILY_QUERY_CHUNK)) {
+    const relationships = await tx.evidenceRelationship.findMany({
+      where: {
+        tenantId,
+        kind: { in: FAMILY_KINDS },
+        OR: [{ parentId: { in: batch } }, { childId: { in: batch } }],
+      },
+      select: { parentId: true, childId: true },
+    });
+    for (const rel of relationships) {
+      expanded.add(rel.parentId);
+      expanded.add(rel.childId);
+    }
   }
   return [...expanded];
 }
@@ -39,12 +58,14 @@ export async function expandDescendants(
   ids: readonly string[],
 ): Promise<string[]> {
   if (ids.length === 0) return [];
-  const relationships = await tx.evidenceRelationship.findMany({
-    where: { tenantId, kind: { in: FAMILY_KINDS }, parentId: { in: [...ids] } },
-    select: { childId: true },
-  });
   const expanded = new Set<string>(ids);
-  for (const rel of relationships) expanded.add(rel.childId);
+  for (const batch of chunk(ids, FAMILY_QUERY_CHUNK)) {
+    const relationships = await tx.evidenceRelationship.findMany({
+      where: { tenantId, kind: { in: FAMILY_KINDS }, parentId: { in: batch } },
+      select: { childId: true },
+    });
+    for (const rel of relationships) expanded.add(rel.childId);
+  }
   return [...expanded];
 }
 

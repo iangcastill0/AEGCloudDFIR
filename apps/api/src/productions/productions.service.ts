@@ -763,17 +763,23 @@ export class ProductionsService {
       // Previously-produced exclusion via the ProductionItem join.
       const exclusion = selection.excludePreviouslyProduced;
       if (exclusion.kind !== 'none' && ids.length > 0) {
-        const produced = await tx.productionItem.findMany({
-          where: {
-            tenantId,
-            evidenceItemId: { in: ids },
-            ...(exclusion.kind === 'selected'
-              ? { productionRun: { productionId: { in: exclusion.productionIds } } }
-              : {}),
-          },
-          select: { evidenceItemId: true },
-        });
-        const excluded = new Set(produced.map((p) => p.evidenceItemId));
+        // Chunked for the same reason expandFamilies is: an inverted selection
+        // reaches SELECTION_ID_CAP ids, and one `in` that size is a query
+        // PostgreSQL refuses on bind-parameter count alone.
+        const excluded = new Set<string>();
+        for (const idChunk of chunk(ids, QUERY_CHUNK)) {
+          const produced = await tx.productionItem.findMany({
+            where: {
+              tenantId,
+              evidenceItemId: { in: idChunk },
+              ...(exclusion.kind === 'selected'
+                ? { productionRun: { productionId: { in: exclusion.productionIds } } }
+                : {}),
+            },
+            select: { evidenceItemId: true },
+          });
+          for (const row of produced) excluded.add(row.evidenceItemId);
+        }
         ids = ids.filter((id) => !excluded.has(id));
       }
 
