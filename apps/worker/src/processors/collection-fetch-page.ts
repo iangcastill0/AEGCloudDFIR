@@ -11,6 +11,7 @@ import {
   buildConnectorsForAccount,
   type ConnectorBundle,
   makeRateLimitObserver,
+  requireChat,
   requireDrive,
   requireEmail,
 } from '../connector-factory.js';
@@ -30,7 +31,7 @@ type CheckpointKind = 'page' | 'delta' | 'history' | 'changes' | 'none';
 /** Checkpoint kind once a scope's enumeration is exhausted. */
 export function exhaustedCursorKind(
   provider: 'microsoft' | 'google' | 'imap' | 'dropbox' | 'slack',
-  source: 'email' | 'drive',
+  source: 'email' | 'drive' | 'chat',
   deltaCursor: string | undefined,
 ): CheckpointKind {
   // IMAP has no delta link at all: the only resume state is a UID position,
@@ -55,6 +56,18 @@ interface PageEntry {
   providerItemId: string;
   providerImmutableId: string;
   entry?: DriveEntryPayload;
+}
+
+/**
+ * An ISO instant as a Slack `ts`.
+ *
+ * Slack's oldest/latest are epoch seconds with a fractional part, not ISO. Send
+ * an ISO string and Slack ignores the bound silently — the collection then
+ * covers the whole channel history while the manifest says it was date-scoped,
+ * which is a false statement about what was collected.
+ */
+export function isoToSlackTs(iso: string): string {
+  return (new Date(iso).getTime() / 1000).toFixed(6);
 }
 
 interface ListedPage {
@@ -94,6 +107,34 @@ async function listOnePage(
         })),
       nextCursor: page.nextCursor,
       deltaCursor: page.deltaCursor,
+    };
+  }
+
+  if (payload.source === 'chat') {
+    // Slack returns the whole message in the listing, unlike mail where each
+    // message is fetched by id. So the message JSON travels with the item and
+    // fetch-item preserves it, exactly as a drive listing entry does — asking
+    // Slack for it again would double every request and risk a different answer
+    // if the message were edited in between.
+    const instants = dateRangeToInstants(scope);
+    const listed = await requireChat(bundle).fetchMessagePage(payload.scopeKey, {
+      ...(cursor === undefined ? {} : { cursor }),
+      ...(instants.since === null ? {} : { oldest: isoToSlackTs(instants.since) }),
+      ...(instants.untilExclusive === null
+        ? {}
+        : { latest: isoToSlackTs(instants.untilExclusive) }),
+    });
+    const summaries = requireChat(bundle).summarize(payload.scopeKey, listed.messages);
+    return {
+      entries: summaries.map((m, index) => ({
+        providerItemId: m.providerItemId,
+        providerImmutableId: '',
+        // Reused rather than adding a parallel field: the payload already
+        // carries an opaque provider element for drive, and this is the same
+        // idea — the bytes we were given, passed to the item that preserves them.
+        entry: listed.messages[index] as unknown as DriveEntryPayload,
+      })),
+      ...(listed.nextCursor === undefined ? {} : { nextCursor: listed.nextCursor }),
     };
   }
 

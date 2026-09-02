@@ -23,6 +23,27 @@ export const MAX_ITEM_ATTEMPTS = 5;
 
 const TERMINAL_STATES = new Set(['preserved', 'processed', 'indexed', 'skipped']);
 
+/**
+ * JSON with keys sorted at every level.
+ *
+ * The stored bytes are the evidence and their SHA-256 is the chain of custody,
+ * so the same message collected twice has to produce the same hash. JSON.parse
+ * does not guarantee key order across runs or versions, and an unstable hash
+ * would make a re-collection look like tampering.
+ */
+export function canonicalJson(value: unknown): string {
+  const sort = (node: unknown): unknown => {
+    if (Array.isArray(node)) return node.map(sort);
+    if (typeof node !== 'object' || node === null) return node;
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(node as Record<string, unknown>).sort()) {
+      out[key] = sort((node as Record<string, unknown>)[key]);
+    }
+    return out;
+  };
+  return JSON.stringify(sort(value));
+}
+
 function toReadable(stream: ReadableStream<Uint8Array> | Uint8Array): Readable {
   if (stream instanceof Uint8Array) return Readable.from(Buffer.from(stream));
   return Readable.fromWeb(stream as unknown as WebReadableStream);
@@ -121,6 +142,27 @@ export async function processCollectionFetchItem(
         readable: Readable.from(Buffer.from(message.rfc822)),
         emailMetadata: message.metadata,
         contentType: 'message/rfc822',
+        apiExportDerivative: false,
+      };
+    } else if (source === 'chat') {
+      // The message JSON came with the listing: Slack returns the whole message
+      // in conversations.history, so there is nothing to fetch. Asking again
+      // would double every request and could return a DIFFERENT answer if the
+      // message were edited in between — and the bytes we were given are the
+      // ones whose hash goes in the chain of custody.
+      if (payload.entry === undefined) {
+        throw new NonDownloadableError('chat item payload is missing its message', {
+          kind: 'unavailable_item',
+          providerItemId,
+        });
+      }
+      // Canonical JSON with sorted keys: two collections of the same message
+      // must hash identically, and key order from a JSON parse is not
+      // guaranteed to be stable across runs.
+      const canonical = canonicalJson(payload.entry);
+      fetched = {
+        readable: Readable.from(Buffer.from(canonical, 'utf8')),
+        contentType: 'application/json; charset=utf-8',
         apiExportDerivative: false,
       };
     } else {

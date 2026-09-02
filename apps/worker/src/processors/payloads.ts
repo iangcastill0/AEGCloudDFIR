@@ -8,7 +8,7 @@ import { z } from 'zod';
 
 const uuid = z.string().uuid();
 
-export const collectionSourceValue = z.enum(['email', 'drive', 'audit']);
+export const collectionSourceValue = z.enum(['email', 'drive', 'chat', 'audit']);
 
 export const discoverPayload = z.object({
   tenantId: uuid,
