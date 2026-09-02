@@ -66,9 +66,13 @@ import {
 import {
   DROPBOX_DELEGATED_SCOPES,
   ImapEmailConnector,
+  SLACK_USER_SCOPES,
   ProviderAuthError,
   buildDropboxAuthorizationUrl,
+  buildSlackAuthorizationUrl,
+  exchangeSlackAuthorizationCode,
   type ImapConnectorOptions,
+  type SlackExchangedToken,
 } from '@aeg-clouddfir/connectors';
 import {
   buildConnectorTokenProvider,
@@ -85,6 +89,8 @@ export const PROVIDER_REVOCATION_NOTES: Record<Provider, string> = {
     'Stored tokens were deleted. To revoke the grant on the provider side, remove the app under https://myaccount.microsoft.com > App permissions (or via Entra admin center for organization connections).',
   google:
     'Stored tokens were deleted. To revoke the grant on the provider side, remove the app under https://myaccount.google.com/permissions (or delete the service-account key for organization connections).',
+  slack:
+    'The stored user token was deleted. To revoke it on the provider side, the workspace owner removes the app under Slack settings > Manage apps, or the custodian revokes it from their own account. A Slack user token does not expire on its own, so until that happens it would still work if it were ever recovered from a backup.',
   dropbox:
     'Stored tokens were deleted. To revoke the grant on the provider side, the custodian removes the app under https://www.dropbox.com/account/connected_apps (a team admin does it from the admin console for organization connections). Until they do, the refresh token would still work if it were ever recovered from a backup.',
   imap: 'The stored app password was deleted. Revoke it at the mail provider too — for Yahoo, iCloud or Gmail that means deleting the app password in the account security settings, which is the only thing that stops it being used again.',
@@ -445,6 +451,7 @@ export class ConnectorsService {
       [Provider.microsoft]: this.config.CDFIR_MS_REDIRECT_PATH,
       [Provider.google]: this.config.CDFIR_GOOGLE_REDIRECT_PATH,
       [Provider.dropbox]: this.config.CDFIR_DROPBOX_REDIRECT_PATH,
+      [Provider.slack]: this.config.CDFIR_SLACK_REDIRECT_PATH,
     };
     const path = paths[providerName] ?? this.config.CDFIR_GOOGLE_REDIRECT_PATH;
     return `${this.config.CDFIR_API_PUBLIC_URL}${path}`;
@@ -549,6 +556,15 @@ export class ConnectorsService {
         state,
         codeChallenge,
       });
+    } else if (input.provider === 'slack') {
+      // No PKCE: Slack's OAuth v2 does not offer it, so the sealed, cookie-bound
+      // state value is what ties the callback to the browser that started it.
+      authorizationUrl = buildSlackAuthorizationUrl({
+        clientId: this.config.CDFIR_SLACK_CLIENT_ID,
+        redirectUri: this.redirectUriFor(Provider.slack),
+        userScopes: SLACK_USER_SCOPES,
+        state,
+      });
     } else if (input.provider === 'dropbox') {
       const codeChallenge = createHash('sha256').update(verifier, 'utf8').digest('base64url');
       authorizationUrl = buildDropboxAuthorizationUrl({
@@ -645,29 +661,128 @@ export class ConnectorsService {
     }
   }
 
-  private async storeRefreshToken(
+  /**
+   * Store the credential a completed grant produced.
+   *
+   * The kind is a parameter because Slack has no refresh grant: its user token
+   * does not expire and IS the access token. Storing it under
+   * oauth_refresh_token would make every reader try a refresh that Slack does
+   * not offer.
+   */
+  private async storeGrantSecret(
     tx: TenantScopedTx,
     tenantId: string,
     connectorAccountId: string,
-    refreshToken: string,
+    kind: SecretKind,
+    value: string,
   ): Promise<void> {
     const encrypted = await encryptSecret(
       this.kek,
       tenantId,
       connectorSecretScope(connectorAccountId),
-      Buffer.from(refreshToken, 'utf8'),
+      Buffer.from(value, 'utf8'),
     );
-    await tx.connectorSecret.deleteMany({
-      where: { connectorAccountId, kind: SecretKind.oauth_refresh_token },
-    });
+    await tx.connectorSecret.deleteMany({ where: { connectorAccountId, kind } });
     await tx.connectorSecret.create({
       data: {
         tenantId,
         connectorAccountId,
-        kind: SecretKind.oauth_refresh_token,
+        kind,
         ...encryptedSecretColumns(encrypted),
       },
     });
+  }
+
+  /**
+   * Finish a Slack grant.
+   *
+   * Separate from the shared path for one reason: Slack issues a user token
+   * that does not expire and no refresh token at all. The shared flow rejects a
+   * grant without a refresh token, which is right for every other provider and
+   * wrong here.
+   *
+   * The identity is taken from the exchange rather than a separate profile
+   * call. Slack cannot force an account chooser, so recording exactly which
+   * workspace and user was connected is what replaces that guarantee — and it
+   * is displayed, so a wrong custodian is visible immediately instead of after
+   * a collection.
+   */
+  private async completeSlackCallback(
+    flow: ConnectorFlowPayload,
+    code: string,
+    _cookies: Record<string, string | undefined>,
+  ): Promise<{ redirectUrl: string }> {
+    let granted: SlackExchangedToken;
+    try {
+      granted = await exchangeSlackAuthorizationCode({
+        clientId: this.config.CDFIR_SLACK_CLIENT_ID,
+        clientSecret: this.config.CDFIR_SLACK_CLIENT_SECRET,
+        code,
+        redirectUri: this.redirectUriFor(Provider.slack),
+        fetchImpl: this.fetchImpl,
+      });
+    } catch {
+      await this.markError(flow, 'authorization code exchange failed');
+      return { redirectUrl: this.webRedirect('connected=0&reason=exchange_failed') };
+    }
+
+    // Both halves matter: the person and the workspace. "jane" alone does not
+    // say whose Slack was connected when someone belongs to several.
+    const externalIdentity =
+      granted.teamName === '' ? granted.userId : `${granted.userId}@${granted.teamName}`;
+
+    await withTenantContext(this.prisma, flow.tenantId, async (tx) => {
+      const account = await tx.connectorAccount.update({
+        where: { id: flow.connectorId },
+        data: {
+          status: ConnectorStatus.connected,
+          statusDetail: '',
+          externalIdentity,
+          externalTenantId: granted.teamId,
+        },
+      });
+      await this.storeGrantSecret(
+        tx,
+        flow.tenantId,
+        account.id,
+        SecretKind.oauth_access_token,
+        granted.accessToken,
+      );
+      await tx.custodian.upsert({
+        where: {
+          connectorAccountId_externalId: {
+            connectorAccountId: account.id,
+            externalId: granted.userId,
+          },
+        },
+        create: {
+          tenantId: flow.tenantId,
+          connectorAccountId: account.id,
+          externalId: granted.userId,
+          email: '',
+          displayName: externalIdentity,
+        },
+        update: { displayName: externalIdentity },
+      });
+      await this.audit.appendTx(tx, {
+        tenantId: flow.tenantId,
+        actorUserId: flow.userId,
+        actorDisplay: '',
+        effectiveRoles: [],
+        action: 'connector.connected',
+        targetType: 'connector',
+        targetId: account.id,
+        summary: {
+          provider: 'slack',
+          mode: 'delegated',
+          externalIdentity,
+          teamId: granted.teamId,
+          grantedScopes: granted.scopes,
+        },
+      });
+    });
+
+    return { redirectUrl: this.webRedirect('connected=1') };
   }
 
   /**
@@ -698,6 +813,14 @@ export class ConnectorsService {
     if (code.length === 0) {
       await this.markError(flow, 'provider returned no authorization code');
       return { redirectUrl: this.webRedirect('connected=0&reason=denied') };
+    }
+
+    // Slack's grant has no refresh token: the user token does not expire, and
+    // there is no refresh grant unless the app opts into rotation. Handled here
+    // rather than threaded through the shared path, where every reader would
+    // then have to know that one provider's "refresh token" is not one.
+    if (providerName === Provider.slack) {
+      return this.completeSlackCallback(flow, code, cookies);
     }
 
     let tokens: ExchangedTokens;
@@ -761,7 +884,13 @@ export class ConnectorsService {
       });
       if (!account) throw new NotFoundException();
 
-      await this.storeRefreshToken(tx, flow.tenantId, account.id, refreshToken);
+      await this.storeGrantSecret(
+        tx,
+        flow.tenantId,
+        account.id,
+        SecretKind.oauth_refresh_token,
+        refreshToken,
+      );
       await tx.connectorScope.createMany({
         data: grantedScopes.map((scope) => ({
           tenantId: flow.tenantId,

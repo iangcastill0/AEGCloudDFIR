@@ -7,6 +7,7 @@ import {
   buildConnectorsForAccount,
   type ConnectorBundle,
   makeRateLimitObserver,
+  requireChat,
   requireDrive,
   requireEmail,
 } from '../connector-factory.js';
@@ -29,7 +30,7 @@ export const ORG_AUDIT_LABEL = '(org audit)';
 
 interface DiscoveredScope {
   custodianId: string;
-  source: 'email' | 'drive' | 'audit';
+  source: 'email' | 'drive' | 'chat' | 'audit';
   scopeKey: string;
 }
 
@@ -63,6 +64,40 @@ async function discoverEmailScopeKeys(
   return discovery.folders
     .filter((folder) => emailFolderIncluded(folder, bundle.provider, emailScope))
     .map((folder) => folder.id);
+}
+
+/**
+ * Chat scope keys are conversation ids: one scope per channel or DM.
+ *
+ * Conversations the token cannot read are dropped here rather than queued and
+ * failed later. A public channel the authorising user is not in is listed by
+ * Slack but returns nothing, which would look like an empty channel instead of
+ * one that was never reachable — the completeness narrative has to be able to
+ * tell those apart.
+ */
+async function discoverChatScopeKeys(
+  bundle: ConnectorBundle,
+  scope: CollectionScope,
+): Promise<string[]> {
+  const chatScope = scope.chat ?? {
+    conversationIds: null,
+    includePublic: true,
+    includePrivate: true,
+    includeDms: false,
+    includeGroupDms: false,
+    includeArchived: false,
+  };
+  if (chatScope.conversationIds !== null && chatScope.conversationIds.length > 0) {
+    return chatScope.conversationIds;
+  }
+  const conversations = await requireChat(bundle).listConversations({
+    includePublic: chatScope.includePublic,
+    includePrivate: chatScope.includePrivate,
+    includeDms: chatScope.includeDms,
+    includeGroupDms: chatScope.includeGroupDms,
+    includeArchived: chatScope.includeArchived,
+  });
+  return conversations.filter((c) => c.isMember).map((c) => c.id);
 }
 
 async function discoverDriveScopeKeys(
@@ -226,20 +261,22 @@ export async function processCollectionDiscover(
           onRateLimit: makeRateLimitObserver(ctx, tenantId, collectionId, custodian.id, source),
         });
         const scopeKeys =
-          source === 'email'
-            ? await discoverEmailScopeKeys(bundle, scope, (kind, message) =>
-                withTenantContext(ctx.prisma, tenantId, (tx) =>
-                  recordException(tx, {
-                    tenantId,
-                    collectionId,
-                    custodianId: custodian.id,
-                    source,
-                    kind,
-                    message,
-                  }),
-                ),
-              )
-            : await discoverDriveScopeKeys(bundle, scope);
+          source === 'chat'
+            ? await discoverChatScopeKeys(bundle, scope)
+            : source === 'email'
+              ? await discoverEmailScopeKeys(bundle, scope, (kind, message) =>
+                  withTenantContext(ctx.prisma, tenantId, (tx) =>
+                    recordException(tx, {
+                      tenantId,
+                      collectionId,
+                      custodianId: custodian.id,
+                      source,
+                      kind,
+                      message,
+                    }),
+                  ),
+                )
+              : await discoverDriveScopeKeys(bundle, scope);
         folderCounts[`${custodian.email}:${source}`] = scopeKeys.length;
         for (const scopeKey of scopeKeys) {
           discovered.push({ custodianId: custodian.id, source, scopeKey });

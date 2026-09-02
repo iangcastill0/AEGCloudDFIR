@@ -27,7 +27,7 @@ export const PROGRESS_COUNTERS = [
 export type ProgressCounter = (typeof PROGRESS_COUNTERS)[number];
 export type ProgressDeltas = Partial<Record<ProgressCounter, number>>;
 
-type CollectionSourceValue = 'email' | 'drive' | 'audit';
+type CollectionSourceValue = 'email' | 'drive' | 'chat' | 'audit';
 
 export async function incrementProgress(
   tx: TenantScopedTx,

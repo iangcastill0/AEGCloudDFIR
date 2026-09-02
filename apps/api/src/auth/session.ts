@@ -56,7 +56,7 @@ const connectorFlowSchema = z.object({
   connectorId: z.string().uuid(),
   tenantId: z.string().uuid(),
   userId: z.string().uuid(),
-  provider: z.enum(['microsoft', 'google', 'dropbox']),
+  provider: z.enum(['microsoft', 'google', 'dropbox', 'slack']),
   /** PKCE verifier. Microsoft and Dropbox use it; Google's flow does not. */
   verifier: z.string().default(''),
   iat: z.number().int(),

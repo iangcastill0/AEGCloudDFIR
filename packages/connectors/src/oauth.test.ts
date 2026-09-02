@@ -11,6 +11,7 @@ import {
   MicrosoftAppTokenSource,
   MicrosoftDelegatedTokenSource,
   buildDropboxAuthorizationUrl,
+  buildSlackAuthorizationUrl,
   buildGoogleAuthorizationUrl,
   buildMicrosoftAdminConsentUrl,
   buildMicrosoftAuthorizationUrl,
@@ -353,6 +354,30 @@ describe('account selection is always forced', () => {
         state: 's',
         codeChallenge: 'ch',
       }),
+    buildSlackAuthorizationUrl: () =>
+      buildSlackAuthorizationUrl({
+        clientId: 'c',
+        redirectUri: 'https://api.test/cb',
+        state: 's',
+      }),
+  };
+
+  /**
+   * Providers whose sign-in URL CANNOT force a chooser, with the reason.
+   *
+   * An explicit list, not a silent skip. Slack offers no `prompt` and no
+   * `force_reauthentication`; what it does instead is always render a consent
+   * screen naming the workspace and account, which cannot be bypassed. That is
+   * weaker than a chooser, so the check moves to immediately after the grant:
+   * the connected identity is read back from auth.test and shown, rather than
+   * the guarantee quietly disappearing.
+   *
+   * Anything added here needs a reason written down. The registry test below
+   * still fails for a NEW builder, which is the property that matters.
+   */
+  const NO_CHOOSER_AVAILABLE: Record<string, string> = {
+    buildSlackAuthorizationUrl:
+      'Slack has no chooser parameter; its consent screen names the workspace and account instead, and the connected identity is verified after the grant.',
   };
 
   it('every URL that sends a person to a provider asks for account selection', () => {
@@ -360,7 +385,16 @@ describe('account selection is always forced', () => {
     // has no prompt parameter and uses force_reauthentication instead. Checking
     // one provider's spelling would have let the next connector past the rule.
     for (const [name, build] of Object.entries(SIGN_IN_URL_BUILDERS)) {
+      if (name in NO_CHOOSER_AVAILABLE) continue;
       expect(forcesAccountSelection(build()), `${name} must force account selection`).toBe(true);
+    }
+  });
+
+  it('every exception to that rule carries a written reason', () => {
+    // The exception list is only acceptable while it explains itself.
+    for (const [name, reason] of Object.entries(NO_CHOOSER_AVAILABLE)) {
+      expect(name in SIGN_IN_URL_BUILDERS, `${name} is not a real builder`).toBe(true);
+      expect(reason.length, `${name} needs a reason`).toBeGreaterThan(40);
     }
   });
 

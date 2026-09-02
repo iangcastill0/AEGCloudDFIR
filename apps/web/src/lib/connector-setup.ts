@@ -16,12 +16,13 @@ import {
   type OrgMicrosoftSetupRequest,
 } from '@aeg-clouddfir/contracts';
 
-export type ConnectorProvider = 'microsoft' | 'google' | 'dropbox';
+export type ConnectorProvider = 'microsoft' | 'google' | 'dropbox' | 'slack';
 
 const PROVIDER_NAMES: Record<ConnectorProvider, string> = {
   microsoft: 'Microsoft 365',
   google: 'Google Workspace',
   dropbox: 'Dropbox',
+  slack: 'Slack',
 };
 
 /**

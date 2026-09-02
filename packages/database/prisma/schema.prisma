@@ -173,6 +173,9 @@ enum Provider {
   /// `google`/`microsoft` drive: identity is a Dropbox file id, its content
   /// hash is not a plain SHA-256, and it has no notion of a creation time.
   dropbox
+  /// Slack workspace chat. Tier 1 reaches what the authorising user can see;
+  /// Enterprise Grid discovery is a later, separate grant.
+  slack
   /// Synthetic provider for user-uploaded container files (PST/OST): no
   /// provider API is involved; originals arrive via the uploads endpoint.
   upload
@@ -310,6 +313,10 @@ enum CollectionKind {
 enum CollectionSource {
   email
   drive
+  /// Chat platforms (Slack today; Teams and Google Chat reuse it). Not `email`:
+  /// naming a Slack message an email would carry that word into the manifest
+  /// and the production load file. See docs/adr/ADR-011.
+  chat
   audit
 }
 
@@ -591,6 +598,13 @@ enum EvidenceKind {
   container
   audit_record
   audit_batch
+  /// One chat message. The preserved native is the message JSON exactly as the
+  /// provider returned it.
+  chat_message
+  /// One channel or DM, holding collection-time metadata (name, purpose,
+  /// membership). Membership at collection time is evidence and Slack keeps no
+  /// history of it.
+  chat_conversation
 }
 
 enum ProcessingStatus {

@@ -41,7 +41,7 @@ export type RecoveryAction =
 
 export interface StalledItemInput {
   state: ItemState;
-  source: 'email' | 'drive' | 'audit';
+  source: 'email' | 'drive' | 'chat' | 'audit';
   attempts: number;
   updatedAt: Date;
   evidenceItemId: string | null;

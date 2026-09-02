@@ -29,7 +29,7 @@ type CheckpointKind = 'page' | 'delta' | 'history' | 'changes' | 'none';
 
 /** Checkpoint kind once a scope's enumeration is exhausted. */
 export function exhaustedCursorKind(
-  provider: 'microsoft' | 'google' | 'imap' | 'dropbox',
+  provider: 'microsoft' | 'google' | 'imap' | 'dropbox' | 'slack',
   source: 'email' | 'drive',
   deltaCursor: string | undefined,
 ): CheckpointKind {
@@ -37,6 +37,10 @@ export function exhaustedCursorKind(
   // which is a page cursor. Calling it a delta would imply the server can tell
   // us what changed, and it cannot.
   if (provider === 'imap') return 'page';
+  // Slack pages with an opaque cursor and offers no change feed at this tier,
+  // so an exhausted scope has no resume token at all. Calling it a delta would
+  // imply we could ask "what changed since", which tier 1 cannot.
+  if (provider === 'slack') return 'none';
   // Dropbox's list_folder cursor really is a delta: once the walk is finished
   // the SAME token returns what changed since. One cursor, both jobs.
   if (provider === 'dropbox') {

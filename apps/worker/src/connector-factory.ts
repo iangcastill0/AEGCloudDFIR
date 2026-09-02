@@ -12,6 +12,7 @@ import {
   GoogleDelegatedTokenSource,
   GoogleDriveConnector,
   DropboxTeamLogConnector,
+  SlackChatConnector,
   GoogleReportsConnector,
   GoogleServiceAccountTokenSource,
   GoogleVaultConnector,
@@ -52,7 +53,7 @@ export function connectorSecretScope(connectorAccountId: string): string {
 }
 
 export interface ConnectorBundle {
-  provider: 'microsoft' | 'google' | 'imap' | 'dropbox';
+  provider: 'microsoft' | 'google' | 'imap' | 'dropbox' | 'slack';
   mode: 'delegated' | 'organization';
   /**
    * Null for providers with no mailbox. Dropbox is files only, and the same
@@ -61,6 +62,8 @@ export interface ConnectorBundle {
    * reach.
    */
   email: EmailConnector | null;
+  /** Null for every provider that is not a chat platform. */
+  chat: SlackChatConnector | null;
   /**
    * Null for providers with no file storage. IMAP is mail only, and handing back
    * a stub that throws would let a collection claim it looked at a drive it
@@ -130,6 +133,22 @@ export function requireDrive(bundle: ConnectorBundle): DriveConnector {
  * selected mail on a files-only connector must fail loudly rather than report a
  * complete collection of a source that was never looked at.
  */
+/**
+ * The chat client, or a clear error naming the provider that has none.
+ *
+ * Third of the same family as requireDrive and requireEmail, and for the same
+ * reason: a collection that selected chat on a provider without it must fail
+ * loudly rather than report a complete collection of a source never looked at.
+ */
+export function requireChat(bundle: ConnectorBundle): SlackChatConnector {
+  if (bundle.chat === null) {
+    throw new Error(
+      `${bundle.provider} connectors have no chat to collect; this collection selected chat`,
+    );
+  }
+  return bundle.chat;
+}
+
 export function requireEmail(bundle: ConnectorBundle): EmailConnector {
   if (bundle.email === null) {
     throw new Error(
@@ -315,11 +334,37 @@ export async function buildConnectorsForAccount(
         ...settings,
         pool: imapPoolFor(connectorAccountId, settings),
       }),
+      chat: null,
       // A mailbox is not a drive, and pretending otherwise would make a
       // collection claim it looked somewhere it cannot reach.
       drive: null,
       // IMAP identifies the mailbox by its login name.
       custodianRef: settings.username,
+    };
+  }
+
+  if (account.provider === 'slack') {
+    // The stored value IS the access token: Slack user tokens do not expire and
+    // there is no refresh grant unless the app opts into rotation.
+    const row = requireSecret(secrets, 'oauth_access_token', 'Slack user token');
+    const token = (await decryptSecretRow(ctx, tenantId, connectorAccountId, row)).toString('utf8');
+    return {
+      provider: 'slack',
+      mode: account.mode,
+      // A workspace is neither a mailbox nor a drive. Stubs that returned
+      // nothing would let a collection claim it looked at both.
+      email: null,
+      drive: null,
+      chat: new SlackChatConnector({
+        tokenProvider: {
+          getAccessToken: () => Promise.resolve(token),
+          invalidate: () => undefined,
+        },
+        baseUrl: ctx.config.CDFIR_SLACK_API_BASE_URL,
+      }),
+      // Tier 1 collects as the authorising user; there is no per-custodian
+      // addressing to do.
+      custodianRef: account.externalIdentity,
     };
   }
 
@@ -353,6 +398,7 @@ export async function buildConnectorsForAccount(
       mode: account.mode,
       // Dropbox has no mailbox. See the note on ConnectorBundle.email.
       email: null,
+      chat: null,
       drive: new DropboxDriveConnector({
         tokenProvider: dropboxToken,
         rpcBase: ctx.config.CDFIR_DROPBOX_API_BASE_URL,
@@ -416,6 +462,7 @@ export async function buildConnectorsForAccount(
       mode: account.mode,
       email: new GraphEmailConnector(options),
       drive: new GraphDriveConnector(options),
+      chat: null,
       custodianRef,
     };
   }
@@ -458,6 +505,7 @@ export async function buildConnectorsForAccount(
     mode: account.mode,
     email: new GmailConnector(options),
     drive: new GoogleDriveConnector(options),
+    chat: null,
     custodianRef,
   };
 }
@@ -659,7 +707,7 @@ export function makeRateLimitObserver(
   tenantId: string,
   collectionId: string,
   custodianId: string,
-  source: 'email' | 'drive' | 'audit',
+  source: 'email' | 'drive' | 'chat' | 'audit',
 ): RateLimitObserver {
   return (info) => {
     void withTenantContext(ctx.prisma, tenantId, (tx) =>

@@ -41,7 +41,7 @@ export interface CollectionItemTarget {
   tenantId: string;
   collectionId: string;
   custodianId: string;
-  source: 'email' | 'drive' | 'audit';
+  source: 'email' | 'drive' | 'chat' | 'audit';
   providerItemId: string;
 }
 

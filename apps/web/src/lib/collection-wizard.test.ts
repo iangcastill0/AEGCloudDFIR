@@ -104,7 +104,7 @@ function uploadWizard(): WizardState {
     patch: {
       name: 'PST intake — Doe custodial files',
       provider: 'upload',
-      sources: { email: true, drive: false, audit: false },
+      sources: { email: true, drive: false, chat: false, audit: false },
       kind: 'snapshot',
     },
   });
@@ -283,7 +283,7 @@ describe('buildCreateRequest', () => {
     let s = filledWizard();
     s = wizardReducer(s, {
       type: 'patch',
-      patch: { sources: { email: true, drive: true, audit: false } },
+      patch: { sources: { email: true, drive: true, chat: false, audit: false } },
     });
     s = wizardReducer(s, {
       type: 'patchScope',
@@ -323,7 +323,7 @@ describe('audit source', () => {
         provider: 'google',
         connectorAccountId: '4f9a4f4e-7b8b-4b1c-9a3e-1c2d3e4f5a6b',
         connectorMode: 'organization',
-        sources: { email: false, drive: false, audit: true },
+        sources: { email: false, drive: false, chat: false, audit: true },
         custodians: [],
       },
     });
@@ -383,7 +383,7 @@ describe('audit source', () => {
         provider: 'microsoft',
         connectorAccountId: '4f9a4f4e-7b8b-4b1c-9a3e-1c2d3e4f5a6b',
         connectorMode: 'organization',
-        sources: { email: false, drive: false, audit: true },
+        sources: { email: false, drive: false, chat: false, audit: true },
         custodians: [],
       },
     });
@@ -408,7 +408,7 @@ describe('IMAP collections', () => {
         provider: 'imap',
         connectorAccountId: '4f9a4f4e-7b8b-4b1c-9a3e-1c2d3e4f5a6b',
         connectorMode: 'delegated',
-        sources: { email: true, drive: false, audit: false },
+        sources: { email: true, drive: false, chat: false, audit: false },
         custodians: [{ id: '2f9a4f4e-7b8b-4b1c-9a3e-1c2d3e4f5a6b', email: 'someone@yahoo.com' }],
       },
     });
@@ -424,7 +424,7 @@ describe('IMAP collections', () => {
     // reports a source it never looked at.
     const s = wizardReducer(imapWizard(), {
       type: 'patch',
-      patch: { sources: { email: true, drive: true, audit: false } },
+      patch: { sources: { email: true, drive: true, chat: false, audit: false } },
     });
     const errors = validateStep(s, STEP_SOURCES);
     expect(errors.join(' ')).toMatch(/IMAP/i);
@@ -434,7 +434,7 @@ describe('IMAP collections', () => {
   it('refuses audit logs on an IMAP connector', () => {
     const s = wizardReducer(imapWizard(), {
       type: 'patch',
-      patch: { sources: { email: false, drive: false, audit: true } },
+      patch: { sources: { email: false, drive: false, chat: false, audit: true } },
     });
     expect(validateStep(s, STEP_SOURCES).length).toBeGreaterThan(0);
   });
@@ -465,19 +465,28 @@ describe('dropbox collections', () => {
   it('can be chosen as a provider at all', () => {
     // Without this the connector exists, the account can be connected, and the
     // wizard still cannot start a collection with it.
-    const state = { ...dropboxState(), sources: { email: false, drive: true, audit: false } };
+    const state = {
+      ...dropboxState(),
+      sources: { email: false, drive: true, chat: false, audit: false },
+    };
     expect(validateStep(state, STEP_TYPE)).toEqual([]);
   });
 
   it('collects files', () => {
-    const state = { ...dropboxState(), sources: { email: false, drive: true, audit: false } };
+    const state = {
+      ...dropboxState(),
+      sources: { email: false, drive: true, chat: false, audit: false },
+    };
     expect(validateStep(state, STEP_SOURCES)).toEqual([]);
   });
 
   it('refuses mail, because Dropbox has no mailbox', () => {
     // The mirror of the IMAP rule. Allowing it would produce a collection that
     // claims a source it never looked at.
-    const state = { ...dropboxState(), sources: { email: true, drive: true, audit: false } };
+    const state = {
+      ...dropboxState(),
+      sources: { email: true, drive: true, chat: false, audit: false },
+    };
     const errors = validateStep(state, STEP_SOURCES);
     expect(errors.join(' ')).toMatch(/files only|no mailbox/i);
   });
@@ -485,7 +494,10 @@ describe('dropbox collections', () => {
   it('refuses the team event log on a personal (delegated) connector', () => {
     // Not a policy choice: Dropbox itself refuses a personal account's token
     // with USER_AUTH_NOT_ALLOWED, "This token is not associated with a team".
-    const state = { ...dropboxState(), sources: { email: false, drive: true, audit: true } };
+    const state = {
+      ...dropboxState(),
+      sources: { email: false, drive: true, chat: false, audit: true },
+    };
     const errors = validateStep(state, STEP_SOURCES);
     expect(errors.length).toBeGreaterThan(0);
     expect(errors.join(' ')).toMatch(/business team/i);
@@ -497,19 +509,22 @@ describe('dropbox collections', () => {
     const state = {
       ...dropboxState(),
       connectorMode: 'organization' as const,
-      sources: { email: false, drive: false, audit: true },
+      sources: { email: false, drive: false, chat: false, audit: true },
     };
     expect(validateStep(state, STEP_SOURCES)).toEqual([]);
   });
 
   it('still requires at least one source', () => {
-    const state = { ...dropboxState(), sources: { email: false, drive: false, audit: false } };
+    const state = {
+      ...dropboxState(),
+      sources: { email: false, drive: false, chat: false, audit: false },
+    };
     expect(validateStep(state, STEP_SOURCES).length).toBeGreaterThan(0);
   });
 });
 
 describe('sourcesForProvider', () => {
-  const ALL = { email: true, drive: true, audit: true };
+  const ALL = { email: true, drive: true, chat: false, audit: true };
 
   /**
    * Reported from staging: choosing Dropbox left "Email" ticked from the
@@ -522,20 +537,26 @@ describe('sourcesForProvider', () => {
     expect(sourcesForProvider('dropbox', ALL)).toEqual({
       email: false,
       drive: true,
+      chat: false,
       audit: true,
     });
   });
 
   it('clears files and audit when the provider is mail only', () => {
-    expect(sourcesForProvider('imap', ALL)).toEqual({ email: true, drive: false, audit: false });
+    expect(sourcesForProvider('imap', ALL)).toEqual({
+      email: true,
+      drive: false,
+      chat: false,
+      audit: false,
+    });
   });
 
   it('always leaves at least one source selected', () => {
     // The other half of the dead end: clearing the only ticked box would fail
     // validation with "select at least one source" and be just as stuck.
-    const fromMailOnly = { email: true, drive: false, audit: false };
+    const fromMailOnly = { email: true, drive: false, chat: false, audit: false };
     expect(sourcesForProvider('dropbox', fromMailOnly).drive).toBe(true);
-    const fromFilesOnly = { email: false, drive: true, audit: false };
+    const fromFilesOnly = { email: false, drive: true, chat: false, audit: false };
     expect(sourcesForProvider('imap', fromFilesOnly).email).toBe(true);
   });
 
@@ -549,6 +570,7 @@ describe('sourcesForProvider', () => {
     expect(sourcesForProvider('upload', ALL)).toEqual({
       email: true,
       drive: false,
+      chat: false,
       audit: false,
     });
   });
@@ -560,9 +582,9 @@ describe('sourcesForProvider', () => {
     for (const provider of ['microsoft', 'google', 'imap', 'dropbox', 'upload'] as const) {
       for (const before of [
         ALL,
-        { email: true, drive: false, audit: false },
-        { email: false, drive: true, audit: false },
-        { email: false, drive: false, audit: true },
+        { email: true, drive: false, chat: false, audit: false },
+        { email: false, drive: true, chat: false, audit: false },
+        { email: false, drive: false, chat: false, audit: true },
       ]) {
         const sources = sourcesForProvider(provider, before);
         const state = {

@@ -32,9 +32,16 @@ export type Completeness = z.infer<typeof completeness>;
  * the response away: `path: ["connector","provider"]`. The operator clicked
  * again and got a second connector. Adding a provider means adding it here too.
  */
-export const provider = z.enum(['microsoft', 'google', 'imap', 'dropbox', 'upload']);
+export const provider = z.enum(['microsoft', 'google', 'imap', 'dropbox', 'slack', 'upload']);
 export const connectionMode = z.enum(['delegated', 'organization']);
-export const collectionSource = z.enum(['email', 'drive', 'audit']);
+/**
+ * `chat` is its own source rather than a flavour of `email`. Calling a Slack
+ * message an email would put that word in the UI, the manifest AND the
+ * production load file — a false statement in an evidence tool is a defect, not
+ * a shortcut. Written generically so Teams and Google Chat reuse it. See
+ * docs/adr/ADR-011.
+ */
+export const collectionSource = z.enum(['email', 'drive', 'chat', 'audit']);
 
 /** Upstream audit systems AEG-CloudDFIR can collect from. */
 export const auditSystem = z.enum([

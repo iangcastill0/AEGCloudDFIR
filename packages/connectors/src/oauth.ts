@@ -626,6 +626,144 @@ export class DropboxDelegatedTokenSource extends CachingTokenSource {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Slack
+// ---------------------------------------------------------------------------
+
+export const SLACK_AUTHORIZATION_ENDPOINT = 'https://slack.com/oauth/v2/authorize';
+export const SLACK_TOKEN_ENDPOINT = 'https://slack.com/api/oauth.v2.access';
+
+/**
+ * User-token scopes for read-only chat collection.
+ *
+ * USER scopes, not bot scopes. A bot only sees channels it has been invited to;
+ * a user token sees what that person sees, which is what a custodian collection
+ * means. No write scope of any kind is requested.
+ */
+export const SLACK_USER_SCOPES: readonly string[] = [
+  'channels:history',
+  'channels:read',
+  'groups:history',
+  'groups:read',
+  'im:history',
+  'im:read',
+  'mpim:history',
+  'mpim:read',
+  'users:read',
+  'files:read',
+];
+
+export interface SlackAuthorizationUrlOptions {
+  clientId: string;
+  redirectUri: string;
+  state: string;
+  userScopes?: readonly string[];
+  authorizationEndpoint?: string;
+}
+
+/**
+ * Slack has no `prompt` or `force_reauthentication` parameter.
+ *
+ * What it does instead is always render a consent screen naming the workspace
+ * and the account granting access, which cannot be skipped — so the operator
+ * sees the identity before approving, even though we cannot force a chooser.
+ * That is weaker than Microsoft's `prompt=select_account`, and it is why the
+ * connected identity is read back from auth.test and displayed: the check moves
+ * from before the grant to immediately after it, rather than disappearing.
+ */
+export function buildSlackAuthorizationUrl(opts: SlackAuthorizationUrlOptions): string {
+  const url = new URL(opts.authorizationEndpoint ?? SLACK_AUTHORIZATION_ENDPOINT);
+  url.searchParams.set('client_id', opts.clientId);
+  // `user_scope`, not `scope`: `scope` would request a bot token, which only
+  // sees channels the bot was invited to.
+  url.searchParams.set('user_scope', (opts.userScopes ?? SLACK_USER_SCOPES).join(' '));
+  url.searchParams.set('redirect_uri', opts.redirectUri);
+  url.searchParams.set('state', opts.state);
+  return url.toString();
+}
+
+export interface SlackCodeExchangeOptions {
+  clientId: string;
+  clientSecret: string;
+  code: string;
+  redirectUri: string;
+  tokenEndpoint?: string;
+  fetchImpl?: FetchLike;
+}
+
+export interface SlackExchangedToken {
+  /** The USER token (xoxp-…). The bot token, if any, is deliberately ignored. */
+  accessToken: string;
+  scopes: string[];
+  teamId: string;
+  teamName: string;
+  userId: string;
+}
+
+/**
+ * Exchange the code for a user token.
+ *
+ * Slack answers this with HTTP 200 and `{"ok": false}` on failure like every
+ * other method, so the envelope is checked rather than the status — an
+ * unchecked exchange would store an empty token and report a connected
+ * connector.
+ */
+export async function exchangeSlackAuthorizationCode(
+  opts: SlackCodeExchangeOptions,
+): Promise<SlackExchangedToken> {
+  const fetchImpl = opts.fetchImpl ?? ((u: string, i?: RequestInit) => fetch(u, i));
+  const url = opts.tokenEndpoint ?? SLACK_TOKEN_ENDPOINT;
+  let response: Response;
+  try {
+    response = await fetchImpl(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: opts.clientId,
+        client_secret: opts.clientSecret,
+        code: opts.code,
+        redirect_uri: opts.redirectUri,
+      }).toString(),
+      signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
+    });
+  } catch {
+    throw new ProviderAuthError(`slack token request failed to reach ${sanitizeUrl(url)}`);
+  }
+
+  const body: unknown = await response.json().catch(() => null);
+  const record = typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : {};
+  if (record['ok'] !== true) {
+    const code = typeof record['error'] === 'string' ? record['error'] : 'unknown_error';
+    throw new ProviderAuthError(`slack oauth.v2.access failed: ${code}`, { providerCode: code });
+  }
+
+  const authed =
+    typeof record['authed_user'] === 'object' && record['authed_user'] !== null
+      ? (record['authed_user'] as Record<string, unknown>)
+      : {};
+  const accessToken = typeof authed['access_token'] === 'string' ? authed['access_token'] : '';
+  if (accessToken === '') {
+    // Happens when the app requested `scope` instead of `user_scope`: Slack
+    // returns a bot token and no user token, and a bot only sees channels it
+    // was invited to.
+    throw new ProviderAuthError(
+      'slack returned no user token; the app must request user_scope, not scope',
+      { providerCode: 'no_user_token' },
+    );
+  }
+  const team =
+    typeof record['team'] === 'object' && record['team'] !== null
+      ? (record['team'] as Record<string, unknown>)
+      : {};
+  return {
+    accessToken,
+    scopes: typeof authed['scope'] === 'string' ? authed['scope'].split(',') : [],
+    teamId: typeof team['id'] === 'string' ? team['id'] : '',
+    teamName: typeof team['name'] === 'string' ? team['name'] : '',
+    userId: typeof authed['id'] === 'string' ? authed['id'] : '',
+  };
+}
+
 export interface MicrosoftCodeExchangeOptions {
   msLoginBaseUrl: string;
   tenant?: string;

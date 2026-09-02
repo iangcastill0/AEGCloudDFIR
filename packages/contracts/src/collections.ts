@@ -44,6 +44,24 @@ export const collectionScope = z.object({
     })
     .optional(),
   /**
+   * Chat scope: which conversations to collect.
+   *
+   * DMs default OFF. Reaching a custodian's private messages is a materially
+   * larger intrusion than reading a public channel, and it should be a decision
+   * someone made rather than a default they inherited.
+   */
+  chat: z
+    .object({
+      /** Explicit conversation ids, or null for everything reachable. */
+      conversationIds: z.array(z.string().min(1)).nullable().default(null),
+      includePublic: z.boolean().default(true),
+      includePrivate: z.boolean().default(true),
+      includeDms: z.boolean().default(false),
+      includeGroupDms: z.boolean().default(false),
+      includeArchived: z.boolean().default(false),
+    })
+    .optional(),
+  /**
    * Audit-log scope. Audit logs are tenant/org-wide, not per-custodian; an
    * optional actor filter narrows to specific principals when the provider
    * supports it. A date range is strongly recommended (providers cap history

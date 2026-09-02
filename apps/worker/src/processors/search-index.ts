@@ -552,7 +552,7 @@ export async function processSearchIndex(
 }
 
 /** Progress bucket an item's counters belong to. */
-function progressSourceFor(item: { kind: string }): 'email' | 'drive' | 'audit' {
+function progressSourceFor(item: { kind: string }): 'email' | 'drive' | 'chat' | 'audit' {
   if (item.kind === 'audit_batch') return 'audit';
   return item.kind === 'email' || item.kind === 'attachment' ? 'email' : 'drive';
 }

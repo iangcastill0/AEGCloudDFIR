@@ -71,10 +71,15 @@ export const wizardStateSchema = z.object({
   /** Generated once per wizard run; reused across retries of the same start. */
   idempotencyKey: z.string().min(8),
   name: z.string(),
-  provider: z.enum(['microsoft', 'google', 'imap', 'dropbox', 'upload', '']),
+  provider: z.enum(['microsoft', 'google', 'imap', 'dropbox', 'slack', 'upload', '']),
   connectorAccountId: z.string(),
   connectorMode: z.enum(['delegated', 'organization', '']),
-  sources: z.object({ email: z.boolean(), drive: z.boolean(), audit: z.boolean() }),
+  sources: z.object({
+    email: z.boolean(),
+    drive: z.boolean(),
+    chat: z.boolean().default(false),
+    audit: z.boolean(),
+  }),
   custodians: z.array(wizardCustodian),
   /** Completed PST/OST uploads (provider 'upload' only). */
   uploads: z.array(wizardUpload),
@@ -132,7 +137,7 @@ export function freshWizard(idempotencyKey: string): WizardState {
     provider: '',
     connectorAccountId: '',
     connectorMode: '',
-    sources: { email: true, drive: false, audit: false },
+    sources: { email: true, drive: false, chat: false, audit: false },
     custodians: [],
     uploads: [],
     uploadCustodian: { email: '', displayName: '' },
@@ -214,20 +219,27 @@ export function sourcesForProvider(
   current: WizardState['sources'],
 ): WizardState['sources'] {
   // A PST holds messages and nothing else.
-  if (provider === 'upload') return { email: true, drive: false, audit: false };
+  if (provider === 'upload') return { email: true, drive: false, chat: false, audit: false };
   // A mailbox has no drive and no provider audit log.
-  if (provider === 'imap') return { email: true, drive: false, audit: false };
+  if (provider === 'imap') return { email: true, drive: false, chat: false, audit: false };
+  // Slack is chat and nothing else.
+  if (provider === 'slack') return { email: false, drive: false, chat: true, audit: false };
   // Dropbox stores files and, for a Business team, keeps an event log. Mail is
   // the only thing it genuinely does not have.
   if (provider === 'dropbox') {
-    const keep = { email: false, drive: current.drive, audit: current.audit };
-    return keep.drive || keep.audit ? keep : { email: false, drive: true, audit: false };
+    const keep = { email: false, drive: current.drive, chat: false, audit: current.audit };
+    return keep.drive || keep.audit
+      ? keep
+      : { email: false, drive: true, chat: false, audit: false };
   }
   // Microsoft and Google reach all three; keep the operator's choices, but never
   // hand back an empty selection.
-  if (!current.email && !current.drive && !current.audit) {
-    return { email: true, drive: false, audit: false };
+  if (!current.email && !current.drive && !current.chat && !current.audit) {
+    return { email: true, drive: false, chat: false, audit: false };
   }
+  // Chat belongs to chat providers only; a Microsoft or Google connector has
+  // none, so it never survives here.
+  if (current.chat) return { ...current, chat: false };
   return current;
 }
 
@@ -280,8 +292,23 @@ export function validateStep(state: WizardState, step: number): string[] {
           );
         }
       }
-      if (!state.sources.email && !state.sources.drive && !state.sources.audit)
-        errors.push('Select at least one source (email, drive, or audit logs).');
+      if (state.provider === 'slack') {
+        if (state.sources.email || state.sources.drive) {
+          errors.push('Slack connectors collect chat only; there is no mailbox or drive.');
+        }
+        if (state.sources.audit) {
+          errors.push(
+            'Slack audit logs need Enterprise Grid and a separate org-level grant, which is not built yet.',
+          );
+        }
+      }
+      if (
+        !state.sources.email &&
+        !state.sources.drive &&
+        !state.sources.chat &&
+        !state.sources.audit
+      )
+        errors.push('Select at least one source (email, drive, chat, or audit logs).');
       // Audit logs are organization-wide (app permission / domain-wide
       // delegation); a delegated connector cannot collect them.
       if (state.sources.audit && state.connectorMode !== 'organization')
@@ -296,7 +323,10 @@ export function validateStep(state: WizardState, step: number): string[] {
         break;
       }
       // Audit is org-scoped and selects no custodian; only email/drive need one.
-      if ((state.sources.email || state.sources.drive) && state.custodians.length === 0)
+      if (
+        (state.sources.email || state.sources.drive || state.sources.chat) &&
+        state.custodians.length === 0
+      )
         errors.push('Add at least one custodian.');
       break;
     case STEP_SCOPE: {

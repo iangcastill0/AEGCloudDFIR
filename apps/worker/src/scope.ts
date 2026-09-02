@@ -103,7 +103,7 @@ export function dateRangeToInstants(scope: Pick<CollectionScope, 'dateRange'>): 
 /** Well-known folder / label filtering for email discovery. */
 export function emailFolderIncluded(
   folder: DiscoveredMailFolder,
-  provider: 'microsoft' | 'google' | 'imap' | 'dropbox',
+  provider: 'microsoft' | 'google' | 'imap' | 'dropbox' | 'slack',
   emailScope: NonNullable<CollectionScope['email']>,
 ): boolean {
   if (emailScope.folderIds !== null) {

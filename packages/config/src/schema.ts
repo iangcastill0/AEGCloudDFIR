@@ -86,6 +86,9 @@ export const configSchema = z.object({
   CDFIR_DROPBOX_CLIENT_ID: z.string().default(''),
   CDFIR_DROPBOX_CLIENT_SECRET: z.string().default(''),
   CDFIR_DROPBOX_REDIRECT_PATH: z.string().default('/api/v1/connectors/callback/dropbox'),
+  CDFIR_SLACK_CLIENT_ID: z.string().default(''),
+  CDFIR_SLACK_CLIENT_SECRET: z.string().default(''),
+  CDFIR_SLACK_REDIRECT_PATH: z.string().default('/api/v1/connectors/callback/slack'),
 
   // --- Provider endpoint overrides (contract tests / fake server / demo) ---
   CDFIR_MS_GRAPH_BASE_URL: z.string().url().default('https://graph.microsoft.com/v1.0'),
@@ -98,6 +101,7 @@ export const configSchema = z.object({
     .string()
     .url()
     .default('https://api.dropboxapi.com/oauth2/token'),
+  CDFIR_SLACK_API_BASE_URL: z.string().url().default('https://slack.com/api'),
 
   // --- ClamAV ---
   CDFIR_CLAMAV_HOST: z.string().default('clamav'),
@@ -157,6 +161,7 @@ const SECRET_KEYS: ReadonlySet<string> = new Set([
   'CDFIR_MS_CLIENT_SECRET',
   'CDFIR_GOOGLE_CLIENT_SECRET',
   'CDFIR_DROPBOX_CLIENT_SECRET',
+  'CDFIR_SLACK_CLIENT_SECRET',
 ]);
 
 export class ConfigValidationError extends Error {

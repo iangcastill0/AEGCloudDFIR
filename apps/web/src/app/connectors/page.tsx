@@ -45,7 +45,7 @@ export default function ConnectorsPage() {
   const [statusText, setStatusText] = useState('');
   const [label, setLabel] = useState('');
 
-  function connectDelegated(provider: 'microsoft' | 'google' | 'dropbox') {
+  function connectDelegated(provider: 'microsoft' | 'google' | 'dropbox' | 'slack') {
     setStatusText(`Starting ${provider} sign-in…`);
     create.mutate(
       // A label is required by the API. Leaving it out is what made every
@@ -101,6 +101,9 @@ export default function ConnectorsPage() {
           </Button>
           <Button onClick={() => connectDelegated('dropbox')} busy={create.isPending}>
             Connect Dropbox account
+          </Button>
+          <Button onClick={() => connectDelegated('slack')} busy={create.isPending}>
+            Connect Slack account
           </Button>
         </div>
       </section>

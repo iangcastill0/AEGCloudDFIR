@@ -54,7 +54,7 @@ export interface ConnectorSecretRecord extends EncryptedSecret {
 export interface ConnectorAccountRecord {
   id: string;
   tenantId: string;
-  provider: 'microsoft' | 'google' | 'dropbox';
+  provider: 'microsoft' | 'google' | 'dropbox' | 'slack';
   mode: 'delegated' | 'organization';
   externalIdentity: string;
   externalTenantId: string;
@@ -111,6 +111,24 @@ export async function buildConnectorTokenProvider(
   input: BuildTokenProviderInput,
 ): Promise<TokenProvider> {
   const { account, config, kek, secrets } = input;
+
+  if (account.provider === 'slack') {
+    // Slack user tokens do not expire and there is no refresh grant unless the
+    // app opts into rotation, so the stored value IS the access token. Handing
+    // back a constant provider keeps every caller identical.
+    const row = findSecret(secrets, SecretKind.oauth_access_token);
+    if (!row) throw new ConnectorCredentialsError('no stored access token for this connector');
+    const token = (
+      await decryptSecret(kek, account.tenantId, connectorSecretScope(account.id), row)
+    ).toString('utf8');
+    return {
+      getAccessToken: () => Promise.resolve(token),
+      // Nothing to invalidate: there is no refresh grant to re-run. A revoked
+      // Slack token fails with token_revoked, which is a connector problem for
+      // a human to fix, not something a retry can recover.
+      invalidate: () => undefined,
+    };
+  }
 
   if (account.mode === 'delegated') {
     const row = findSecret(secrets, SecretKind.oauth_refresh_token);
