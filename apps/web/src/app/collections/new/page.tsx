@@ -270,6 +270,11 @@ function ProviderStep({ state, dispatch }: StepProps) {
             description: 'Dropbox files — files only, no mailbox',
           },
           {
+            value: 'slack',
+            label: 'Slack',
+            description: 'Slack channels, DMs and threads — chat only',
+          },
+          {
             value: 'upload',
             label: 'PST / mailbox file upload',
             description: 'Preserve and review Outlook data files (.pst, .ost)',
@@ -527,9 +532,13 @@ function SourcesStep({ state, dispatch }: StepProps) {
         <Checkbox
           label="Email"
           checked={state.sources.email}
-          disabled={state.provider === 'dropbox'}
+          disabled={state.provider === 'dropbox' || state.provider === 'slack'}
           hint={
-            state.provider === 'dropbox' ? 'Not available: Dropbox stores files only.' : undefined
+            state.provider === 'dropbox'
+              ? 'Not available: Dropbox stores files only.'
+              : state.provider === 'slack'
+                ? 'Not available: Slack is chat only.'
+                : undefined
           }
           onChange={(e) =>
             dispatch({
@@ -544,12 +553,34 @@ function SourcesStep({ state, dispatch }: StepProps) {
         <Checkbox
           label="Drive files"
           checked={state.sources.drive}
-          disabled={state.provider === 'imap'}
-          hint={state.provider === 'imap' ? 'Not available: IMAP is mail only.' : undefined}
+          disabled={state.provider === 'imap' || state.provider === 'slack'}
+          hint={
+            state.provider === 'imap'
+              ? 'Not available: IMAP is mail only.'
+              : state.provider === 'slack'
+                ? 'Not available: Slack is chat only.'
+                : undefined
+          }
           onChange={(e) =>
             dispatch({
               type: 'patch',
               patch: { sources: { ...state.sources, drive: e.target.checked } },
+            })
+          }
+        />
+        <Checkbox
+          label="Chat messages"
+          checked={state.sources.chat}
+          disabled={state.provider !== 'slack'}
+          hint={
+            state.provider !== 'slack'
+              ? 'Available for chat providers (Slack).'
+              : 'Channels, group DMs and threads. Thread replies are collected with their parent.'
+          }
+          onChange={(e) =>
+            dispatch({
+              type: 'patch',
+              patch: { sources: { ...state.sources, chat: e.target.checked } },
             })
           }
         />
@@ -561,8 +592,10 @@ function SourcesStep({ state, dispatch }: StepProps) {
             state.provider === 'imap'
               ? 'Not available: IMAP has no provider audit log.'
               : state.provider === 'dropbox'
-                ? 'Not available: Dropbox has no provider audit log.'
-                : undefined
+                ? 'Dropbox Business teams only: a personal Dropbox has no event log.'
+                : state.provider === 'slack'
+                  ? 'Slack audit logs need Enterprise Grid and a separate org-level grant, which is not built yet.'
+                  : undefined
           }
           onChange={(e) =>
             dispatch({
@@ -576,6 +609,14 @@ function SourcesStep({ state, dispatch }: StepProps) {
         <Notice variant="info">
           IMAP collects mail only. Every selectable mailbox is walked by UID, and the original
           message bytes are preserved exactly as the server returns them.
+        </Notice>
+      ) : null}
+      {state.provider === 'slack' ? (
+        <Notice variant="info">
+          Slack collects chat only. This connector reaches what the authorising account can see —
+          public channels, plus the private channels and DMs it belongs to. It cannot reach a
+          channel that account is not in, and the collection report says so rather than implying the
+          channel was empty. Thread replies are collected with their parent message.
         </Notice>
       ) : null}
       {state.provider === 'dropbox' ? (
@@ -816,6 +857,74 @@ function ScopeStep({ state, dispatch }: StepProps) {
         </fieldset>
       ) : null}
 
+      {state.sources.chat ? (
+        <fieldset className="cdfir-fieldset">
+          <legend>Chat scope</legend>
+          <Checkbox
+            label="All conversations this account can reach"
+            checked={s.chatAllConversations}
+            onChange={(e) =>
+              dispatch({ type: 'patchScope', patch: { chatAllConversations: e.target.checked } })
+            }
+          />
+          {s.chatAllConversations ? (
+            <>
+              <Checkbox
+                label="Public channels"
+                checked={s.chatIncludePublic}
+                onChange={(e) =>
+                  dispatch({ type: 'patchScope', patch: { chatIncludePublic: e.target.checked } })
+                }
+              />
+              <Checkbox
+                label="Private channels the account belongs to"
+                checked={s.chatIncludePrivate}
+                onChange={(e) =>
+                  dispatch({ type: 'patchScope', patch: { chatIncludePrivate: e.target.checked } })
+                }
+              />
+              <Checkbox
+                label="Group DMs"
+                checked={s.chatIncludeGroupDms}
+                onChange={(e) =>
+                  dispatch({ type: 'patchScope', patch: { chatIncludeGroupDms: e.target.checked } })
+                }
+              />
+              <Checkbox
+                label="Direct messages"
+                hint="Off by default. A custodian's DMs are a materially larger intrusion than a public channel, so this should be a deliberate decision."
+                checked={s.chatIncludeDms}
+                onChange={(e) =>
+                  dispatch({ type: 'patchScope', patch: { chatIncludeDms: e.target.checked } })
+                }
+              />
+              <Checkbox
+                label="Archived conversations"
+                checked={s.chatIncludeArchived}
+                onChange={(e) =>
+                  dispatch({ type: 'patchScope', patch: { chatIncludeArchived: e.target.checked } })
+                }
+              />
+            </>
+          ) : (
+            <TextInput
+              label="Conversation ids"
+              hint="Comma or newline separated, e.g. C01ABCDEF. Channel ids are in the Slack channel details."
+              value={s.chatConversationIdsText}
+              onChange={(e) =>
+                dispatch({ type: 'patchScope', patch: { chatConversationIdsText: e.target.value } })
+              }
+            />
+          )}
+          {s.chatIncludeDms ? (
+            <Notice variant="warning">
+              Direct messages are included. Collect them only where the matter actually requires it
+              — this reaches private one-to-one conversations, not workplace channels.
+            </Notice>
+          ) : null}
+        </fieldset>
+      ) : null}
+
       {state.sources.drive ? (
         <fieldset className="cdfir-fieldset">
           <legend>Drive scope</legend>
@@ -1029,6 +1138,7 @@ function ReviewStep({ state }: { state: WizardState }) {
                 : [
                     state.sources.email ? 'email' : null,
                     state.sources.drive ? 'drive' : null,
+                    state.sources.chat ? 'chat' : null,
                     state.sources.audit ? 'audit logs' : null,
                   ]
                     .filter(Boolean)

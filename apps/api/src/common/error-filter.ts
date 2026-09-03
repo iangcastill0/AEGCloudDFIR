@@ -1,5 +1,6 @@
 import { Catch, HttpException, type ArgumentsHost, type ExceptionFilter } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import { logSafeUrl } from './log-url.js';
 
 /**
  * Log the error behind a 500. Without this, there is no error anywhere.
@@ -68,7 +69,7 @@ export class UnhandledErrorFilter implements ExceptionFilter {
       this.logger.error(
         {
           err: described,
-          req: { method: request.method, url: request.url, requestId: request.id },
+          req: { method: request.method, url: logSafeUrl(request.url), requestId: request.id },
           statusCode: status,
         },
         'request failed with an unhandled error',

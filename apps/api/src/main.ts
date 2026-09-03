@@ -11,6 +11,7 @@ import { redactConfig, type AppConfig } from '@aeg-clouddfir/config';
 import './common/http.js';
 import { getAppConfig } from './common/config.js';
 import { createLogger } from './common/logger.js';
+import { logSafeUrl } from './common/log-url.js';
 import { UnhandledErrorFilter } from './common/error-filter.js';
 import { resolveRequestId } from './common/request-id.js';
 import { AppModule } from './app.module.js';
@@ -89,7 +90,11 @@ async function bootstrap(): Promise<void> {
   fastify.addHook('onResponse', (request, reply, done) => {
     logger.info(
       {
-        req: { method: request.method, url: request.url, requestId: request.cdfirRequestId },
+        req: {
+          method: request.method,
+          url: logSafeUrl(request.url),
+          requestId: request.cdfirRequestId,
+        },
         res: { statusCode: reply.statusCode },
         durationMs: Math.round(reply.elapsedTime * 1000) / 1000,
       },
@@ -110,7 +115,11 @@ async function bootstrap(): Promise<void> {
     if (status >= 500) {
       logger.error(
         {
-          req: { method: request.method, url: request.url, requestId: request.cdfirRequestId },
+          req: {
+            method: request.method,
+            url: logSafeUrl(request.url),
+            requestId: request.cdfirRequestId,
+          },
           err: {
             name: error.name,
             message: error.message,

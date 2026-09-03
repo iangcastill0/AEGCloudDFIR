@@ -95,6 +95,13 @@ export const wizardStateSchema = z.object({
     includeSpam: z.boolean(),
     includeTrash: z.boolean(),
     includeRecoverableItems: z.boolean(),
+    chatAllConversations: z.boolean().default(true),
+    chatConversationIdsText: z.string().default(''),
+    chatIncludePublic: z.boolean().default(true),
+    chatIncludePrivate: z.boolean().default(true),
+    chatIncludeDms: z.boolean().default(false),
+    chatIncludeGroupDms: z.boolean().default(false),
+    chatIncludeArchived: z.boolean().default(false),
     driveAllRoots: z.boolean(),
     driveRootIdsText: z.string(),
     includeSharedDrives: z.boolean(),
@@ -151,6 +158,16 @@ export function freshWizard(idempotencyKey: string): WizardState {
       includeSpam: false,
       includeTrash: false,
       includeRecoverableItems: false,
+      chatAllConversations: true,
+      chatConversationIdsText: '',
+      chatIncludePublic: true,
+      chatIncludePrivate: true,
+      // Default off: reaching a custodian's DMs is a materially larger
+      // intrusion than reading a public channel, and it should be a decision
+      // someone made rather than a default they inherited.
+      chatIncludeDms: false,
+      chatIncludeGroupDms: false,
+      chatIncludeArchived: false,
       driveAllRoots: true,
       driveRootIdsText: '',
       includeSharedDrives: false,
@@ -330,6 +347,21 @@ export function validateStep(state: WizardState, step: number): string[] {
         errors.push('Add at least one custodian.');
       break;
     case STEP_SCOPE: {
+      if (state.sources.chat) {
+        const c = state.scope;
+        if (
+          c.chatAllConversations &&
+          !c.chatIncludePublic &&
+          !c.chatIncludePrivate &&
+          !c.chatIncludeDms &&
+          !c.chatIncludeGroupDms
+        ) {
+          errors.push('Select at least one kind of conversation to collect.');
+        }
+        if (!c.chatAllConversations && parseIdList(c.chatConversationIdsText).length === 0) {
+          errors.push('List at least one conversation id, or collect all conversations.');
+        }
+      }
       // Upload scope is fixed to the whole container: informational only.
       if (upload) break;
       const s = state.scope;
@@ -578,9 +610,10 @@ export function buildCreateRequest(state: WizardState): WebCreateCollectionReque
     });
   }
 
-  const sources: Array<'email' | 'drive' | 'audit'> = [];
+  const sources: Array<'email' | 'drive' | 'chat' | 'audit'> = [];
   if (state.sources.email) sources.push('email');
   if (state.sources.drive) sources.push('drive');
+  if (state.sources.chat) sources.push('chat');
   if (state.sources.audit) sources.push('audit');
 
   const body = {
@@ -609,6 +642,20 @@ export function buildCreateRequest(state: WizardState): WebCreateCollectionReque
               includeSpam: state.scope.includeSpam,
               includeTrash: state.scope.includeTrash,
               includeRecoverableItems: state.scope.includeRecoverableItems,
+            },
+          }
+        : {}),
+      ...(state.sources.chat
+        ? {
+            chat: {
+              conversationIds: state.scope.chatAllConversations
+                ? null
+                : parseIdList(state.scope.chatConversationIdsText),
+              includePublic: state.scope.chatIncludePublic,
+              includePrivate: state.scope.chatIncludePrivate,
+              includeDms: state.scope.chatIncludeDms,
+              includeGroupDms: state.scope.chatIncludeGroupDms,
+              includeArchived: state.scope.chatIncludeArchived,
             },
           }
         : {}),

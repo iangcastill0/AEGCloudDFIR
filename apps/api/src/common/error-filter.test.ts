@@ -18,7 +18,11 @@ function host(): {
       return this;
     },
   };
-  const request = { method: 'POST', url: '/api/v1/productions/x/validate', id: 'req-1' };
+  const request = {
+    method: 'POST',
+    url: '/api/v1/productions/x/validate?code=SECRETCODE',
+    id: 'req-1',
+  };
   return {
     host: {
       switchToHttp: () => ({ getResponse: () => reply, getRequest: () => request }),
@@ -47,6 +51,8 @@ describe('UnhandledErrorFilter', () => {
     const [payload] = logger.error.mock.calls[0] ?? [];
     const req = (payload as { req: { url: string; method: string; requestId: string } }).req;
     expect(req.url).toContain('/validate');
+    // An error on a callback must not log the credential either.
+    expect(req.url).not.toContain('SECRETCODE');
     expect(req.method).toBe('POST');
     expect(req.requestId).toBe('req-1');
   });

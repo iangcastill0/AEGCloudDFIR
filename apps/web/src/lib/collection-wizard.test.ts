@@ -602,3 +602,80 @@ describe('sourcesForProvider', () => {
     }
   });
 });
+
+describe('slack collections', () => {
+  function slackState() {
+    return {
+      ...freshWizard('idem-slack-1'),
+      provider: 'slack' as const,
+      name: 'Slack chat',
+      connectorAccountId: '3f1a2b4c-5d6e-4f70-8a9b-0c1d2e3f4a5b',
+      connectorMode: 'delegated' as const,
+      // custodianIds must be uuids: the request carries database ids, not the
+      // provider's own user id.
+      custodians: [{ id: '7b1c9d2e-3f40-4a51-8b62-9c73d84e95f0', email: 'U1@Team' }],
+      sources: { email: false, drive: false, chat: true, audit: false },
+    };
+  }
+
+  it('collects chat', () => {
+    expect(validateStep(slackState(), STEP_SOURCES)).toEqual([]);
+  });
+
+  it('refuses mail and drive, which Slack does not have', () => {
+    const s = { ...slackState(), sources: { email: true, drive: true, chat: true, audit: false } };
+    expect(validateStep(s, STEP_SOURCES).join(' ')).toMatch(/chat only/i);
+  });
+
+  it('selects chat automatically when the provider is chosen', () => {
+    // Slack has nothing else, so leaving the default "email" ticked would put
+    // the operator in the dead end Dropbox was in.
+    expect(
+      sourcesForProvider('slack', { email: true, drive: false, chat: false, audit: false }),
+    ).toEqual({ email: false, drive: false, chat: true, audit: false });
+  });
+
+  it('requires at least one kind of conversation', () => {
+    const s = slackState();
+    const scope = {
+      ...s.scope,
+      chatAllConversations: true,
+      chatIncludePublic: false,
+      chatIncludePrivate: false,
+      chatIncludeDms: false,
+      chatIncludeGroupDms: false,
+    };
+    expect(validateStep({ ...s, scope }, STEP_SCOPE).length).toBeGreaterThan(0);
+  });
+
+  it('requires ids when not collecting everything', () => {
+    const s = slackState();
+    const scope = { ...s.scope, chatAllConversations: false, chatConversationIdsText: '  ' };
+    expect(validateStep({ ...s, scope }, STEP_SCOPE).length).toBeGreaterThan(0);
+  });
+
+  it('leaves DMs out of the request unless they were ticked', () => {
+    // The default must not quietly reach a custodian's private messages.
+    const body = buildCreateRequest(slackState());
+    expect(body.scope.chat?.includeDms).toBe(false);
+    expect(body.scope.chat?.includePublic).toBe(true);
+  });
+
+  it('sends null conversation ids when collecting everything reachable', () => {
+    const body = buildCreateRequest(slackState());
+    expect(body.scope.chat?.conversationIds).toBeNull();
+  });
+
+  it('sends the explicit list when the operator named channels', () => {
+    const s = slackState();
+    const scope = {
+      ...s.scope,
+      chatAllConversations: false,
+      chatConversationIdsText: 'C01ABC, C02DEF',
+    };
+    expect(buildCreateRequest({ ...s, scope }).scope.chat?.conversationIds).toEqual([
+      'C01ABC',
+      'C02DEF',
+    ]);
+  });
+});
