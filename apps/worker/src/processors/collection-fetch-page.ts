@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto';
 import {
   DeltaExpiredError,
-  HistoryExpiredError,
   type DriveListPage,
   type EmailListPage,
+  HistoryExpiredError,
+  isTerminalSlackError,
 } from '@aeg-clouddfir/connectors';
 import { appendAuditEvent, withTenantContext, type Prisma } from '@aeg-clouddfir/database';
 import { sanitizeError, type WorkerContext } from '../context.js';
@@ -221,6 +222,28 @@ export async function processCollectionFetchPage(
       await handleExpiredCheckpoint(ctx, payload, checkpoint.id, checkpoint.version, err);
       return;
     }
+    // A Slack refusal that can never succeed is recorded once and the scope is
+    // closed. Observed on the first real collection: a DM the token could not
+    // read retried EIGHT times over nearly three minutes before dead-lettering,
+    // and the answer was never going to change. On a large workspace that waste
+    // adds up, and it buries the transient failures retries exist for.
+    if (isTerminalSlackError(err)) {
+      const detail = err instanceof Error ? err.message : String(err);
+      await withTenantContext(ctx.prisma, tenantId, (tx) =>
+        recordException(tx, {
+          tenantId,
+          collectionId,
+          custodianId,
+          source,
+          // The conversation exists but this grant cannot read it. That is a
+          // stated limit of the access, not a failure to collect — and the
+          // difference is what a reviewer needs.
+          kind: 'permission_denied',
+          message: `${scopeKey}: ${detail}`,
+        }),
+      );
+      return;
+    }
     throw err;
   }
 
@@ -272,7 +295,15 @@ export async function processCollectionFetchPage(
           custodianId,
           source,
           providerItemId: item.providerItemId,
-          ...(source === 'drive' ? { entry: entriesById.get(item.providerItemId)?.entry } : {}),
+          // Both drive and chat carry the provider element with the item:
+          // drive needs the listing entry to download, and chat IS the message
+          // (Slack returns it whole in the history, so there is nothing to
+          // fetch). Gating this on 'drive' alone skipped every Slack message
+          // with "payload is missing its message" — 2,054 of them, and zero
+          // evidence items, on the first real run.
+          ...(source === 'drive' || source === 'chat'
+            ? { entry: entriesById.get(item.providerItemId)?.entry }
+            : {}),
         } as Prisma.InputJsonValue,
       }));
       await tx.outboxEvent.createMany({ data: outboxRows, skipDuplicates: true });

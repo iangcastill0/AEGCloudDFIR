@@ -62,6 +62,7 @@ export {
   type RawDropboxPage,
 } from './dropbox/entries.js';
 export { dropboxApiArg } from './dropbox/api-arg.js';
+export { isTerminalSlackError } from './slack/terminal.js';
 export {
   SlackApiError,
   nextSlackCursor,
