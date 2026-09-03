@@ -150,7 +150,7 @@ export async function processCollectionFetchItem(
       // would double every request and could return a DIFFERENT answer if the
       // message were edited in between — and the bytes we were given are the
       // ones whose hash goes in the chain of custody.
-      if (payload.entry === undefined) {
+      if (payload.message === undefined) {
         throw new NonDownloadableError('chat item payload is missing its message', {
           kind: 'unavailable_item',
           providerItemId,
@@ -159,7 +159,7 @@ export async function processCollectionFetchItem(
       // Canonical JSON with sorted keys: two collections of the same message
       // must hash identically, and key order from a JSON parse is not
       // guaranteed to be stable across runs.
-      const canonical = canonicalJson(payload.entry);
+      const canonical = canonicalJson(payload.message);
       fetched = {
         readable: Readable.from(Buffer.from(canonical, 'utf8')),
         contentType: 'application/json; charset=utf-8',

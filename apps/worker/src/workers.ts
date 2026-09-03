@@ -1,4 +1,5 @@
-import { Worker, type Job } from 'bullmq';
+import { ZodError } from 'zod';
+import { UnrecoverableError, Worker, type Job } from 'bullmq';
 import type { Redis } from 'ioredis';
 import { sanitizeError, type WorkerContext } from './context.js';
 import { withJobAttempt } from './job-attempts.js';
@@ -103,7 +104,21 @@ export function createWorkers(ctx: WorkerContext, connection: Redis): Worker[] {
     const worker = new Worker(
       queueName,
       async (job: Job) => {
-        await withJobAttempt(ctx, queueName, job, () => handler(ctx, job.data));
+        // A payload that fails validation will fail identically on every
+        // attempt: the stored row does not change between them. Observed on a
+        // real Slack collection — every item retried EIGHT times on the same
+        // Zod error before dead-lettering, which is minutes of pure waste on a
+        // 2,000-message run and buries the transient failures retries exist for.
+        await withJobAttempt(ctx, queueName, job, async () => {
+          try {
+            await handler(ctx, job.data);
+          } catch (err) {
+            if (err instanceof ZodError) {
+              throw new UnrecoverableError(`invalid ${queueName} payload: ${err.message}`);
+            }
+            throw err;
+          }
+        });
       },
       {
         connection,

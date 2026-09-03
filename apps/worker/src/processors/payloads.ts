@@ -60,6 +60,20 @@ export const fetchItemPayload = z.object({
   providerItemId: z.string().min(1),
   /** Present for drive items only. */
   entry: driveEntryPayload.optional(),
+  /**
+   * Present for chat items only: the provider's message, exactly as returned.
+   *
+   * A field of its own rather than reusing `entry`. Reusing it was tried and
+   * failed on the first real run: the drive schema requires providerItemId,
+   * name and mimeType, a Slack message has none of them, and every item
+   * dead-lettered on a validation error that could never pass. A Slack message
+   * is not a drive entry, and a cast that says otherwise only moves the lie
+   * from the type checker to runtime.
+   *
+   * Unknown rather than a shape: the value of preserving the raw message is
+   * that it is complete, including fields this version has never seen.
+   */
+  message: z.unknown().optional(),
 });
 export type FetchItemPayload = z.infer<typeof fetchItemPayload>;
 

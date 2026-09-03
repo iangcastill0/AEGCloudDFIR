@@ -130,9 +130,9 @@ async function listOnePage(
       entries: summaries.map((m, index) => ({
         providerItemId: m.providerItemId,
         providerImmutableId: '',
-        // Reused rather than adding a parallel field: the payload already
-        // carries an opaque provider element for drive, and this is the same
-        // idea — the bytes we were given, passed to the item that preserves them.
+        // The provider's message, carried verbatim to the item that preserves
+        // it. Typed loosely on purpose: it is not a drive entry, and the value
+        // of keeping it is that nothing is dropped.
         entry: listed.messages[index] as unknown as DriveEntryPayload,
       })),
       ...(listed.nextCursor === undefined ? {} : { nextCursor: listed.nextCursor }),
@@ -295,15 +295,13 @@ export async function processCollectionFetchPage(
           custodianId,
           source,
           providerItemId: item.providerItemId,
-          // Both drive and chat carry the provider element with the item:
-          // drive needs the listing entry to download, and chat IS the message
-          // (Slack returns it whole in the history, so there is nothing to
-          // fetch). Gating this on 'drive' alone skipped every Slack message
-          // with "payload is missing its message" — 2,054 of them, and zero
-          // evidence items, on the first real run.
-          ...(source === 'drive' || source === 'chat'
-            ? { entry: entriesById.get(item.providerItemId)?.entry }
-            : {}),
+          // Drive needs its listing entry to download. Chat carries the
+          // message itself, because Slack returns it whole in the history and
+          // there is nothing left to fetch — but in its OWN field: the drive
+          // schema requires providerItemId, name and mimeType, and a Slack
+          // message has none of them.
+          ...(source === 'drive' ? { entry: entriesById.get(item.providerItemId)?.entry } : {}),
+          ...(source === 'chat' ? { message: entriesById.get(item.providerItemId)?.entry } : {}),
         } as Prisma.InputJsonValue,
       }));
       await tx.outboxEvent.createMany({ data: outboxRows, skipDuplicates: true });
