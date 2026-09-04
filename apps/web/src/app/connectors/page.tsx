@@ -106,6 +106,16 @@ export default function ConnectorsPage() {
             Connect Slack account
           </Button>
         </div>
+        <Notice variant="warning">
+          Microsoft, Google and Dropbox are sent an explicit instruction to show an account chooser,
+          so the account being connected is always chosen deliberately.{' '}
+          <strong>Slack offers no equivalent</strong> — its OAuth has no parameter that forces a
+          chooser or a re-login, so it connects whichever Slack account this browser is already
+          signed in to. To connect a different one, sign out of Slack in this browser first (or use
+          a private window), then click Connect. Check the identity shown in the list afterwards: it
+          is recorded as user@workspace, and it is the only confirmation of which account was
+          actually captured.
+        </Notice>
       </section>
 
       <section

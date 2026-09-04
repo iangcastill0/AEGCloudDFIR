@@ -65,7 +65,9 @@ import {
 } from '../auth/session.js';
 import {
   DROPBOX_DELEGATED_SCOPES,
+  DropboxDriveConnector,
   ImapEmailConnector,
+  SlackChatConnector,
   SLACK_USER_SCOPES,
   ProviderAuthError,
   buildDropboxAuthorizationUrl,
@@ -1275,6 +1277,57 @@ export class ConnectorsService {
               ? err.message
               : 'IMAP connection failed';
         }
+      }
+    } else if (account.provider === Provider.slack) {
+      // auth.test is exactly this: it proves the token AND reports which
+      // workspace and user it belongs to. Before this branch existed, a Slack
+      // connector fell through to the Google path below and tested itself
+      // against the GMAIL API — a 401 from googleapis.com that marked the
+      // connector `error` and read as "Slack is broken".
+      try {
+        const tokenProvider = await this.tokenProviderFor(account);
+        const chat = new SlackChatConnector({
+          tokenProvider,
+          baseUrl: this.config.CDFIR_SLACK_API_BASE_URL,
+          ...(this.fetchImpl === undefined ? {} : { fetchImpl: this.fetchImpl }),
+        });
+        const who = await chat.identify();
+        // A second call, because a valid token with the wrong scopes passes
+        // auth.test and then collects nothing.
+        const conversations = await chat.listConversations({
+          includePublic: true,
+          includePrivate: true,
+          includeDms: false,
+          includeGroupDms: false,
+          includeArchived: false,
+        });
+        const readable = conversations.filter((c) => c.isMember).length;
+        ok = true;
+        detail =
+          `ok: ${who.user} on ${who.team}; ${String(conversations.length)} conversations visible, ` +
+          `${String(readable)} readable by this account`;
+      } catch (err) {
+        ok = false;
+        detail = err instanceof Error ? err.message : 'Slack connection failed';
+      }
+    } else if (account.provider === Provider.dropbox) {
+      // Dropbox had the same fault: it also fell through to the Gmail test.
+      // Listing the account root proves the metadata scope, which is the one
+      // that was actually missing when the first real collection failed.
+      try {
+        const tokenProvider = await this.tokenProviderFor(account);
+        const drive = new DropboxDriveConnector({
+          tokenProvider,
+          rpcBase: this.config.CDFIR_DROPBOX_API_BASE_URL,
+          contentBase: this.config.CDFIR_DROPBOX_CONTENT_BASE_URL,
+          ...(this.fetchImpl === undefined ? {} : { fetchImpl: this.fetchImpl }),
+        });
+        const page = await drive.listFiles('me', {});
+        ok = true;
+        detail = `ok: ${String(page.items.length)} items visible in the account root`;
+      } catch (err) {
+        ok = false;
+        detail = err instanceof Error ? err.message : 'Dropbox connection failed';
       }
     } else {
       try {
