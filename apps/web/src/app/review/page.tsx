@@ -655,6 +655,14 @@ function ResultsPane(props: {
                         {item.name || '(no subject)'}
                       </button>
                       <div className="result-row__meta">
+                        {/* KNOWN GAP: Slack grants carry no email address, so
+                            every Slack message reads "unknown custodian" even
+                            though the custodian IS recorded. The honest fix is
+                            custodianDisplayName in the search document, which
+                            means a MAPPING_VERSION bump and a full reindex —
+                            not something to bolt on quietly. Faking an email
+                            here was tried and reverted: custodianEmail reaches
+                            the export CSV and the manifest. */}
                         {item.custodianEmail ?? 'unknown custodian'} ·{' '}
                         {formatDateTime(item.primaryDate)} · {item.sourcePath} ·{' '}
                         {item.extension || item.mimeType} · {formatBytes(item.size)}

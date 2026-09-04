@@ -229,8 +229,8 @@ export async function processCollectionFetchPage(
     // adds up, and it buries the transient failures retries exist for.
     if (isTerminalSlackError(err)) {
       const detail = err instanceof Error ? err.message : String(err);
-      await withTenantContext(ctx.prisma, tenantId, (tx) =>
-        recordException(tx, {
+      await withTenantContext(ctx.prisma, tenantId, async (tx) => {
+        await recordException(tx, {
           tenantId,
           collectionId,
           custodianId,
@@ -240,8 +240,16 @@ export async function processCollectionFetchPage(
           // difference is what a reviewer needs.
           kind: 'permission_denied',
           message: `${scopeKey}: ${detail}`,
-        }),
-      );
+        });
+        // Remove the checkpoint as well. Leaving it made the stalled-page
+        // sweeper resume the same unreadable conversation every pass: four
+        // identical permission_denied rows and then an expired_checkpoint on a
+        // real collection, for one DM that was never readable. Recording a
+        // permanent refusal once is the honest amount.
+        await tx.collectionCheckpoint.deleteMany({
+          where: { collectionId, custodianId, source, scopeKey },
+        });
+      });
       return;
     }
     throw err;

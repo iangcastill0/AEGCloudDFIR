@@ -1,10 +1,11 @@
 import { Readable } from 'node:stream';
 import type { ReadableStream as WebReadableStream } from 'node:stream/web';
 import {
-  GMAIL_ACCOUNT_FOLDER,
-  NonDownloadableError,
   type DriveEntry,
   type EmailApiMetadata,
+  GMAIL_ACCOUNT_FOLDER,
+  NonDownloadableError,
+  type RawSlackMessage,
 } from '@aeg-clouddfir/connectors';
 import { appendAuditEvent, withTenantContext, type Prisma } from '@aeg-clouddfir/database';
 import { sanitizeError, type WorkerContext } from '../context.js';
@@ -14,6 +15,7 @@ import {
   requireDrive,
   requireEmail,
 } from '../connector-factory.js';
+import { chatEvidenceFacts } from './chat-evidence.js';
 import { incrementProgress, recordException } from '../progress.js';
 import { QUEUES, dedupKeys } from '../queues.js';
 import type { FetchItemPayload } from './payloads.js';
@@ -47,6 +49,12 @@ export function canonicalJson(value: unknown): string {
 function toReadable(stream: ReadableStream<Uint8Array> | Uint8Array): Readable {
   if (stream instanceof Uint8Array) return Readable.from(Buffer.from(stream));
   return Readable.fromWeb(stream as unknown as WebReadableStream);
+}
+
+/** The conversation half of a `channel:ts` item id, or the whole id. */
+export function conversationIdOf(providerItemId: string): string {
+  const colon = providerItemId.indexOf(':');
+  return colon === -1 ? providerItemId : providerItemId.slice(0, colon);
 }
 
 function extensionOf(name: string): string {
@@ -213,14 +221,30 @@ export async function processCollectionFetchItem(
 
       const meta = fetched.emailMetadata;
       const isEmail = source === 'email';
+      const isChat = source === 'chat';
+      // A chat message is neither an email nor a file, and the manifest says
+      // whichever kind is recorded here.
+      const chat = isChat
+        ? chatEvidenceFacts(
+            // The conversation is the first half of the item id
+            // (`channel:ts`); the item payload carries no scope key of its own.
+            // indexOf returns -1 with no colon, and slice(0, -1) would silently
+            // drop the LAST character instead of failing — 'noColonHere' became
+            // 'noColonHer'.
+            conversationIdOf(providerItemId),
+            (payload.message ?? {}) as RawSlackMessage,
+          )
+        : null;
       const name = isEmail
         ? meta?.subject !== undefined && meta.subject !== ''
           ? meta.subject
           : '(no subject)'
-        : (entry?.name ?? providerItemId);
+        : (chat?.name ?? entry?.name ?? providerItemId);
       const primaryDate = isEmail
         ? (parseDate(meta?.receivedAt) ?? parseDate(meta?.sentAt))
-        : parseDate(entry?.modifiedAt);
+        : isChat
+          ? (chat?.primaryDate ?? null)
+          : parseDate(entry?.modifiedAt);
 
       const evidence = await tx.evidenceItem.create({
         data: {
@@ -228,16 +252,20 @@ export async function processCollectionFetchItem(
           custodianId,
           collectionId,
           blobId: blob.id,
-          kind: isEmail ? 'email' : 'file',
+          kind: isEmail ? 'email' : isChat ? 'chat_message' : 'file',
           name: name.slice(0, 500),
-          extension: isEmail ? 'eml' : extensionOf(entry?.name ?? ''),
+          extension: isEmail ? 'eml' : isChat ? 'json' : extensionOf(entry?.name ?? ''),
           mimeType: fetched.contentType ?? entry?.mimeType ?? 'application/octet-stream',
           size: BigInt(staged.size),
           sha256: staged.sha256,
           provider: loaded.connectorAccount?.provider ?? null,
           providerItemId,
           providerImmutableId,
-          sourcePath: isEmail ? (meta?.folderId ?? '') : (entry?.path ?? ''),
+          sourcePath: isEmail
+            ? (meta?.folderId ?? '')
+            : isChat
+              ? (chat?.sourcePath ?? '')
+              : (entry?.path ?? ''),
           sourceLabels: meta?.labelIds ?? [],
           isApiExportDerivative: fetched.apiExportDerivative,
           primaryDate,
@@ -267,6 +295,43 @@ export async function processCollectionFetchItem(
             hasAttachments: meta?.hasAttachments ?? false,
           },
         });
+      } else if (isChat) {
+        // The message text, stored as this item's extracted text. chat.text was
+        // being computed and thrown away: the field existed, a test asserted it
+        // existed "for extraction and search", and nothing consumed it — so a
+        // reviewer searching for words in a message would have matched the raw
+        // JSON instead.
+        const messageText = chat?.text ?? '';
+        if (messageText.trim() !== '') {
+          const put = await ctx.store.putDerivative(
+            tenantId,
+            evidence.id,
+            'chat-text',
+            1,
+            'message.txt',
+            Buffer.from(messageText, 'utf8'),
+            'text/plain; charset=utf-8',
+          );
+          await tx.extractedText.create({
+            data: {
+              tenantId,
+              evidenceItemId: evidence.id,
+              kind: 'file_text',
+              objectKey: put.objectKey,
+              sha256: put.sha256,
+              charCount: messageText.length,
+              extractorName: 'slack-message-text',
+              extractorVersion: '1',
+              version: 1,
+            },
+          });
+        }
+        // Deliberately no metadata row. A chat message is not in a drive, and
+        // the else-branch below was writing a driveMetadata row with an empty
+        // driveId and path for every message — junk that asserts a Slack
+        // message lives in a file store. chat_conversation is where the
+        // conversation's own facts belong, and that is not built yet.
+        void 0;
       } else {
         await tx.driveMetadata.create({
           data: {
@@ -324,7 +389,15 @@ export async function processCollectionFetchItem(
         data: [
           {
             tenantId,
-            topic: isEmail ? QUEUES.processParse : QUEUES.processExtract,
+            // Chat skips extraction: the message text is already known and was
+            // written above. Running Tika over the message JSON would index bot
+            // metadata, URLs and callback blobs as if a person had typed them,
+            // so a phrase search would match noise and miss meaning.
+            topic: isEmail
+              ? QUEUES.processParse
+              : isChat
+                ? QUEUES.searchIndex
+                : QUEUES.processExtract,
             dedupKey: dedupKeys.processStage(stage, evidence.id, 1),
             payload: { tenantId, evidenceItemId: evidence.id, version: 1 },
           },

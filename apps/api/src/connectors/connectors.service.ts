@@ -759,6 +759,12 @@ export class ConnectorsService {
           tenantId: flow.tenantId,
           connectorAccountId: account.id,
           externalId: granted.userId,
+          // Deliberately EMPTY. Slack's OAuth grant returns no email address,
+          // and custodianEmail is a column that reaches the export CSV and the
+          // manifest. Writing 'U0BUB4U82TT@Evestigate' there would put a
+          // fabricated email address into a legal artefact — worse than the
+          // "unknown custodian" label it was meant to fix. The display name
+          // carries the identity, and the UI falls back to it.
           email: '',
           displayName: externalIdentity,
         },
