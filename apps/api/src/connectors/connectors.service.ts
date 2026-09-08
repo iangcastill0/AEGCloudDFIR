@@ -83,6 +83,7 @@ import {
   parseServiceAccountKey,
   type ConnectorSecretRecord,
 } from './token-provider.factory.js';
+import { withProviderErrors } from './provider-error.js';
 
 const CONNECT_FLOW_TTL_SECONDS = 600;
 
@@ -385,6 +386,14 @@ export class ConnectorsService {
    * no longer be used. The detail says which kind of dead it is. IMAP is
    * excluded — it is created pending_auth too, but that only means "not tested
    * yet", and it holds a credential from the moment it exists.
+   *
+   * Organization mode is excluded for a different reason: there is no sign-in
+   * to abandon. The token is app-only, so externalIdentity is never filled in
+   * and the cutoff always matches. What an org connector waits for is a Global
+   * Administrator at the *customer's* company to open a link you emailed them —
+   * hours or days. Sweeping it after twenty minutes retired every org connector
+   * ever made, and a retired one cannot even be tested, so a consent that had
+   * really been granted had nothing left to attach to.
    */
   private async retireAbandonedFlows(auth: AuthContext): Promise<void> {
     // A grace period past the flow TTL: a slow sign-in should not be swept away
@@ -395,6 +404,7 @@ export class ConnectorsService {
         where: {
           tenantId: auth.tenantId,
           provider: { in: [Provider.microsoft, Provider.google] },
+          mode: { not: ConnectionMode.organization },
           status: { in: [ConnectorStatus.pending_auth, ConnectorStatus.error] },
           // No identity means the provider never told us who this is, so the
           // flow never reached the callback.
@@ -1468,11 +1478,17 @@ export class ConnectorsService {
       };
     }
 
-    const tokenProvider = await this.tokenProviderFor(account);
-    const directory = this.directoryFor(account, tokenProvider);
-    const page = await directory.listUsers({
-      search: query.search,
-      cursor: query.cursor,
+    // A refusal from the provider is not this server failing. Unwrapped, a
+    // Graph 403 escaped as a bare 500 with no body: an empty custodian list,
+    // no reason shown, and the browser retrying a permission error it could
+    // never get past.
+    const page = await withProviderErrors('Custodian lookup', async () => {
+      const tokenProvider = await this.tokenProviderFor(account);
+      const directory = this.directoryFor(account, tokenProvider);
+      return directory.listUsers({
+        search: query.search,
+        cursor: query.cursor,
+      });
     });
 
     const items = await withTenantContext(this.prisma, auth.tenantId, async (tx) => {

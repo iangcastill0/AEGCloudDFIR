@@ -156,6 +156,22 @@ describe('abandoned sign-ins', () => {
     expect(args.where.provider.in).not.toContain('imap');
     expect(args.where.provider.in).toEqual(['microsoft', 'google']);
   });
+
+  it('never retires an organization connector, which waits on an admin elsewhere', async () => {
+    // Organization mode has no sign-in to abandon: the token is app-only, so
+    // externalIdentity stays empty forever and the twenty-minute cutoff always
+    // matches. What it is really waiting for is a Global Administrator at
+    // another company to open an emailed link — hours or days, not minutes.
+    // Sweeping it left a live consent with no connector to attach to, and the
+    // retired row could not even be tested ("connector has been revoked").
+    const updateMany = vi.fn(async () => ({ count: 0 }));
+    const { service } = makeService({
+      connectorAccount: { findMany: vi.fn(async () => []), updateMany },
+    });
+    await service.list(auth, { limit: 100, cursor: null });
+    const args = updateMany.mock.calls[0]?.[0] as { where: { mode: { not: string } } };
+    expect(args.where.mode).toEqual({ not: 'organization' });
+  });
 });
 
 describe('ConnectorsService.create', () => {

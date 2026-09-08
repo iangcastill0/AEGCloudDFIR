@@ -1,13 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
 import { TenantRole } from '@aeg-clouddfir/database';
 import {
+  attemptFromState,
   buildAuthorizationParameters,
   callbackUrl,
+  clampAttempt,
   extractGroups,
+  loginRestartUrl,
   mapIdTokenClaims,
+  MAX_LOGIN_RESTARTS,
   oauthErrorFields,
   parseGroupRoleMap,
   rolesForGroups,
+  stateWithAttempt,
   validateRedirectTo,
 } from './oidc-helpers.js';
 
@@ -182,5 +187,55 @@ describe('oauthErrorFields', () => {
     for (const input of [null, undefined, 'oops', 7]) {
       expect(oauthErrorFields(input)).toEqual({});
     }
+  });
+});
+
+describe('login restart after a lost flow cookie', () => {
+  /**
+   * The callback restarts the login when the auth-flow cookie is gone. The
+   * counter cannot live in a cookie, because a missing cookie is the very thing
+   * that triggers the restart — so it rides in the OIDC `state`, the only value
+   * that survives the trip through the identity provider.
+   */
+  it('round-trips the attempt through the state', () => {
+    const state = stateWithAttempt('abc-DEF_123', 1);
+    expect(attemptFromState(state)).toBe(1);
+  });
+
+  it('reads a plain state as attempt zero', () => {
+    // Every normal login. base64url has no '.', so there is nothing to confuse.
+    expect(attemptFromState('abc-DEF_123')).toBe(0);
+    expect(attemptFromState(undefined)).toBe(0);
+    expect(attemptFromState(42)).toBe(0);
+  });
+
+  it('never lets a forged state buy extra restarts', () => {
+    // state comes back from the browser, so it is attacker-controlled. The most
+    // it can do is claim a high attempt, which only ends the loop sooner.
+    expect(attemptFromState('abc.a99')).toBe(MAX_LOGIN_RESTARTS);
+    expect(attemptFromState('abc.a-1')).toBe(0);
+    expect(attemptFromState('abc.aNaN')).toBe(0);
+    expect(attemptFromState('abc.a')).toBe(0);
+  });
+
+  it('stops the bounce after one restart', () => {
+    // A browser that keeps no cookies at all would otherwise ping-pong between
+    // the callback and the login endpoint forever.
+    const restarted = stateWithAttempt('xyz', MAX_LOGIN_RESTARTS);
+    expect(attemptFromState(restarted) < MAX_LOGIN_RESTARTS).toBe(false);
+  });
+
+  it('clamps the attempt query parameter', () => {
+    expect(clampAttempt('1')).toBe(MAX_LOGIN_RESTARTS);
+    expect(clampAttempt('0')).toBe(0);
+    expect(clampAttempt('99')).toBe(MAX_LOGIN_RESTARTS);
+    expect(clampAttempt('../evil')).toBe(0);
+    expect(clampAttempt(undefined)).toBe(0);
+  });
+
+  it('builds a restart URL on our own API host', () => {
+    expect(loginRestartUrl('https://api.example.com/', 1)).toBe(
+      'https://api.example.com/auth/login?attempt=1',
+    );
   });
 });

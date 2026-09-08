@@ -142,6 +142,52 @@ export function callbackUrl(apiPublicUrl: string): string {
 }
 
 /**
+ * How many times a login may restart itself from the callback.
+ *
+ * One. Either the second attempt works or something is wrong that another
+ * bounce will not fix.
+ */
+export const MAX_LOGIN_RESTARTS = 1;
+
+/**
+ * The restart counter is carried inside the OIDC `state`, not a cookie.
+ *
+ * That looks odd until you see what it is for. The callback restarts the login
+ * exactly when the auth-flow cookie is missing — so the cookie cannot be the
+ * thing that remembers how many times we have tried. `state` is the only value
+ * that makes the whole round trip through the identity provider and comes back
+ * to us. Without a counter, a browser that keeps no cookies at all would bounce
+ * between the callback and the login endpoint forever.
+ *
+ * `.` never appears in a base64url state, so the separator cannot collide with
+ * the random part.
+ */
+const ATTEMPT_SEPARATOR = '.a';
+
+export function stateWithAttempt(state: string, attempt: number): string {
+  return `${state}${ATTEMPT_SEPARATOR}${String(attempt)}`;
+}
+
+/** Attempt number encoded in a returned state; 0 for anything unreadable. */
+export function attemptFromState(state: unknown): number {
+  if (typeof state !== 'string') return 0;
+  const idx = state.lastIndexOf(ATTEMPT_SEPARATOR);
+  if (idx < 0) return 0;
+  return clampAttempt(state.slice(idx + ATTEMPT_SEPARATOR.length));
+}
+
+/** Attempt number from an `?attempt=` query value; 0 for anything unreadable. */
+export function clampAttempt(value: unknown): number {
+  if (typeof value !== 'string' || !/^\d{1,2}$/.test(value)) return 0;
+  return Math.min(Number(value), MAX_LOGIN_RESTARTS);
+}
+
+/** Where the callback sends a browser whose login flow has gone missing. */
+export function loginRestartUrl(apiPublicUrl: string, attempt: number): string {
+  return `${apiPublicUrl.replace(/\/+$/, '')}/auth/login?attempt=${String(attempt)}`;
+}
+
+/**
  * Protocol-level detail from a failed token exchange, for logging.
  *
  * openid-client reports every failure with the same message — "server responded

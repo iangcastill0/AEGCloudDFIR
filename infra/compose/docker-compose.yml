@@ -150,6 +150,13 @@ services:
 
   authentik-postgres:
     image: postgres:16-alpine
+    # Authentik carries sign-in for the whole product, so it must come back on
+    # its own. Without this the worker crashed during a disk-full incident
+    # (Redis could not snapshot, Celery died) and stayed down for ten days.
+    # Nothing noticed: the server kept serving logins while every background
+    # task queued up unconsumed — including blueprint application, which is
+    # authoritative for the OIDC client secret.
+    restart: unless-stopped
     environment:
       POSTGRES_DB: authentik
       POSTGRES_USER: authentik
@@ -164,6 +171,7 @@ services:
 
   authentik-redis:
     image: redis:7-alpine
+    restart: unless-stopped
     healthcheck:
       test: ['CMD', 'redis-cli', 'ping']
       interval: 5s
@@ -173,6 +181,7 @@ services:
   authentik-server:
     image: ghcr.io/goauthentik/server:2025.4
     command: server
+    restart: unless-stopped
     environment:
       AUTHENTIK_SECRET_KEY: ${CDFIR_LOCAL_AUTHENTIK_SECRET:-local-dev-secret-generate-your-own-0000}
       AUTHENTIK_POSTGRESQL__HOST: authentik-postgres
@@ -211,6 +220,7 @@ services:
   authentik-worker:
     image: ghcr.io/goauthentik/server:2025.4
     command: worker
+    restart: unless-stopped
     environment:
       AUTHENTIK_SECRET_KEY: ${CDFIR_LOCAL_AUTHENTIK_SECRET:-local-dev-secret-generate-your-own-0000}
       AUTHENTIK_POSTGRESQL__HOST: authentik-postgres

@@ -24,12 +24,17 @@ import { AuditService } from '../audit/audit.service.js';
 import { AuthService } from './auth.service.js';
 import { OidcService } from './oidc.service.js';
 import {
+  MAX_LOGIN_RESTARTS,
+  attemptFromState,
   buildAuthorizationParameters,
+  clampAttempt,
   extractGroups,
+  loginRestartUrl,
   mapIdTokenClaims,
   oauthErrorFields,
   parseGroupRoleMap,
   rolesForGroups,
+  stateWithAttempt,
   validateRedirectTo,
 } from './oidc-helpers.js';
 import {
@@ -48,6 +53,17 @@ import { Public } from './guards/public.decorator.js';
 import { SessionGuard } from './guards/session.guard.js';
 
 const AUTH_FLOW_TTL_SECONDS = 600;
+
+/**
+ * Auth responses must never be stored. The login redirect carries the state,
+ * the nonce, the PKCE challenge and a Set-Cookie; the callback URL carries an
+ * authorization code. Nothing was setting this — helmet does not — so the only
+ * thing keeping them out of a cache was that a 302 is not heuristically
+ * cacheable. That is a rule about browsers, not about every proxy in between.
+ */
+function noStore(reply: FastifyReply): void {
+  void reply.header('cache-control', 'no-store');
+}
 
 const selectTenantSchema = z.object({ tenantId: z.string().uuid() });
 
@@ -98,11 +114,15 @@ export class AuthController {
   @Get('login')
   async login(
     @Query('redirectTo') redirectTo: string | undefined,
+    @Query('attempt') attempt: string | undefined,
     @Res() reply: FastifyReply,
   ): Promise<void> {
+    noStore(reply);
     const verifier = this.oidc.generatePkceVerifier();
     const codeChallenge = await this.oidc.calculatePkceChallenge(verifier);
-    const state = this.oidc.generateState();
+    // The attempt rides in the state so a restarted login cannot restart again
+    // forever; see MAX_LOGIN_RESTARTS.
+    const state = stateWithAttempt(this.oidc.generateState(), clampAttempt(attempt));
     const nonce = this.oidc.generateNonce();
 
     const authorizationUrl = await this.oidc.buildAuthorizationUrl(
@@ -135,10 +155,29 @@ export class AuthController {
   @Public()
   @Get('callback')
   async callback(@Req() request: FastifyRequest, @Res() reply: FastifyReply): Promise<void> {
+    noStore(reply);
     const sealedFlow = request.cookies?.[AUTH_FLOW_COOKIE];
     const flow = typeof sealedFlow === 'string' ? openAuthFlow(this.key, sealedFlow) : null;
     if (!flow) {
-      throw new BadRequestException('login flow missing or expired; restart login');
+      // Start a fresh login instead of dead-ending.
+      //
+      // This used to answer 400 and stop. Reloading the page could never help:
+      // the authorization code is single-use and the flow cookie lives ten
+      // minutes, so a callback URL that is reopened later — a refreshed error
+      // page, a tab restored from yesterday, an address-bar autocomplete — is
+      // permanently unusable. Staging logged eight of these in one session
+      // against a single real sign-in, and the operator had no way forward
+      // except to know the login URL by heart.
+      const attempt = attemptFromState(
+        (request.query as Record<string, unknown> | undefined)?.state,
+      );
+      if (attempt < MAX_LOGIN_RESTARTS) {
+        reply.redirect(302, loginRestartUrl(this.config.CDFIR_API_PUBLIC_URL, attempt + 1));
+        return;
+      }
+      throw new BadRequestException(
+        'could not start a login session. Check that cookies are enabled for this site, then try again.',
+      );
     }
 
     const currentUrl = new URL(request.url, this.config.CDFIR_API_PUBLIC_URL);
