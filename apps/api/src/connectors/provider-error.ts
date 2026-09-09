@@ -68,13 +68,43 @@ export function providerHttpError(err: unknown, action: string): HttpException |
   return null;
 }
 
-/** Run `fn`, converting provider failures into HTTP answers. */
-export async function withProviderErrors<T>(action: string, fn: () => Promise<T>): Promise<T> {
+/** What a provider failure is worth writing down. */
+export function providerErrorFields(err: unknown, action: string): Record<string, unknown> {
+  const base: Record<string, unknown> = { action };
+  if (err instanceof ProviderApiError) {
+    base['providerStatus'] = err.status;
+    if (err.providerCode !== undefined) base['providerCode'] = err.providerCode;
+    if (err.requestId !== undefined) base['providerRequestId'] = err.requestId;
+  }
+  base['detail'] = err instanceof Error ? err.message : String(err);
+  return base;
+}
+
+export interface ProviderErrorLogger {
+  warn: (obj: Record<string, unknown>, msg: string) => void;
+}
+
+/**
+ * Run `fn`, converting provider failures into HTTP answers.
+ *
+ * `log` is not optional decoration. Mapping these to 4xx means the
+ * unhandled-error filter no longer sees them — it only logs 500 and above, on
+ * purpose. Without a line here, the provider's own words (`403`,
+ * `Authorization_RequestDenied`, their request id) would reach the browser and
+ * nothing else, and the next person reading the logs would see a bare status
+ * code. That is the exact failure the error filter was written to end.
+ */
+export async function withProviderErrors<T>(
+  action: string,
+  fn: () => Promise<T>,
+  log?: ProviderErrorLogger,
+): Promise<T> {
   try {
     return await fn();
   } catch (err) {
     const mapped = providerHttpError(err, action);
     if (mapped === null) throw err;
+    log?.warn(providerErrorFields(err, action), 'provider refused a request');
     throw mapped;
   }
 }

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ConnectorError, ProviderApiError } from '@aeg-clouddfir/connectors';
 import { ConnectorCredentialsError } from './token-provider.factory.js';
 import { providerHttpError, withProviderErrors } from './provider-error.js';
@@ -80,6 +80,49 @@ describe('withProviderErrors', () => {
   });
 
   it('converts a provider error', async () => {
+    await expect(
+      withProviderErrors('Custodian lookup', () => Promise.reject(apiError(403))),
+    ).rejects.toMatchObject({ status: 409 });
+  });
+});
+
+describe('provider failures stay visible in the log', () => {
+  /**
+   * Mapping these to 4xx takes them out of the unhandled-error filter's reach:
+   * it logs 500 and above only, deliberately. Without a line of our own, the
+   * provider's reason would reach the browser and nowhere else, and the log
+   * would show a bare status code — the exact hole the error filter exists to
+   * close.
+   */
+  it('writes the provider status, code and request id', async () => {
+    const warn = vi.fn();
+    const err = new ProviderApiError('listUsers: provider returned HTTP 403', {
+      status: 403,
+      providerCode: 'Authorization_RequestDenied',
+      requestId: '19506504-3f4a-4127-bfdd-903d27d78193',
+    });
+    await expect(
+      withProviderErrors('Custodian lookup', () => Promise.reject(err), { warn }),
+    ).rejects.toMatchObject({ status: 409 });
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]?.[0]).toMatchObject({
+      action: 'Custodian lookup',
+      providerStatus: 403,
+      providerCode: 'Authorization_RequestDenied',
+      providerRequestId: '19506504-3f4a-4127-bfdd-903d27d78193',
+    });
+  });
+
+  it('does not log our own bugs — the error filter still owns those', async () => {
+    const warn = vi.fn();
+    await expect(
+      withProviderErrors('Custodian lookup', () => Promise.reject(new TypeError('boom')), { warn }),
+    ).rejects.toBeInstanceOf(TypeError);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('works without a logger', async () => {
     await expect(
       withProviderErrors('Custodian lookup', () => Promise.reject(apiError(403))),
     ).rejects.toMatchObject({ status: 409 });

@@ -24,6 +24,7 @@ beforeEach(() => {
 function connector(
   mode: 'delegated' | 'organization' = 'delegated',
   onRateLimit?: RateLimitObserver,
+  onUrl?: (url: string) => void,
 ) {
   return new GraphEmailConnector({
     tokenProvider: new StaticTokenProvider('fake-token'),
@@ -31,6 +32,14 @@ function connector(
     mode,
     onRateLimit,
     sleepImpl: () => Promise.resolve(),
+    ...(onUrl === undefined
+      ? {}
+      : {
+          fetchImpl: (url: string | URL, init?: RequestInit) => {
+            onUrl(typeof url === 'string' ? url : url.toString());
+            return fetch(url, init);
+          },
+        }),
   });
 }
 
@@ -126,6 +135,23 @@ describe('GraphEmailConnector.fetchMessage', () => {
     expect(md.bodyContentType).toBe('html');
     const inline = md.attachments?.find((a) => a.isInline === true);
     expect(inline?.contentId).toBe('logo-cid@example.com');
+  });
+
+  it('type-casts contentId in the attachment $select, or Graph rejects the request', async () => {
+    // The bug this exists for: contentId is declared on fileAttachment, not on
+    // the base attachment type $expand returns, so an uncast select made Graph
+    // fail the WHOLE call with
+    //   400 Parsing OData Select and Expand failed: Could not find a property
+    //   named 'contentId' on type 'microsoft.graph.attachment'
+    // Every message with an attachment failed. The fixture answered happily, so
+    // nothing here noticed — which is why this asserts the URL we send rather
+    // than the body we get back.
+    const urls: string[] = [];
+    await connector(undefined, undefined, (url) => urls.push(url)).fetchMessage('me', 'm-001');
+    const metaUrl = urls.find((u) => u.includes('$expand=attachments'));
+    expect(metaUrl).toBeDefined();
+    expect(metaUrl).toContain('microsoft.graph.fileAttachment/contentId');
+    expect(metaUrl).not.toMatch(/\(\$select=[^)]*[,(]contentId[,)]/);
   });
 
   it('omits bccRecipients when the API returned none', async () => {

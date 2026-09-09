@@ -89,6 +89,20 @@ export class ClamdClient implements ClamAvClient {
   async scanStream(data: Readable): Promise<ClamScanResult> {
     const socket = await connect(this.host, this.port, this.timeoutMs);
     const replyPromise = readReply(socket);
+    // Park a rejection handler NOW.
+    //
+    // replyPromise is created here and only awaited at the end of the method.
+    // Anything that throws in between — and the write loop below can — leaves
+    // it floating, and a floating rejected promise is an unhandled rejection,
+    // which takes down the entire Node process. That is not theoretical: it
+    // killed the production worker twice in one evening, the second time 28
+    // seconds after being restarted, stranding a whole collection and a PST
+    // upload behind ~10,000 queued jobs while the UI still said "fetching".
+    //
+    // .catch() returns a new promise and leaves this one rejected-but-handled,
+    // so the real `await` further down still sees the error.
+    void replyPromise.catch(() => undefined);
+
     socket.write('zINSTREAM\0');
 
     const writeChunk = (chunk: Buffer): Promise<void> =>
@@ -102,13 +116,23 @@ export class ClamdClient implements ClamAvClient {
 
     try {
       for await (const raw of data) {
+        // clamd answers before the stream finishes whenever it has made up its
+        // mind: a signature hit, or an abort such as INSTREAM size limit
+        // exceeded. readReply ends our side of the socket the moment that reply
+        // lands, so every later chunk throws ERR_STREAM_WRITE_AFTER_END. There
+        // is nothing left to send at that point — the verdict is already in
+        // flight — so stop feeding it.
+        if (socket.writableEnded) break;
         const buf = Buffer.isBuffer(raw) ? raw : Buffer.from(raw as Uint8Array);
         for (let offset = 0; offset < buf.byteLength; offset += CHUNK_SIZE) {
+          if (socket.writableEnded) break;
           await writeChunk(buf.subarray(offset, offset + CHUNK_SIZE));
         }
       }
-      const terminator = Buffer.alloc(4);
-      socket.write(terminator);
+      if (!socket.writableEnded) {
+        const terminator = Buffer.alloc(4);
+        socket.write(terminator);
+      }
     } catch (err) {
       socket.destroy();
       throw err;

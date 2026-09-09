@@ -26,6 +26,7 @@ name: cdfir
 services:
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_DB: cdfir
       POSTGRES_USER: postgres
@@ -48,6 +49,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     command: ['redis-server', '--appendonly', 'yes', '--maxmemory-policy', 'noeviction']
     volumes:
       - redis-data:/data
@@ -61,6 +63,7 @@ services:
 
   opensearch:
     image: opensearchproject/opensearch:2.19.1
+    restart: unless-stopped
     environment:
       discovery.type: single-node
       # Authentication is ON by default. Set CDFIR_OPENSEARCH_SECURITY_DISABLED=true
@@ -95,6 +98,7 @@ services:
 
   minio:
     image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    restart: unless-stopped
     command: ['server', '/data', '--console-address', ':9001']
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -127,6 +131,7 @@ services:
   clamav:
     # clamav-debian is the multi-arch (amd64+arm64) distribution of the same release
     image: clamav/clamav-debian:1.4
+    restart: unless-stopped
     volumes:
       - clamav-data:/var/lib/clamav
     ports:
@@ -140,6 +145,7 @@ services:
 
   tika:
     image: apache/tika:2.9.2.1-full
+    restart: unless-stopped
     ports:
       - '127.0.0.1:${CDFIR_TIKA_HOST_PORT:-9998}:9998'
     healthcheck:
@@ -263,6 +269,7 @@ services:
 
   api:
     image: ghcr.io/iangcastill0/aegclouddfir/api:${CDFIR_IMAGE_TAG:-dev}
+    restart: unless-stopped
     logging:
       driver: json-file
       options: { max-size: '10m', max-file: '3' }
@@ -299,6 +306,12 @@ services:
 
   worker:
     image: ghcr.io/iangcastill0/aegclouddfir/worker:${CDFIR_IMAGE_TAG:-dev}
+    # A crashed worker means collection silently stops. It happened: an
+    # unhandled stream 'error' (a fetch timeout on a Readable with no error
+    # listener) killed the process mid-collection, 9,088 jobs stayed queued,
+    # and the UI still read "fetching" for half an hour. Nothing restarted it,
+    # because none of the app services had a policy.
+    restart: unless-stopped
     logging:
       driver: json-file
       options: { max-size: '10m', max-file: '3' }
@@ -336,6 +349,7 @@ services:
 
   web:
     image: ghcr.io/iangcastill0/aegclouddfir/web:${CDFIR_IMAGE_TAG:-dev}
+    restart: unless-stopped
     logging:
       driver: json-file
       options: { max-size: '10m', max-file: '3' }

@@ -52,7 +52,8 @@ import {
 import type { FastifyRequest } from 'fastify';
 import '../common/http.js';
 import type { AuthContext } from '../common/http.js';
-import { APP_CONFIG, CONNECTOR_FETCH, KEY_ENCRYPTION, PRISMA } from '../common/tokens.js';
+import { APP_CONFIG, CONNECTOR_FETCH, KEY_ENCRYPTION, LOGGER, PRISMA } from '../common/tokens.js';
+import type { AppLogger } from '../common/logger.js';
 import { assertWithinQuota, readQuota } from '../common/quotas.js';
 import { zodValidate } from '../common/zod-validate.js';
 import type { CursorQuery } from '../common/pagination.js';
@@ -217,6 +218,8 @@ export class ConnectorsService {
     @Inject(KEY_ENCRYPTION) private readonly kek: KeyEncryptionProvider,
     private readonly audit: AuditService,
     @Optional() @Inject(CONNECTOR_FETCH) private readonly fetchImpl?: FetchLike,
+    // Optional so the unit tests can build the service without a logger.
+    @Optional() @Inject(LOGGER) private readonly logger?: AppLogger,
   ) {
     this.sealingKey = deriveSealingKey(config.CDFIR_SESSION_SECRET);
   }
@@ -1482,14 +1485,18 @@ export class ConnectorsService {
     // Graph 403 escaped as a bare 500 with no body: an empty custodian list,
     // no reason shown, and the browser retrying a permission error it could
     // never get past.
-    const page = await withProviderErrors('Custodian lookup', async () => {
-      const tokenProvider = await this.tokenProviderFor(account);
-      const directory = this.directoryFor(account, tokenProvider);
-      return directory.listUsers({
-        search: query.search,
-        cursor: query.cursor,
-      });
-    });
+    const page = await withProviderErrors(
+      'Custodian lookup',
+      async () => {
+        const tokenProvider = await this.tokenProviderFor(account);
+        const directory = this.directoryFor(account, tokenProvider);
+        return directory.listUsers({
+          search: query.search,
+          cursor: query.cursor,
+        });
+      },
+      this.logger,
+    );
 
     const items = await withTenantContext(this.prisma, auth.tenantId, async (tx) => {
       const upserted: CustodianDto[] = [];

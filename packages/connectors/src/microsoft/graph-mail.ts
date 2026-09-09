@@ -34,6 +34,35 @@ const IMMUTABLE_ID_PREFER = 'IdType="ImmutableId"';
 const MESSAGE_LIST_SELECT =
   'id,internetMessageId,conversationId,receivedDateTime,hasAttachments,categories,flag,isRead';
 
+/**
+ * `$select` for the expanded attachment collection.
+ *
+ * `contentId` must carry the `microsoft.graph.fileAttachment/` type cast.
+ * It is declared on fileAttachment, not on the base attachment type that
+ * `$expand=attachments` returns, and Graph rejects the WHOLE request when a
+ * selected property is not on the base type:
+ *
+ *   400 BadRequest - Parsing OData Select and Expand failed: Could not find a
+ *   property named 'contentId' on type 'microsoft.graph.attachment'.
+ *
+ * Uncast, this failed every single message that had an attachment — a real
+ * collection logged 799 failed items behind it. The unit tests never saw it,
+ * because they answer the fetch from a fixture and nothing checks the query
+ * string against a live Graph. All three shapes here were tried against the
+ * real API before this was written: uncast is a hard 400, cast returns 200 with
+ * contentId, and dropping contentId returns 200 but loses the cid -> child
+ * mapping that inline images in the safe preview depend on
+ * (apps/worker/src/processors/process-parse.ts).
+ */
+const ATTACHMENT_SELECT = [
+  'id',
+  'name',
+  'contentType',
+  'size',
+  'isInline',
+  'microsoft.graph.fileAttachment/contentId',
+].join(',');
+
 const MESSAGE_FULL_SELECT = [
   'id',
   'subject',
@@ -262,7 +291,7 @@ export class GraphEmailConnector implements EmailConnector {
     const metaUrl =
       `${this.base}${seg}/messages/${encoded}` +
       `?$select=${MESSAGE_FULL_SELECT}` +
-      `&$expand=attachments($select=id,name,contentType,size,isInline,contentId)`;
+      `&$expand=attachments($select=${ATTACHMENT_SELECT})`;
     const metaRes = await ensureOk(
       await this.get(metaUrl, { Prefer: IMMUTABLE_ID_PREFER }),
       'fetchMessage(metadata)',
