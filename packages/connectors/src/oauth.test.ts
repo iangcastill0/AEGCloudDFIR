@@ -106,6 +106,10 @@ describe('MicrosoftDelegatedTokenSource', () => {
   });
 
   it('token failures never echo the client secret', async () => {
+    // The provider's description IS now included — without it a real outage
+    // logged 6,720 failures that named no cause at all. What must never come
+    // with it is a credential, and an identity provider is free to quote the
+    // request back at you: this body contains the client secret verbatim.
     const { fetchImpl } = tokenFetch([
       () =>
         new Response(
@@ -118,7 +122,11 @@ describe('MicrosoftDelegatedTokenSource', () => {
     expect(err).toBeInstanceOf(ProviderAuthError);
     expect((err as ProviderAuthError).providerCode).toBe('invalid_grant');
     expect((err as ProviderAuthError).message).not.toContain('ms-secret-value');
-    expect((err as ProviderAuthError).message).not.toContain('leaked');
+    // The refresh token submitted alongside it is stripped the same way.
+    expect((err as ProviderAuthError).message).not.toContain('refresh-1');
+    // …and the surrounding text survives, which is the whole point.
+    expect((err as ProviderAuthError).message).toContain('invalid_grant');
+    expect((err as ProviderAuthError).message).toContain('[redacted]');
   });
 });
 
@@ -136,6 +144,87 @@ describe('MicrosoftAppTokenSource', () => {
     expect(calls[0]?.url).toBe('https://login.example/tenant-xyz/oauth2/v2.0/token');
     expect(calls[0]?.body.get('grant_type')).toBe('client_credentials');
     expect(calls[0]?.body.get('scope')).toBe('https://graph.microsoft.com/.default');
+  });
+});
+
+describe('token endpoint failures say what went wrong', () => {
+  /**
+   * This used to read only "token endpoint ... returned HTTP 400". The OAuth
+   * code was attached to the error object but never to the message, and
+   * error_description was discarded outright — so a production worker logged
+   * 6,720 identical failures without once naming the cause, and the only way
+   * to find it was replaying the token request by hand. It was
+   * AADSTS7000112: the customer had disabled the application in their tenant.
+   */
+  function failing(body: unknown, status = 400): FetchLike {
+    return () =>
+      Promise.resolve(
+        new Response(JSON.stringify(body), {
+          status,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+  }
+
+  function source(fetchImpl: FetchLike) {
+    return new MicrosoftAppTokenSource({
+      msLoginBaseUrl: 'https://login.example',
+      tenantId: 'tenant-xyz',
+      clientId: 'client-1',
+      clientSecret: 's',
+      fetchImpl,
+    });
+  }
+
+  it('names the OAuth code and the provider description', async () => {
+    const err = await source(
+      failing({
+        error: 'unauthorized_client',
+        error_description:
+          "AADSTS7000112: Application 'abc'(AEGCloudDFIR) is disabled. Trace ID: 1 Timestamp: 2",
+      }),
+    )
+      .getAccessToken()
+      .catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(ProviderAuthError);
+    const message = (err as Error).message;
+    expect(message).toContain('unauthorized_client');
+    expect(message).toContain('AADSTS7000112');
+    expect(message).toContain('is disabled');
+    // Still carried on the object, for the retry classifier.
+    expect((err as ProviderAuthError).providerCode).toBe('unauthorized_client');
+  });
+
+  it('keeps working when the provider sends no description', async () => {
+    const err = await source(failing({ error: 'invalid_client' }))
+      .getAccessToken()
+      .catch((e: unknown) => e);
+    const message = (err as Error).message;
+    expect(message).toContain('invalid_client');
+    expect(message).not.toContain('undefined');
+  });
+
+  it('still reports the status when the body is not usable at all', async () => {
+    const fetchImpl: FetchLike = () =>
+      Promise.resolve(new Response('<html>502</html>', { status: 502 }));
+    const err = await source(fetchImpl)
+      .getAccessToken()
+      .catch((e: unknown) => e);
+    expect((err as Error).message).toContain('502');
+  });
+
+  it('redacts anything token-shaped out of the description', async () => {
+    // An identity provider can put anything in here; a long opaque run is far
+    // more often a credential than a sentence.
+    const secret = 'a'.repeat(60);
+    const err = await source(
+      failing({ error: 'invalid_grant', error_description: `bad assertion ${secret}` }),
+    )
+      .getAccessToken()
+      .catch((e: unknown) => e);
+    expect((err as Error).message).not.toContain(secret);
+    expect((err as Error).message).toContain('[redacted]');
   });
 });
 

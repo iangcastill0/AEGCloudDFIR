@@ -6,7 +6,7 @@
  */
 import { SignJWT, importPKCS8 } from 'jose';
 import { z } from 'zod';
-import { DEFAULT_TIMEOUT_MS, sanitizeUrl, type FetchLike } from './http.js';
+import { DEFAULT_TIMEOUT_MS, redactProviderDetail, sanitizeUrl, type FetchLike } from './http.js';
 import { DomainNotAllowedError, ProviderAuthError, type TokenProvider } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -114,7 +114,35 @@ export interface ExchangedTokens {
   scope?: string;
 }
 
-const errorBodySchema = z.object({ error: z.string().optional() });
+const errorBodySchema = z.object({
+  error: z.string().optional(),
+  error_description: z.string().optional(),
+});
+
+/**
+ * Parameters whose values are credentials. An identity provider is free to
+ * quote the request back at you inside error_description, and at least one
+ * does; echoing that verbatim would put the client secret in the log.
+ */
+const SECRET_PARAMS = [
+  'client_secret',
+  'refresh_token',
+  'assertion',
+  'client_assertion',
+  'code',
+] as const;
+
+/** Remove any submitted credential value that the provider echoed back. */
+function stripSubmittedSecrets(text: string, params: Record<string, string>): string {
+  let out = text;
+  for (const key of SECRET_PARAMS) {
+    const value = params[key];
+    // Very short values are more likely to be ordinary words than credentials,
+    // and blanking them would mangle the message for no gain.
+    if (value !== undefined && value.length >= 4) out = out.split(value).join('[redacted]');
+  }
+  return out;
+}
 
 async function postTokenForm(
   url: string,
@@ -134,14 +162,36 @@ async function postTokenForm(
   }
   if (!response.ok) {
     let providerCode: string | undefined;
+    let description = '';
     try {
-      providerCode = errorBodySchema.parse(await response.json()).error;
+      const body = errorBodySchema.parse(await response.json());
+      providerCode = body.error;
+      description = body.error_description ?? '';
     } catch {
       providerCode = undefined;
     }
-    // Only the OAuth error code (e.g. invalid_grant) is echoed, never the body.
+    // Say WHICH failure this is, in the message itself.
+    //
+    // This used to read only "returned HTTP 400". The OAuth code was attached
+    // to the error object but never to the string, and error_description was
+    // thrown away — so the log said nothing useful and the only way to learn
+    // the cause was to replay the token request by hand. That happened for
+    // real: 6,720 identical failures in five minutes, and the reason
+    // (AADSTS7000112: the application had been disabled in the customer's
+    // tenant) appeared nowhere.
+    //
+    // The description is protocol-level text from the identity provider, not
+    // token material, and redactProviderDetail strips bearer tokens and long
+    // opaque strings before it is echoed.
+    const detail = [
+      providerCode,
+      redactProviderDetail(stripSubmittedSecrets(description, params), 200),
+    ]
+      .filter((part) => part !== undefined && part !== '')
+      .join(': ');
     throw new ProviderAuthError(
-      `token endpoint ${sanitizeUrl(url)} returned HTTP ${response.status}`,
+      `token endpoint ${sanitizeUrl(url)} returned HTTP ${response.status}` +
+        (detail === '' ? '' : ` — ${detail}`),
       { status: response.status, providerCode },
     );
   }

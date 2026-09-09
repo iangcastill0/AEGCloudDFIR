@@ -29,6 +29,7 @@ import {
 } from './processors/payloads.js';
 import { BACKOFF_STRATEGIES, DEFAULT_JOB_OPTIONS, QUEUES, type QueueName } from './queues.js';
 import { failureTargetFor, isTerminalFailure, recordTerminalFailure } from './terminal-failure.js';
+import { classifyProviderError } from './permanent-errors.js';
 
 /** Per-queue concurrency: IO-heavy stages fan out; run-level stages serialize. */
 export const QUEUE_CONCURRENCY: Record<QueueName, number> = {
@@ -115,6 +116,16 @@ export function createWorkers(ctx: WorkerContext, connection: Redis): Worker[] {
           } catch (err) {
             if (err instanceof ZodError) {
               throw new UnrecoverableError(`invalid ${queueName} payload: ${err.message}`);
+            }
+            // Same principle, different source: some provider answers cannot
+            // change between attempts either. A customer disabling our app in
+            // their tenant produced 6,720 identical token failures in five
+            // minutes, all of them waiting on a person in another company.
+            const verdict = classifyProviderError(err);
+            if (verdict.permanent) {
+              throw new UnrecoverableError(
+                `${verdict.reason}: ${err instanceof Error ? err.message : String(err)}`,
+              );
             }
             throw err;
           }
