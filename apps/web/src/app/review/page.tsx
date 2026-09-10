@@ -1155,7 +1155,13 @@ function ContentTab({
 
   const body =
     !preview || preview.kind === 'none' ? (
-      <p>No safe preview is available for this item.</p>
+      // The note now says WHY — "this is a ZIP archive", "this is a video" —
+      // rather than the bare sentence every attachment used to get.
+      <p>
+        {preview?.content !== undefined && preview.content !== ''
+          ? preview.content
+          : 'No preview is available for this item. The native file can be downloaded.'}
+      </p>
     ) : preview.kind === 'safe_html' ? (
       // sandbox="" (fully restrictive): no scripts, no same-origin, no forms.
       <iframe
@@ -1164,6 +1170,24 @@ function ContentTab({
         srcDoc={preview.content}
         title="Sanitized evidence preview"
       />
+    ) : preview.kind === 'image' ? (
+      // Collected pictures, and document pages rasterised to PNG. Rendering
+      // through <img> means no script in an SVG or a PDF can execute, which
+      // is why documents are rasterised rather than embedded.
+      <div className="preview-pages">
+        {preview.imageUrls.map((url, i) => (
+          <img
+            key={url}
+            className="preview-page"
+            src={url}
+            alt={
+              preview.imageUrls.length > 1
+                ? `Page ${String(i + 1)} of ${String(preview.imageUrls.length)}`
+                : 'Evidence preview'
+            }
+          />
+        ))}
+      </div>
     ) : (
       <pre className="preview-pre">{preview.content}</pre>
     );

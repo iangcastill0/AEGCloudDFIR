@@ -11,6 +11,7 @@ import { processExportRun } from './processors/export-run.js';
 import { processExtract } from './processors/process-extract.js';
 import { processOcr } from './processors/process-ocr.js';
 import { processParse } from './processors/process-parse.js';
+import { processPreview } from './processors/process-preview.js';
 import { processScan } from './processors/process-scan.js';
 import { processPstExtract } from './processors/pst-extract.js';
 import { processProductionRun } from './processors/production-run.js';
@@ -68,13 +69,7 @@ export function buildHandlers(): Record<QueueName, QueueHandler> {
     [QUEUES.processParse]: (ctx, data) => processParse(ctx, evidenceStagePayload.parse(data)),
     [QUEUES.processExtract]: (ctx, data) => processExtract(ctx, evidenceStagePayload.parse(data)),
     [QUEUES.processOcr]: (ctx, data) => processOcr(ctx, evidenceStagePayload.parse(data)),
-    // Previews are generated inside process.parse today; the queue stays a
-    // no-op consumer so enqueued jobs drain instead of rotting.
-    [QUEUES.processPreview]: (ctx, data) => {
-      evidenceStagePayload.parse(data);
-      void ctx;
-      return Promise.resolve();
-    },
+    [QUEUES.processPreview]: (ctx, data) => processPreview(ctx, evidenceStagePayload.parse(data)),
     [QUEUES.processScan]: (ctx, data) => processScan(ctx, evidenceStagePayload.parse(data)),
     [QUEUES.searchIndex]: (ctx, data) => processSearchIndex(ctx, evidenceStagePayload.parse(data)),
     [QUEUES.exportRun]: (ctx, data) => processExportRun(ctx, exportRunPayload.parse(data)),

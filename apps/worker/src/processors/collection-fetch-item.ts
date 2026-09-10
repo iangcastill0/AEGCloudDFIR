@@ -407,6 +407,19 @@ export async function processCollectionFetchItem(
             dedupKey: dedupKeys.processStage('scan', evidence.id, 1),
             payload: { tenantId, evidenceItemId: evidence.id, version: 1 },
           },
+          // Emails get their preview from the parser. Everything else — drive
+          // files, uploads — had no preview stage enqueued at all, so they
+          // reported "No safe preview is available" no matter the type.
+          ...(isEmail || isChat
+            ? []
+            : [
+                {
+                  tenantId,
+                  topic: QUEUES.processPreview,
+                  dedupKey: dedupKeys.processStage('preview', evidence.id, 1),
+                  payload: { tenantId, evidenceItemId: evidence.id, version: 1 },
+                },
+              ]),
         ],
         skipDuplicates: true,
       });

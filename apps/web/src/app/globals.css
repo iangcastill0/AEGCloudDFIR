@@ -476,3 +476,19 @@ h2 {
 .eml-body {
   min-width: 0;
 }
+
+/* Rasterised document pages and collected images in the preview pane. */
+.preview-pages {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  overflow: auto;
+}
+.preview-page {
+  max-width: 100%;
+  height: auto;
+  /* A border matters here: a scanned page is often white to the edge, and
+     without one it is impossible to see where a page stops. */
+  border: 1px solid var(--border, #d4d4d8);
+  background: #fff;
+}

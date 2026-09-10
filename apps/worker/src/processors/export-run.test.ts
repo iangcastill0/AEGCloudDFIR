@@ -2,7 +2,12 @@ import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import { EVIDENCE, EXPORT_ID, TENANT, fakeCtx, type FakeCtx } from '../testing/fakes.js';
-import { processExportRun, shouldStartNewArchive, type ArchiveWriterLike } from './export-run.js';
+import {
+  exportStatusDetail,
+  processExportRun,
+  shouldStartNewArchive,
+  type ArchiveWriterLike,
+} from './export-run.js';
 
 const GOOD_ID = EVIDENCE;
 const BAD_ID = '99999999-9999-4999-8999-999999999999';
@@ -153,5 +158,31 @@ describe('processExportRun (native)', () => {
     });
     await processExportRun(f.ctx, payload);
     expect(f.tx.export.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('exportStatusDetail', () => {
+  it('says plainly when an export produced nothing', () => {
+    // A real run: a tag with no items assigned finished as status "ready",
+    // itemCount 0, statusDetail empty — indistinguishable from a good export
+    // unless you noticed the zero.
+    const detail = exportStatusDetail(0, 0);
+    expect(detail).toContain('No items matched');
+    expect(detail).toContain('empty');
+    // And it points at the cause rather than just stating the fact.
+    expect(detail).toMatch(/tag, case or search/);
+  });
+
+  it('still reports verification failures on a non-empty export', () => {
+    expect(exportStatusDetail(10, 3)).toBe('3 item(s) failed verification');
+  });
+
+  it('says nothing when everything worked', () => {
+    expect(exportStatusDetail(10, 0)).toBe('');
+  });
+
+  it('prefers the empty message when there is nothing AND nothing failed', () => {
+    // failedCount 0 with itemCount 0 is the exact shape the real bug had.
+    expect(exportStatusDetail(0, 0)).not.toBe('');
   });
 });

@@ -580,7 +580,15 @@ export function useEvidence(id: string | null) {
 
 const rawPreviewResponse = z.object({
   items: z
-    .array(z.object({ kind: z.string(), mimeType: z.string().default(''), url: z.string() }))
+    .array(
+      z.object({
+        kind: z.string(),
+        mimeType: z.string().default(''),
+        pageCount: z.number().default(0),
+        url: z.string(),
+        pageUrls: z.array(z.string()).default([]),
+      }),
+    )
     .default([]),
   note: z.string().default(''),
 });
@@ -593,17 +601,36 @@ export function useEvidencePreview(id: string | null) {
       // derivatives; fetch the best one (safe HTML, else text) for inline
       // sandboxed rendering. Previews never load remote resources.
       const raw = await apiFetch(`/api/v1/evidence/${id}/preview`, { schema: rawPreviewResponse });
-      const pick =
-        raw.items.find((p) => p.kind === 'safe_html') ??
-        raw.items.find((p) => p.kind === 'text' || p.kind === 'preview-text');
-      if (!pick) return previewResponse.parse({ kind: 'none', content: raw.note });
-      const res = await fetch(pick.url);
-      if (!res.ok) return previewResponse.parse({ kind: 'none', content: raw.note });
-      const content = await res.text();
-      return previewResponse.parse({
-        kind: pick.kind === 'safe_html' ? 'safe_html' : 'text',
-        content,
-      });
+
+      // Order of preference: a rendered email, then pictures (a rasterised
+      // document or a collected image), then text. Before this, anything that
+      // was not safe_html or text fell through to "No safe preview is
+      // available" — which was every attachment ever collected.
+      const html = raw.items.find((p) => p.kind === 'safe_html');
+      if (html) {
+        const res = await fetch(html.url);
+        if (res.ok) {
+          return previewResponse.parse({ kind: 'safe_html', content: await res.text() });
+        }
+      }
+
+      const pictures =
+        raw.items.find((p) => p.kind === 'page_images') ??
+        raw.items.find((p) => p.kind === 'thumbnail');
+      if (pictures) {
+        // pageUrls carries every page of a rasterised document; a single
+        // image has none, so fall back to its one URL.
+        const urls = pictures.pageUrls.length > 0 ? pictures.pageUrls : [pictures.url];
+        return previewResponse.parse({ kind: 'image', imageUrls: urls });
+      }
+
+      const text = raw.items.find((p) => p.kind === 'text' || p.kind === 'preview-text');
+      if (text) {
+        const res = await fetch(text.url);
+        if (res.ok) return previewResponse.parse({ kind: 'text', content: await res.text() });
+      }
+
+      return previewResponse.parse({ kind: 'none', content: raw.note });
     },
     enabled: id !== null,
   });

@@ -233,8 +233,12 @@ export const evidenceDetail = evidenceSummary.extend({
 export type EvidenceDetail = z.infer<typeof evidenceDetail>;
 
 export const previewResponse = z.object({
-  kind: z.enum(['safe_html', 'text', 'none']),
+  // 'image' covers both a collected picture and a rasterised document page —
+  // from the reviewer's side they are the same thing: pictures to look at.
+  kind: z.enum(['safe_html', 'text', 'image', 'none']),
   content: z.string().default(''),
+  /** Presigned page images, in order. Empty for the other kinds. */
+  imageUrls: z.array(z.string()).default([]),
   isApiExportDerivative: z.boolean().default(false),
 });
 

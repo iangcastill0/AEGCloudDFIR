@@ -364,6 +364,16 @@ export async function processParse(
           dedupKey: dedupKeys.processStage('scan', attachment.id, 1),
           payload: { tenantId, evidenceItemId: attachment.id, version: 1 },
         },
+        // Without this an attachment never got a preview at all: the parser
+        // writes one for the EMAIL, and nothing enqueued anything for its
+        // children. 1,379 attachments in one real matter, every one of them
+        // reporting "No safe preview is available".
+        {
+          tenantId,
+          topic: QUEUES.processPreview,
+          dedupKey: dedupKeys.processStage('preview', attachment.id, 1),
+          payload: { tenantId, evidenceItemId: attachment.id, version: 1 },
+        },
         {
           tenantId,
           topic: QUEUES.searchIndex,

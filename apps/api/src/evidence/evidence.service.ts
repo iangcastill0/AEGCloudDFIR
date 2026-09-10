@@ -1,3 +1,4 @@
+import { pageKeys } from './preview-pages.js';
 import {
   ConflictException,
   HttpException,
@@ -363,7 +364,13 @@ export class EvidenceService {
     auth: AuthContext,
     id: string,
   ): Promise<{
-    items: { kind: string; mimeType: string; pageCount: number; url: string }[];
+    items: {
+      kind: string;
+      mimeType: string;
+      pageCount: number;
+      url: string;
+      pageUrls: string[];
+    }[];
     note: string;
   }> {
     const item = await this.requireItem(auth, id, (tx) =>
@@ -382,14 +389,23 @@ export class EvidenceService {
       seen.add(p.kind);
       return true;
     });
+    const ttlSeconds = this.config.CDFIR_S3_PRESIGN_TTL_SECONDS;
     const items = await Promise.all(
       latest.map(async (p) => ({
         kind: p.kind,
         mimeType: p.mimeType,
         pageCount: p.pageCount,
-        url: await this.store.presignGet(auth.tenantId, p.objectKey, {
-          ttlSeconds: this.config.CDFIR_S3_PRESIGN_TTL_SECONDS,
-        }),
+        url: await this.store.presignGet(auth.tenantId, p.objectKey, { ttlSeconds }),
+        // A rasterised document is many objects but one Preview row. The
+        // worker names them preview-page001.png … preview-pageNNN.png and
+        // records the count, so every page is addressable from the first key
+        // without a second table. One row, one URL would have shown page 1 of
+        // a twelve-page memo and called it a preview.
+        pageUrls: await Promise.all(
+          pageKeys(p.objectKey, p.pageCount).map((key) =>
+            this.store.presignGet(auth.tenantId, key, { ttlSeconds }),
+          ),
+        ),
       })),
     );
     return { items, note: PREVIEW_SAFETY_NOTE };

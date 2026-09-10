@@ -344,8 +344,7 @@ export async function processExportRun(
           totalBytes: BigInt(result.totalBytes),
           outputPrefix: result.outputPrefix,
           manifestSha256: result.manifestSha256,
-          statusDetail:
-            result.failedCount > 0 ? `${result.failedCount} item(s) failed verification` : '',
+          statusDetail: exportStatusDetail(result.itemCount, result.failedCount),
         },
       });
       await appendAuditEvent(tx, {
@@ -442,6 +441,23 @@ async function runCsvExport(
     manifestSha256: put.sha256,
     archiveParts: 0,
   };
+}
+
+/**
+ * What the operator is told about a finished export.
+ *
+ * An export that produced NOTHING used to read exactly like one that worked:
+ * status "ready", no detail, itemCount 0. A real run against a tag with no
+ * items assigned did precisely that, and the only way to tell was to notice
+ * the zero. In a product whose failure mode is "reports success, silently
+ * broken", an empty archive must say so out loud.
+ */
+export function exportStatusDetail(itemCount: number, failedCount: number): string {
+  if (itemCount === 0) {
+    return 'No items matched this selection, so the export is empty. Check that the tag, case or search you chose still contains items.';
+  }
+  if (failedCount > 0) return `${String(failedCount)} item(s) failed verification`;
+  return '';
 }
 
 async function runNativeExport(
