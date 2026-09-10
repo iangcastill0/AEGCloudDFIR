@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { FAMILY_QUERY_CHUNK, chunk, expandDescendants, expandFamilies } from './families.js';
+import {
+  FAMILY_QUERY_CHUNK,
+  chunk,
+  expandDescendants,
+  expandFamilies,
+  queryInChunks,
+} from './families.js';
 import type { TenantScopedTx } from '@aeg-clouddfir/database';
 
 function ids(n: number): string[] {
@@ -114,5 +120,55 @@ describe('chunk', () => {
 
   it('returns nothing for an empty list', () => {
     expect(chunk([], 10)).toEqual([]);
+  });
+});
+
+describe('queryInChunks', () => {
+  /**
+   * The rule this enforces: nothing bounds how much a collection acquires, so
+   * nothing bounds a case, export or production built from one. Prisma refuses
+   * a statement with more than 32,767 bind variables, and an id list IS the
+   * bind variables.
+   */
+  const uuids = (n: number): string[] =>
+    Array.from(
+      { length: n },
+      (_, i) => `00000000-0000-4000-8000-${i.toString(16).padStart(12, '0')}`,
+    );
+
+  it('never sends a batch near the bind-variable ceiling', async () => {
+    const sizes: number[] = [];
+    await queryInChunks(uuids(43_379), async (batch) => {
+      sizes.push(batch.length);
+      return batch;
+    });
+    expect(Math.max(...sizes)).toBeLessThan(32_767);
+  });
+
+  it('returns every row — chunking must never lose one', async () => {
+    const rows = await queryInChunks(uuids(43_379), async (batch) => batch);
+    expect(rows).toHaveLength(43_379);
+    expect(new Set(rows).size).toBe(43_379);
+  });
+
+  it('runs no query at all for an empty list', async () => {
+    const run = vi.fn(async (batch: string[]) => batch);
+    expect(await queryInChunks([], run)).toEqual([]);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('honours a smaller batch size for queries that name each id twice', async () => {
+    // expandFamilies matches on parentId OR childId, so each id costs two
+    // parameters and the safe batch is half the usual one.
+    const sizes: number[] = [];
+    await queryInChunks(
+      uuids(20_000),
+      async (batch) => {
+        sizes.push(batch.length);
+        return batch;
+      },
+      2_500,
+    );
+    expect(Math.max(...sizes)).toBe(2_500);
   });
 });

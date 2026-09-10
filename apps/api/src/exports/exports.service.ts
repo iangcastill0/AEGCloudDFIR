@@ -24,6 +24,7 @@ import { assertWithinQuota, readQuota } from '../common/quotas.js';
 import { zodValidate } from '../common/zod-validate.js';
 import { AuditService } from '../audit/audit.service.js';
 import { SelectionService } from '../search/selection.service.js';
+import { chunk, FAMILY_QUERY_CHUNK } from '../common/families.js';
 
 type CreateExportRequest = z.infer<typeof createExportRequest>;
 
@@ -106,10 +107,19 @@ export class ExportsService {
     }
     return withTenantContext(this.prisma, auth.tenantId, async (tx) => {
       switch (selection.kind) {
-        case 'items':
-          return tx.evidenceItem.count({
-            where: { tenantId: auth.tenantId, id: { in: selection.evidenceItemIds } },
-          });
+        case 'items': {
+          // createExportRequest puts no ceiling on this list, unlike the case
+          // and tag requests which cap at 10,000. One bind variable per id and
+          // Prisma refuses past 32,767, so an unchunked count is a 500 waiting
+          // for a big enough export. Same fault already hit enqueueReindex.
+          let total = 0;
+          for (const batch of chunk(selection.evidenceItemIds, FAMILY_QUERY_CHUNK)) {
+            total += await tx.evidenceItem.count({
+              where: { tenantId: auth.tenantId, id: { in: batch } },
+            });
+          }
+          return total;
+        }
         case 'tag': {
           const tag = await tx.tag.findFirst({
             where: { id: selection.tagId, tenantId: auth.tenantId },

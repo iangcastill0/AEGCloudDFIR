@@ -21,7 +21,7 @@ import { describeCaseEvent } from './case-activity.js';
 import { PRISMA } from '../common/tokens.js';
 import type { CursorQuery } from '../common/pagination.js';
 import { zodValidate } from '../common/zod-validate.js';
-import { chunk, expandFamilies } from '../common/families.js';
+import { chunk, expandFamilies, queryInChunks } from '../common/families.js';
 import { enqueueReindex } from '../common/reindex.js';
 import { isCaseRestricted } from '../common/roles.js';
 import { AuditService } from '../audit/audit.service.js';
@@ -280,10 +280,12 @@ export class CasesService {
         });
         sourceIds = items.map((item) => item.id);
       } else if (input.source.kind === 'items') {
-        const rows = await tx.evidenceItem.findMany({
-          where: { tenantId: auth.tenantId, id: { in: sourceIds } },
-          select: { id: true },
-        });
+        const rows = await queryInChunks(sourceIds, (batch) =>
+          tx.evidenceItem.findMany({
+            where: { tenantId: auth.tenantId, id: { in: batch } },
+            select: { id: true },
+          }),
+        );
         if (rows.length !== sourceIds.length) {
           throw new BadRequestException('one or more evidenceItemIds do not exist');
         }
@@ -599,13 +601,17 @@ export class CasesService {
       });
       if (caseItems.length === 0) return { items: [] };
 
-      const assignments = await tx.tagAssignment.findMany({
-        where: {
-          tenantId: auth.tenantId,
-          evidenceItemId: { in: caseItems.map((c) => c.evidenceItemId) },
-        },
-        include: { tag: true },
-      });
+      // Chunked: a case holds as many items as the collections added to it,
+      // with no ceiling. Opening the tag panel on a 43,379-item case sent every
+      // id into one query and answered 500.
+      const assignments = await queryInChunks(
+        caseItems.map((c) => c.evidenceItemId),
+        (batch) =>
+          tx.tagAssignment.findMany({
+            where: { tenantId: auth.tenantId, evidenceItemId: { in: batch } },
+            include: { tag: true },
+          }),
+      );
 
       // Count per tag so a reviewer can see how much of the matter each covers;
       // a tag on one document is a very different production from one on 500.

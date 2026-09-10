@@ -1,9 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import type { TenantScopedTx } from '@aeg-clouddfir/database';
-import { chunk } from './families.js';
+import { chunk, FAMILY_QUERY_CHUNK } from './families.js';
 
 /** Rows per insert. Matches the other bulk paths in the API. */
 const REINDEX_CHUNK = 500;
+
+/**
+ * Ids per `in` list. Well under Prisma's 32,767 bind-variable ceiling, and the
+ * same size the family expansion uses.
+ */
+const REINDEX_QUERY_CHUNK = FAMILY_QUERY_CHUNK;
 
 /**
  * Ask the worker to re-index evidence items after a change that alters what a
@@ -39,10 +45,25 @@ export async function enqueueReindex(
   if (ids.length === 0) return 0;
 
   // The worker's payload contract carries the version it indexed at.
-  const versions = await tx.evidenceItem.findMany({
-    where: { tenantId, id: { in: ids } },
-    select: { id: true, version: true },
-  });
+  //
+  // Chunked, like the insert below it. Every id in an `in` list is one bind
+  // variable, and Prisma refuses a statement with more than 32,767 of them:
+  //
+  //   Assertion violation on the database: too many bind variables in prepared
+  //   statement, expected maximum of 32767, received 32768
+  //
+  // Adding a large collection to a case sends every item id at once, so this
+  // was a 500 for exactly the case the feature exists for. The insert below was
+  // already chunked; this read, three lines above it, was not.
+  const versionBatches = await Promise.all(
+    chunk(ids, REINDEX_QUERY_CHUNK).map((batch) =>
+      tx.evidenceItem.findMany({
+        where: { tenantId, id: { in: batch } },
+        select: { id: true, version: true },
+      }),
+    ),
+  );
+  const versions = versionBatches.flat();
 
   let written = 0;
   for (const rows of chunk(versions, REINDEX_CHUNK)) {

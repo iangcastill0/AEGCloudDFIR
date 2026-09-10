@@ -58,6 +58,41 @@ describe('enqueueReindex', () => {
     expect(createMany).toHaveBeenCalledTimes(3); // 500 + 500 + 200
   });
 
+  it('chunks the version LOOKUP too, not just the insert', async () => {
+    // The production 500. Adding a large collection to a case sent every item
+    // id into one findMany, and Prisma refused the statement:
+    //   Assertion violation on the database: too many bind variables in
+    //   prepared statement, expected maximum of 32767, received 32768
+    // The insert below it was already chunked. This read, three lines above,
+    // was not — so the feature broke on exactly the case it exists for.
+    const ids = Array.from(
+      { length: 32_768 },
+      (_, i) => `00000000-0000-4000-8000-${i.toString(16).padStart(12, '0')}`,
+    );
+
+    const batches: number[] = [];
+    const findMany = vi.fn(async (args: { where: { id: { in: string[] } } }) => {
+      const batch = args.where.id.in;
+      batches.push(batch.length);
+      return batch.map((id) => ({ id, version: 3 }));
+    });
+    const createMany = vi.fn(async (args: { data: unknown[] }) => ({ count: args.data.length }));
+    const tx = {
+      evidenceItem: { findMany },
+      outboxEvent: { createMany },
+    } as unknown as TenantScopedTx;
+
+    const count = await enqueueReindex(tx, TENANT, ids, 'case');
+
+    expect(count).toBe(32_768);
+    expect(batches.length).toBeGreaterThan(1);
+    // One bind variable per id, plus the tenant. Anything at or above the
+    // ceiling is the bug coming back.
+    expect(Math.max(...batches)).toBeLessThan(32_767);
+    // Every id still gets looked up — chunking must not lose any.
+    expect(batches.reduce((a, b) => a + b, 0)).toBe(32_768);
+  });
+
   it('does nothing when there are no items', async () => {
     const { tx, createMany } = fakeTx([]);
     expect(await enqueueReindex(tx, TENANT, [], 'case')).toBe(0);

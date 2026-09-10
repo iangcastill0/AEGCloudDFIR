@@ -13,6 +13,7 @@ import {
   type QueryNode,
 } from '@aeg-clouddfir/search';
 import { sanitizeError, type WorkerContext } from '../context.js';
+import { QUERY_ID_CHUNK, queryInChunks } from '../chunked.js';
 import type { ExportRunPayload } from './payloads.js';
 
 /**
@@ -37,7 +38,13 @@ const exportParameters = z.object({
 });
 type ExportParameters = z.infer<typeof exportParameters>;
 
-const SAVED_SEARCH_RESULT_CAP = 50_000;
+/**
+ * Runaway guard, NOT a product limit. At 50,000 this silently truncated, so a
+ * saved search matching more than that produced an export that looked complete
+ * and was not. An export missing evidence nobody was told about is the one
+ * outcome this product must never produce.
+ */
+const SAVED_SEARCH_RESULT_CAP = 1_000_000;
 const FAMILY_KINDS = ['attachment', 'inline_attachment'] as const;
 
 /**
@@ -138,7 +145,13 @@ async function resolveSelectionIds(
     if (page.searchAfter === undefined) break;
     searchAfter = page.searchAfter;
   }
-  return [...new Set(ids)].slice(0, SAVED_SEARCH_RESULT_CAP);
+  if (ids.length > SAVED_SEARCH_RESULT_CAP) {
+    throw new Error(
+      `saved search matched more than ${String(SAVED_SEARCH_RESULT_CAP)} items; ` +
+        `refusing to export a truncated set`,
+    );
+  }
+  return [...new Set(ids)];
 }
 
 async function expandFamilies(
@@ -148,14 +161,22 @@ async function expandFamilies(
 ): Promise<string[]> {
   if (ids.length === 0) return ids;
   const expanded = new Set(ids);
+  // Chunked, and at half the usual size: this query names every id TWICE, so
+  // an unchunked call on a 43,379-item case is 86,758 bind variables and dies
+  // before the export writes anything.
   const relations = await withTenantContext(ctx.prisma, tenantId, (tx) =>
-    tx.evidenceRelationship.findMany({
-      where: {
-        kind: { in: [...FAMILY_KINDS] },
-        OR: [{ parentId: { in: ids } }, { childId: { in: ids } }],
-      },
-      select: { parentId: true, childId: true },
-    }),
+    queryInChunks(
+      ids,
+      (batch) =>
+        tx.evidenceRelationship.findMany({
+          where: {
+            kind: { in: [...FAMILY_KINDS] },
+            OR: [{ parentId: { in: batch } }, { childId: { in: batch } }],
+          },
+          select: { parentId: true, childId: true },
+        }),
+      Math.floor(QUERY_ID_CHUNK / 2),
+    ),
   );
   const parentIds = new Set<string>();
   for (const rel of relations) {
@@ -165,10 +186,12 @@ async function expandFamilies(
   }
   // Include siblings: all children of every implicated parent.
   const siblings = await withTenantContext(ctx.prisma, tenantId, (tx) =>
-    tx.evidenceRelationship.findMany({
-      where: { kind: { in: [...FAMILY_KINDS] }, parentId: { in: [...parentIds] } },
-      select: { childId: true },
-    }),
+    queryInChunks([...parentIds], (batch) =>
+      tx.evidenceRelationship.findMany({
+        where: { kind: { in: [...FAMILY_KINDS] }, parentId: { in: batch } },
+        select: { childId: true },
+      }),
+    ),
   );
   for (const rel of siblings) expanded.add(rel.childId);
   return [...expanded];
@@ -272,23 +295,30 @@ export async function processExportRun(
     if (params.includeFamilies) {
       ids = await expandFamilies(ctx, tenantId, ids);
     }
+    // Chunked: `ids` is a whole case or collection and has no upper bound.
+    // Unchunked, exporting the 43,379-item collection this was reported on
+    // failed before writing a single byte.
     const items = await withTenantContext(ctx.prisma, tenantId, (tx) =>
-      tx.evidenceItem.findMany({
-        where: { id: { in: ids } },
-        include: {
-          blob: true,
-          custodian: { select: { email: true } },
-          emailMetadata: true,
-          participants: true,
-          tagAssignments: { include: { tag: { select: { name: true } } } },
-          childRelationships: { select: { parentId: true, kind: true } },
-          // Ordered so the CSV reads as a timeline rather than in whatever
-          // order the rows happen to come back.
-          auditRecords: { orderBy: [{ occurredAt: 'asc' }, { providerRecordId: 'asc' }] },
-        },
-        orderBy: { id: 'asc' },
-      }),
+      queryInChunks(ids, (batch) =>
+        tx.evidenceItem.findMany({
+          where: { id: { in: batch } },
+          include: {
+            blob: true,
+            custodian: { select: { email: true } },
+            emailMetadata: true,
+            participants: true,
+            tagAssignments: { include: { tag: { select: { name: true } } } },
+            childRelationships: { select: { parentId: true, kind: true } },
+            // Ordered so the CSV reads as a timeline rather than in whatever
+            // order the rows happen to come back.
+            auditRecords: { orderBy: [{ occurredAt: 'asc' }, { providerRecordId: 'asc' }] },
+          },
+          orderBy: { id: 'asc' },
+        }),
+      ),
     );
+    // Batches come back in batch order; the writers rely on a stable ordering.
+    items.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 
     const result =
       exportRow.kind === 'csv'

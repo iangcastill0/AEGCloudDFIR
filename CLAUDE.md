@@ -103,6 +103,18 @@ span files and are easy to break:
   **no** policy on evidence tables. So `psql -U cdfir` with no tenant context
   returns **zero rows from everything**. And `pg_dump` as the owner quietly
   produces a near-empty dump. Always dump as superuser.
+- **Every id in an `in` list is one bind variable, and Prisma stops at 32,767.**
+  Past that the query dies with `too many bind variables in prepared statement`,
+  which reaches the browser as a bare 500. It is not PostgreSQL's own 65,535
+  limit — sizing against that number still breaks. So any query built from a
+  caller's id list must be chunked, even a `count` and even a `notIn`. Use
+  `queryInChunks(ids, (batch) => ...)` — `apps/api/src/common/families.ts` for
+  the API, `apps/worker/src/chunked.ts` for the worker. Halve the batch when a
+  query names each id twice, as the family expansion does.
+  This has bitten repeatedly, always the same way: fine in testing, 500 on the
+  biggest real matter. A 43,379-item collection could not be added to a case,
+  its case could not show its tags, and it could not be exported at all. Assume
+  every id list is unbounded, because a collection is.
 - **Jobs are dispatched through a transactional outbox.** Services write an
   `outbox_events` row inside the same transaction as their state change; the
   worker dispatches to BullMQ. Never enqueue directly from a service. Dedup keys

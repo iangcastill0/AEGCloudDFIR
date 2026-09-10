@@ -6,19 +6,48 @@ const FAMILY_KINDS: RelationshipKind[] = [RelationshipKind.family, RelationshipK
 /**
  * Ids per query.
  *
- * PostgreSQL's wire protocol carries the bind-parameter count in an int16, so
- * one statement can take at most 65,535 of them. expandFamilies sends each id
- * TWICE — once for parentId, once for childId — so the real ceiling here is
- * half of that.
+ * Every id in an `in` (or `notIn`) list is one bind variable, and **Prisma
+ * refuses a statement with more than 32,767 of them**:
  *
- * Found the hard way on staging: a production with an inverted selection and
- * includeFamilies passed 50,000 ids into a single query, which is 100,000
- * parameters. It failed in 618ms with a bare HTTP 500 and nothing in the log.
+ *   Assertion violation on the database: too many bind variables in prepared
+ *   statement, expected maximum of 32767, received 32768
  *
- * 5,000 matches the chunk size productions already uses for the same reason,
- * and leaves an order of magnitude of headroom.
+ * Note that ceiling. PostgreSQL's own wire protocol allows 65,535, and sizing
+ * against the bigger number still breaks — Prisma stops at half of it.
+ * expandFamilies also sends each id TWICE, once for parentId and once for
+ * childId, halving it again.
+ *
+ * Found the hard way three times. A production with an inverted selection and
+ * includeFamilies passed 50,000 ids into one query (100,000 parameters) and
+ * failed in 618ms with a bare HTTP 500. Then adding a 43,379-item collection to
+ * a case failed the same way. There is no size at which this is safe to skip:
+ * a collection has no ceiling, so neither does any list derived from one.
+ *
+ * 5,000 leaves an order of magnitude of headroom.
  */
 export const FAMILY_QUERY_CHUNK = 5_000;
+
+/**
+ * Run a query over an id list in safe-sized batches and concatenate the rows.
+ *
+ * Use this for EVERY query whose `in` list comes from a collection, a case, a
+ * tag or a caller — none of those have an upper bound. Writing the `in` inline
+ * works right up until a customer collects more than about thirty thousand
+ * items, and then it is a 500 on the feature they most needed.
+ *
+ * Batches run in parallel; ordering of the returned rows is therefore the
+ * ordering of the batches, not of the database. Sort afterwards when order
+ * matters, exactly as a single query with no `orderBy` would require.
+ */
+export async function queryInChunks<T>(
+  ids: readonly string[],
+  run: (batch: string[]) => Promise<T[]>,
+  size: number = FAMILY_QUERY_CHUNK,
+): Promise<T[]> {
+  if (ids.length === 0) return [];
+  const batches = await Promise.all(chunk(ids, size).map(run));
+  return batches.flat();
+}
 
 /**
  * Expand evidence item ids to their families (parents AND children via

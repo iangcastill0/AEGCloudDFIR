@@ -28,7 +28,7 @@ import { APP_CONFIG, EVIDENCE_STORE, PRISMA } from '../common/tokens.js';
 import type { CursorQuery } from '../common/pagination.js';
 import { assertWithinQuota, readQuota } from '../common/quotas.js';
 import { zodValidate } from '../common/zod-validate.js';
-import { chunk } from '../common/families.js';
+import { chunk, FAMILY_QUERY_CHUNK } from '../common/families.js';
 import { AuditService } from '../audit/audit.service.js';
 import type { AppConfig } from '@aeg-clouddfir/config';
 import { derivativeKey, type EvidenceObjectStore } from '@aeg-clouddfir/evidence';
@@ -473,10 +473,19 @@ export class CollectionsService {
     evidenceItemIds: string[],
   ): Promise<void> {
     const uniqueIds = [...new Set(evidenceItemIds)];
-    const items = await tx.evidenceItem.findMany({
-      where: { id: { in: uniqueIds }, tenantId: auth.tenantId },
-      select: { id: true, kind: true, provider: true, collectionId: true },
-    });
+    // Chunked: this list has no ceiling in the contract, and one bind variable
+    // per id runs into Prisma's 32,767 limit on a large upload batch. Shapes are
+    // inferred from the query rather than restated, so a schema change cannot
+    // drift away from a hand-written annotation.
+    const batches = await Promise.all(
+      chunk(uniqueIds, FAMILY_QUERY_CHUNK).map((batch) =>
+        tx.evidenceItem.findMany({
+          where: { id: { in: batch }, tenantId: auth.tenantId },
+          select: { id: true, kind: true, provider: true, collectionId: true },
+        }),
+      ),
+    );
+    const items = batches.flat();
     if (items.length !== uniqueIds.length) {
       throw new BadRequestException(
         'every uploads.evidenceItemIds entry must reference an existing uploaded file',

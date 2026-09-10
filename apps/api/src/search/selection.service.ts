@@ -9,8 +9,32 @@ import { withTenantContext, type PrismaClient } from '@aeg-clouddfir/database';
 import { PRISMA, SEARCH_ADAPTER } from '../common/tokens.js';
 import { SearchService } from './search.service.js';
 
-/** Hard cap on ids collected from a saved-search selection. */
-export const SELECTION_ID_CAP = 50_000;
+/**
+ * Runaway guard on ids collected from a search selection — NOT a product
+ * limit.
+ *
+ * This used to be 50,000 and it silently truncated: a saved search matching
+ * 60,000 items produced a 50,000-item export that looked complete. In an
+ * evidence tool that is the worst available outcome, worse by far than an
+ * error, because nothing downstream can tell that anything is missing.
+ *
+ * Ids are cheap — a million UUIDs is about 36 MB — so the number is set where
+ * it only catches a genuine runaway, and reaching it now THROWS rather than
+ * quietly dropping the tail.
+ */
+export const SELECTION_ID_CAP = 1_000_000;
+
+/** Raised instead of returning a short list. */
+export class SelectionTooLargeError extends Error {
+  constructor(cap: number) {
+    super(
+      `selection matched more than ${cap.toLocaleString('en-US')} items, which is past the ` +
+        `safety limit. Narrow the search and try again — nothing was exported, ` +
+        `deliberately, rather than exporting an incomplete set.`,
+    );
+    this.name = 'SelectionTooLargeError';
+  }
+}
 
 /**
  * Resolves saved searches into evidence item id lists for cases, exports and
@@ -42,7 +66,7 @@ export class SelectionService {
       const page = await this.adapter.search(body);
       for (const hit of page.items) {
         ids.push(hit.id);
-        if (ids.length >= cap) return ids;
+        if (ids.length > cap) throw new SelectionTooLargeError(cap);
       }
       if (page.items.length < MAX_PAGE_SIZE || page.searchAfter === undefined) {
         return ids;

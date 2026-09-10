@@ -38,7 +38,7 @@ import { chunk, expandFamilies } from '../common/families.js';
 import { AuditService } from '../audit/audit.service.js';
 import type { AppConfig } from '@aeg-clouddfir/config';
 import type { EvidenceObjectStore } from '@aeg-clouddfir/evidence';
-import { SelectionService, SELECTION_ID_CAP } from '../search/selection.service.js';
+import { SelectionService } from '../search/selection.service.js';
 import {
   FLAG_DEFINITIONS,
   validateProductionSet,
@@ -750,13 +750,17 @@ export class ProductionsService {
 
       let ids: string[];
       if (selection.inverted) {
+        // `notIn` costs a bind variable per id exactly like `in`, and this
+        // list is the whole base selection — tens of thousands of ids. It
+        // cannot be chunked the same way (excluding per batch would exclude
+        // nothing), so the exclusion happens in memory instead.
+        const excludeSet = new Set(base);
         const all = await tx.evidenceItem.findMany({
-          where: { tenantId, id: { notIn: [...base].slice(0, SELECTION_ID_CAP) } },
+          where: { tenantId },
           select: { id: true },
           orderBy: { id: 'asc' },
-          take: SELECTION_ID_CAP,
         });
-        ids = all.map((row) => row.id);
+        ids = all.map((row) => row.id).filter((id) => !excludeSet.has(id));
       } else {
         ids = [...base];
       }
@@ -765,7 +769,7 @@ export class ProductionsService {
       const exclusion = selection.excludePreviouslyProduced;
       if (exclusion.kind !== 'none' && ids.length > 0) {
         // Chunked for the same reason expandFamilies is: an inverted selection
-        // reaches SELECTION_ID_CAP ids, and one `in` that size is a query
+        // reaches tens of thousands of ids, and one `in` that size is a query
         // PostgreSQL refuses on bind-parameter count alone.
         const excluded = new Set<string>();
         for (const idChunk of chunk(ids, QUERY_CHUNK)) {
