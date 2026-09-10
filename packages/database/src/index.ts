@@ -17,3 +17,4 @@ export {
 export type { AuditEventInput, AuditChainVerification } from './audit.js';
 export { LocalAesKeyEncryptionProvider, encryptSecret, decryptSecret } from './envelope.js';
 export type { KeyEncryptionProvider, EncryptedSecret } from './envelope.js';
+export { FAMILY_RELATIONSHIP_KINDS, isFamilyRelationshipKind } from './families.js';

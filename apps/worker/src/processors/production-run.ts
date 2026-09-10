@@ -1,7 +1,12 @@
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { z } from 'zod';
 import { productionParameters, type ProductionParameters } from '@aeg-clouddfir/contracts';
-import { appendAuditEvent, withTenantContext, type Prisma } from '@aeg-clouddfir/database';
+import {
+  appendAuditEvent,
+  isFamilyRelationshipKind,
+  withTenantContext,
+  type Prisma,
+} from '@aeg-clouddfir/database';
 import { hashBuffer, productionKey } from '@aeg-clouddfir/evidence';
 import {
   BatesCounter,
@@ -30,7 +35,6 @@ import { readAllCapped } from '../streams.js';
 import type { ProductionRunPayload } from './payloads.js';
 
 const MAX_NATIVE_BYTES = 200 * 1024 * 1024;
-const FAMILY_KINDS = new Set(['attachment', 'inline_attachment']);
 
 /** frozenParameters = full wizard parameters + the frozen selection ids (written by apps/api at submit). */
 const frozenParametersSchema = z
@@ -204,8 +208,8 @@ export async function processProductionRun(
     );
 
     const sortable: (SortableProductionItem & { loaded: LoadedItem })[] = items.map((item) => {
-      const parentRel = item.childRelationships.find((r) => FAMILY_KINDS.has(r.kind));
-      const hasChildren = item.parentRelationships.some((r) => FAMILY_KINDS.has(r.kind));
+      const parentRel = item.childRelationships.find((r) => isFamilyRelationshipKind(r.kind));
+      const hasChildren = item.parentRelationships.some((r) => isFamilyRelationshipKind(r.kind));
       return {
         evidenceId: item.id,
         fileName: item.name,

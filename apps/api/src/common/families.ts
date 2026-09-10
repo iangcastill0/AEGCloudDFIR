@@ -1,7 +1,8 @@
 import type { TenantScopedTx } from '@aeg-clouddfir/database';
-import { RelationshipKind } from '@aeg-clouddfir/database';
-
-const FAMILY_KINDS: RelationshipKind[] = [RelationshipKind.family, RelationshipKind.attachment];
+// One shared definition. This file used to declare its own, omitting
+// inline_attachment, which silently dropped most images from every selection
+// expanded through the API. See packages/database/src/families.ts.
+import { FAMILY_RELATIONSHIP_KINDS as FAMILY_KINDS } from '@aeg-clouddfir/database';
 
 /**
  * Ids per query.
@@ -65,7 +66,7 @@ export async function expandFamilies(
     const relationships = await tx.evidenceRelationship.findMany({
       where: {
         tenantId,
-        kind: { in: FAMILY_KINDS },
+        kind: { in: [...FAMILY_KINDS] },
         OR: [{ parentId: { in: batch } }, { childId: { in: batch } }],
       },
       select: { parentId: true, childId: true },
@@ -90,7 +91,7 @@ export async function expandDescendants(
   const expanded = new Set<string>(ids);
   for (const batch of chunk(ids, FAMILY_QUERY_CHUNK)) {
     const relationships = await tx.evidenceRelationship.findMany({
-      where: { tenantId, kind: { in: FAMILY_KINDS }, parentId: { in: batch } },
+      where: { tenantId, kind: { in: [...FAMILY_KINDS] }, parentId: { in: batch } },
       select: { childId: true },
     });
     for (const rel of relationships) expanded.add(rel.childId);

@@ -1,4 +1,8 @@
-import { ProcessingStatus, withTenantContext } from '@aeg-clouddfir/database';
+import {
+  isFamilyRelationshipKind,
+  ProcessingStatus,
+  withTenantContext,
+} from '@aeg-clouddfir/database';
 import {
   MAPPING_VERSION,
   type BatesRecord,
@@ -295,8 +299,6 @@ export function buildSearchDoc(input: SearchDocInput): EvidenceSearchDoc {
   return doc;
 }
 
-const FAMILY_KINDS = new Set(['attachment', 'inline_attachment']);
-
 /**
  * search.index: assemble the full EvidenceSearchDoc (metadata + derivative
  * text streams) and index it. Indexing failures are routed to the dead-letter
@@ -343,8 +345,8 @@ export async function processSearchIndex(
 
   // Family linkage: a child points at its parent; a parent with attachment
   // children heads its own family.
-  const parentRel = item.childRelationships.find((r) => FAMILY_KINDS.has(r.kind));
-  const hasChildren = item.parentRelationships.some((r) => FAMILY_KINDS.has(r.kind));
+  const parentRel = item.childRelationships.find((r) => isFamilyRelationshipKind(r.kind));
+  const hasChildren = item.parentRelationships.some((r) => isFamilyRelationshipKind(r.kind));
   const familyId = parentRel !== undefined ? parentRel.parentId : hasChildren ? item.id : null;
 
   // Load derivative text contents, bounded to 1MB total.

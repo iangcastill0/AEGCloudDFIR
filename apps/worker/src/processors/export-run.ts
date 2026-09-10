@@ -2,7 +2,12 @@ import { PassThrough, Readable, type Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { z } from 'zod';
 import { TRUTHFULNESS_NOTICES } from '@aeg-clouddfir/contracts';
-import { appendAuditEvent, withTenantContext, type Prisma } from '@aeg-clouddfir/database';
+import {
+  appendAuditEvent,
+  FAMILY_RELATIONSHIP_KINDS,
+  withTenantContext,
+  type Prisma,
+} from '@aeg-clouddfir/database';
 import { Sha256Stream, canonicalJson, sanitizeFilename } from '@aeg-clouddfir/evidence';
 import { ProductionArchiveWriter, csvEscape } from '@aeg-clouddfir/production';
 import { AUDIT_CSV_COLUMNS, auditRowsFor } from './audit-csv.js';
@@ -45,7 +50,7 @@ type ExportParameters = z.infer<typeof exportParameters>;
  * outcome this product must never produce.
  */
 const SAVED_SEARCH_RESULT_CAP = 1_000_000;
-const FAMILY_KINDS = ['attachment', 'inline_attachment'] as const;
+const FAMILY_KINDS = FAMILY_RELATIONSHIP_KINDS;
 
 /**
  * Splitter decision, factored out for unit testing: start a new archive part

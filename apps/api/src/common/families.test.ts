@@ -6,7 +6,7 @@ import {
   expandFamilies,
   queryInChunks,
 } from './families.js';
-import type { TenantScopedTx } from '@aeg-clouddfir/database';
+import { FAMILY_RELATIONSHIP_KINDS, type TenantScopedTx } from '@aeg-clouddfir/database';
 
 function ids(n: number): string[] {
   return Array.from({ length: n }, (_, i) => `id-${String(i)}`);
@@ -41,8 +41,9 @@ function recordingTx(rows: { parentId: string; childId: string }[] = []) {
 }
 
 /**
- * PostgreSQL's wire protocol carries the bind-parameter count in an int16, so a
- * single statement can take at most 65,535 of them.
+ * Prisma refuses a statement carrying more than 32,767 bind variables — half
+ * PostgreSQL's own 65,535, which is why sizing against the bigger number still
+ * breaks.
  *
  * Found on staging: a production with inverted selection and includeFamilies
  * passed 50,000 ids into one query built as
@@ -50,23 +51,26 @@ function recordingTx(rows: { parentId: string; childId: string }[] = []) {
  * failed in 618ms with a bare HTTP 500 and nothing in the log.
  */
 describe('expandFamilies stays under the bind-parameter limit', () => {
-  const PG_BIND_LIMIT = 65_535;
+  const PRISMA_BIND_LIMIT = 32_767;
 
-  it('never sends more parameters than PostgreSQL accepts', async () => {
+  it('never sends more parameters than Prisma accepts', async () => {
     const { tx, bindCounts } = recordingTx();
     await expandFamilies(tx, 'tenant', ids(50_000));
     expect(bindCounts.length).toBeGreaterThan(1);
     for (const count of bindCounts) {
-      expect(count).toBeLessThan(PG_BIND_LIMIT);
+      expect(count).toBeLessThan(PRISMA_BIND_LIMIT);
     }
   });
 
   it('counts BOTH sides of the OR, which is what doubled the real query', async () => {
     // A chunk of N ids appears twice — once for parentId, once for childId — so
     // the safe chunk size is half what a single-column query could take.
+    // Derived, not hardcoded: the kind list is shared now, and a hardcoded
+    // count made this fail the moment inline_attachment was added to it.
     const { tx, bindCounts } = recordingTx();
     await expandFamilies(tx, 'tenant', ids(FAMILY_QUERY_CHUNK));
-    expect(bindCounts[0]).toBe(FAMILY_QUERY_CHUNK * 2 + 2);
+    const perQuery = FAMILY_QUERY_CHUNK * 2 + FAMILY_RELATIONSHIP_KINDS.length;
+    expect(bindCounts[0]).toBe(perQuery);
   });
 
   it('returns every family member found across all chunks', async () => {
