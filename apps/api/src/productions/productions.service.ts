@@ -34,7 +34,7 @@ import { APP_CONFIG, EVIDENCE_STORE, PRISMA } from '../common/tokens.js';
 import type { CursorQuery } from '../common/pagination.js';
 import { assertWithinQuota, readQuota } from '../common/quotas.js';
 import { zodValidate } from '../common/zod-validate.js';
-import { chunk, expandFamilies } from '../common/families.js';
+import { chunk, expandFamilies, onTx } from '../common/families.js';
 import { AuditService } from '../audit/audit.service.js';
 import type { AppConfig } from '@aeg-clouddfir/config';
 import type { EvidenceObjectStore } from '@aeg-clouddfir/evidence';
@@ -789,7 +789,7 @@ export class ProductionsService {
       }
 
       if (selection.includeFamilies && ids.length > 0) {
-        ids = await expandFamilies(tx, tenantId, ids);
+        ids = await expandFamilies(onTx(tx), tenantId, ids);
       }
 
       return ids.sort();

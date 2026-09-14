@@ -21,7 +21,7 @@ import { describeCaseEvent } from './case-activity.js';
 import { PRISMA } from '../common/tokens.js';
 import type { CursorQuery } from '../common/pagination.js';
 import { zodValidate } from '../common/zod-validate.js';
-import { chunk, expandFamilies, queryInChunks } from '../common/families.js';
+import { chunk, expandFamilies, inOwnTx, queryInChunks } from '../common/families.js';
 import { enqueueReindex } from '../common/reindex.js';
 import { isCaseRestricted } from '../common/roles.js';
 import { AuditService } from '../audit/audit.service.js';
@@ -252,7 +252,8 @@ export class CasesService {
       addedVia = 'tag';
     }
 
-    return withTenantContext(this.prisma, auth.tenantId, async (tx) => {
+    // A short transaction: check the case exists and resolve what to add.
+    const resolved = await withTenantContext(this.prisma, auth.tenantId, async (tx) => {
       await this.requireCase(tx, auth, id);
 
       if (input.source.kind === 'tag') {
@@ -290,13 +291,30 @@ export class CasesService {
           throw new BadRequestException('one or more evidenceItemIds do not exist');
         }
       }
+    });
+    void resolved;
 
-      const finalIds = input.includeFamilies
-        ? await expandFamilies(tx, auth.tenantId, sourceIds)
-        : [...new Set(sourceIds)];
+    // Everything below runs OUTSIDE that transaction, each chunk in its own.
+    //
+    // Adding a whole collection is ~1,400 round trips — family expansion,
+    // membership inserts, re-index rows. Held in one transaction it died at
+    // 30,129 ms against the 30-second limit with `Transaction already closed`,
+    // so the feature failed on exactly the collection it exists for. Chunking
+    // the queries did not help: the transaction was the limit, not any query.
+    //
+    // The cost is that a failure half way leaves a partly-filled case rather
+    // than nothing. That is the honest trade and it is recoverable: every write
+    // here skips duplicates, so running the add again completes it.
+    const finalIds = input.includeFamilies
+      ? await expandFamilies(inOwnTx(this.prisma, auth.tenantId), auth.tenantId, sourceIds)
+      : [...new Set(sourceIds)];
 
-      let added = 0;
-      for (const ids of chunk(finalIds, ITEM_INSERT_CHUNK)) {
+    let added = 0;
+    for (const ids of chunk(finalIds, ITEM_INSERT_CHUNK)) {
+      // Membership and its re-index go in together. Split apart, a crash
+      // between them leaves items in a case that search cannot find — the
+      // failure this product is least able to afford.
+      added += await withTenantContext(this.prisma, auth.tenantId, async (tx) => {
         const result = await tx.caseItem.createMany({
           data: ids.map((evidenceItemId) => ({
             tenantId: auth.tenantId,
@@ -307,16 +325,17 @@ export class CasesService {
           })),
           skipDuplicates: true,
         });
-        added += result.count;
-      }
+        // The case filter in search reads `caseIds` from the index document,
+        // built from database truth at index time — so a new member of a case
+        // is invisible to search until the item is re-indexed. Every requested
+        // id is re-indexed, not just newly inserted ones, so an item whose
+        // document is already stale is repaired by adding it again.
+        await enqueueReindex(tx, auth.tenantId, ids, 'case');
+        return result.count;
+      });
+    }
 
-      // The case filter in search reads `caseIds` from the index document, and
-      // that document is built from database truth at index time — so a new
-      // member of a case is invisible to search until the item is re-indexed.
-      // Every requested id is re-indexed, not just the newly inserted ones, so
-      // an item whose document is already stale is repaired by adding it again.
-      await enqueueReindex(tx, auth.tenantId, finalIds, 'case');
-
+    await withTenantContext(this.prisma, auth.tenantId, async (tx) => {
       await this.audit.appendTx(tx, {
         tenantId: auth.tenantId,
         actorUserId: auth.userId,
@@ -333,9 +352,9 @@ export class CasesService {
         },
         request,
       });
-
-      return { requested: sourceIds.length, added };
     });
+
+    return { requested: sourceIds.length, added };
   }
 
   async items(

@@ -1,4 +1,4 @@
-import type { TenantScopedTx } from '@aeg-clouddfir/database';
+import { withTenantContext, type PrismaClient, type TenantScopedTx } from '@aeg-clouddfir/database';
 // One shared definition. This file used to declare its own, omitting
 // inline_attachment, which silently dropped most images from every selection
 // expanded through the API. See packages/database/src/families.ts.
@@ -55,22 +55,57 @@ export async function queryInChunks<T>(
  * family/attachment relationships, both directions). Returns the input ids
  * plus every direct family member, de-duplicated.
  */
+/**
+ * How a family query gets its transaction.
+ *
+ * Chunking a query is not enough on its own. A caller that wraps the whole
+ * operation in ONE transaction still has to finish inside the 30-second limit,
+ * and adding a 434,910-item collection to a case needs roughly 1,400 round
+ * trips — expansion, membership inserts and re-index rows. It failed at
+ * 30,129 ms with `Transaction already closed`, which is the same fault that
+ * stopped finalize sealing.
+ *
+ * So the caller decides. A small selection stays inside one transaction and
+ * keeps all-or-nothing. A large one runs each chunk in its own short
+ * transaction and trades that atomicity for being possible at all.
+ */
+export type TxRunner = <T>(fn: (tx: TenantScopedTx) => Promise<T>) => Promise<T>;
+
+/** Run on the caller's existing transaction. Atomic, bounded by its timeout. */
+export function onTx(tx: TenantScopedTx): TxRunner {
+  return (fn) => fn(tx);
+}
+
+/**
+ * Give every query its own short transaction.
+ *
+ * Use when the id list has no upper bound. Nothing here is all-or-nothing any
+ * more, which is safe for these paths because the writes are idempotent —
+ * `createMany` skips duplicates and re-running completes what a failure left
+ * half done.
+ */
+export function inOwnTx(prisma: PrismaClient, tenantId: string): TxRunner {
+  return (fn) => withTenantContext(prisma, tenantId, fn);
+}
+
 export async function expandFamilies(
-  tx: TenantScopedTx,
+  run: TxRunner,
   tenantId: string,
   ids: readonly string[],
 ): Promise<string[]> {
   if (ids.length === 0) return [];
   const expanded = new Set<string>(ids);
   for (const batch of chunk(ids, FAMILY_QUERY_CHUNK)) {
-    const relationships = await tx.evidenceRelationship.findMany({
-      where: {
-        tenantId,
-        kind: { in: [...FAMILY_KINDS] },
-        OR: [{ parentId: { in: batch } }, { childId: { in: batch } }],
-      },
-      select: { parentId: true, childId: true },
-    });
+    const relationships = await run((tx) =>
+      tx.evidenceRelationship.findMany({
+        where: {
+          tenantId,
+          kind: { in: [...FAMILY_KINDS] },
+          OR: [{ parentId: { in: batch } }, { childId: { in: batch } }],
+        },
+        select: { parentId: true, childId: true },
+      }),
+    );
     for (const rel of relationships) {
       expanded.add(rel.parentId);
       expanded.add(rel.childId);
@@ -83,17 +118,19 @@ export async function expandFamilies(
  * Expand ids to their direct children only (apply_to_descendants behavior).
  */
 export async function expandDescendants(
-  tx: TenantScopedTx,
+  run: TxRunner,
   tenantId: string,
   ids: readonly string[],
 ): Promise<string[]> {
   if (ids.length === 0) return [];
   const expanded = new Set<string>(ids);
   for (const batch of chunk(ids, FAMILY_QUERY_CHUNK)) {
-    const relationships = await tx.evidenceRelationship.findMany({
-      where: { tenantId, kind: { in: [...FAMILY_KINDS] }, parentId: { in: batch } },
-      select: { childId: true },
-    });
+    const relationships = await run((tx) =>
+      tx.evidenceRelationship.findMany({
+        where: { tenantId, kind: { in: [...FAMILY_KINDS] }, parentId: { in: batch } },
+        select: { childId: true },
+      }),
+    );
     for (const rel of relationships) expanded.add(rel.childId);
   }
   return [...expanded];

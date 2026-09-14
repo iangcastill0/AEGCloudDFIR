@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  FAMILY_QUERY_CHUNK,
   chunk,
   expandDescendants,
   expandFamilies,
+  FAMILY_QUERY_CHUNK,
+  onTx,
   queryInChunks,
 } from './families.js';
 import { FAMILY_RELATIONSHIP_KINDS, type TenantScopedTx } from '@aeg-clouddfir/database';
@@ -55,7 +56,7 @@ describe('expandFamilies stays under the bind-parameter limit', () => {
 
   it('never sends more parameters than Prisma accepts', async () => {
     const { tx, bindCounts } = recordingTx();
-    await expandFamilies(tx, 'tenant', ids(50_000));
+    await expandFamilies(onTx(tx), 'tenant', ids(50_000));
     expect(bindCounts.length).toBeGreaterThan(1);
     for (const count of bindCounts) {
       expect(count).toBeLessThan(PRISMA_BIND_LIMIT);
@@ -68,14 +69,14 @@ describe('expandFamilies stays under the bind-parameter limit', () => {
     // Derived, not hardcoded: the kind list is shared now, and a hardcoded
     // count made this fail the moment inline_attachment was added to it.
     const { tx, bindCounts } = recordingTx();
-    await expandFamilies(tx, 'tenant', ids(FAMILY_QUERY_CHUNK));
+    await expandFamilies(onTx(tx), 'tenant', ids(FAMILY_QUERY_CHUNK));
     const perQuery = FAMILY_QUERY_CHUNK * 2 + FAMILY_RELATIONSHIP_KINDS.length;
     expect(bindCounts[0]).toBe(perQuery);
   });
 
   it('returns every family member found across all chunks', async () => {
     const { tx } = recordingTx([{ parentId: 'parent-x', childId: 'child-y' }]);
-    const result = await expandFamilies(tx, 'tenant', ids(12_000));
+    const result = await expandFamilies(onTx(tx), 'tenant', ids(12_000));
     expect(result).toContain('parent-x');
     expect(result).toContain('child-y');
     expect(result).toContain('id-0');
@@ -84,20 +85,20 @@ describe('expandFamilies stays under the bind-parameter limit', () => {
 
   it('de-duplicates rather than returning an id once per chunk', async () => {
     const { tx } = recordingTx([{ parentId: 'shared', childId: 'shared' }]);
-    const result = await expandFamilies(tx, 'tenant', ids(12_000));
+    const result = await expandFamilies(onTx(tx), 'tenant', ids(12_000));
     expect(result.filter((id) => id === 'shared')).toHaveLength(1);
     expect(new Set(result).size).toBe(result.length);
   });
 
   it('still does one query for a small selection', async () => {
     const { tx, findMany } = recordingTx();
-    await expandFamilies(tx, 'tenant', ids(3));
+    await expandFamilies(onTx(tx), 'tenant', ids(3));
     expect(findMany).toHaveBeenCalledTimes(1);
   });
 
   it('does nothing at all for an empty selection', async () => {
     const { tx, findMany } = recordingTx();
-    expect(await expandFamilies(tx, 'tenant', [])).toEqual([]);
+    expect(await expandFamilies(onTx(tx), 'tenant', [])).toEqual([]);
     expect(findMany).not.toHaveBeenCalled();
   });
 });
@@ -105,14 +106,14 @@ describe('expandFamilies stays under the bind-parameter limit', () => {
 describe('expandDescendants has the same limit', () => {
   it('chunks a large selection', async () => {
     const { tx, bindCounts } = recordingTx();
-    await expandDescendants(tx, 'tenant', ids(50_000));
+    await expandDescendants(onTx(tx), 'tenant', ids(50_000));
     expect(bindCounts.length).toBeGreaterThan(1);
     for (const count of bindCounts) expect(count).toBeLessThan(65_535);
   });
 
   it('returns the children it found', async () => {
     const { tx } = recordingTx([{ parentId: 'p', childId: 'kid' }]);
-    const result = await expandDescendants(tx, 'tenant', ids(12_000));
+    const result = await expandDescendants(onTx(tx), 'tenant', ids(12_000));
     expect(result).toContain('kid');
   });
 });

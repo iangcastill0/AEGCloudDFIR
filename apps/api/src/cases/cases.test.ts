@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, type Mock } from 'vitest';
 import { NotFoundException } from '@nestjs/common';
 import { CaseStatus, TenantRole } from '@aeg-clouddfir/database';
 import {
@@ -45,12 +45,11 @@ function caseRow(overrides: Record<string, unknown> = {}) {
 
 function makeService(models: Record<string, unknown>, selection?: Partial<SelectionService>) {
   const audit = fakeAudit();
-  const service = new CasesService(
-    fakePrisma(models),
-    audit.service,
-    (selection ?? {}) as SelectionService,
-  );
-  return { service, audit };
+  const prisma = fakePrisma(models);
+  const service = new CasesService(prisma, audit.service, (selection ?? {}) as SelectionService);
+  // $transaction is a mock, so a test can count how many transactions the work
+  // was split across — which is the difference the large-collection fix made.
+  return { service, audit, prisma: prisma as unknown as { $transaction: Mock } };
 }
 
 describe('CasesService.addItems', () => {
@@ -622,4 +621,126 @@ describe('CasesService.tags — only tags present in the matter', () => {
     const service = makeService({ case: { findFirst: vi.fn(async () => null) } }).service;
     await expect(service.tags(auth, CASE_ID)).rejects.toThrow(NotFoundException);
   });
+});
+
+const COLLECTION_ID = '00000000-0000-4000-8000-0000000000c1';
+
+describe('CasesService.addItems on a whole collection', () => {
+  /**
+   * The production failure. Adding a 434,910-item collection to a case ran the
+   * entire operation — family expansion, membership inserts, re-index rows,
+   * roughly 1,400 round trips — inside ONE transaction, and died at 30,129 ms
+   * against the 30-second limit:
+   *
+   *   Transaction already closed: a query cannot be executed on an expired
+   *   transaction.
+   *
+   * Chunking the queries had not helped, because the transaction was the limit
+   * rather than any single query. The work now runs in short transactions, one
+   * per chunk.
+   */
+  function bigCollection(total: number) {
+    const rows = Array.from({ length: total }, (_, i) => ({ id: `ev-${String(i)}` }));
+    const txStarts: string[] = [];
+    const caseItemCreateMany = vi.fn(async (args: { data: unknown[] }) => {
+      txStarts.push('caseItem');
+      return { count: args.data.length };
+    });
+    const { service, audit, prisma } = makeService({
+      case: { findFirst: vi.fn(async () => caseRow()) },
+      collection: { findFirst: vi.fn(async () => ({ id: COLLECTION_ID })) },
+      evidenceItem: {
+        findMany: vi.fn(async (args: { where?: { id?: { in?: string[] } } }) => {
+          const all = rows.map((r) => ({ id: r.id, version: 1 }));
+          const wanted = args.where?.id?.in;
+          return wanted === undefined ? all : all.filter((r) => wanted.includes(r.id));
+        }),
+      },
+      caseItem: { createMany: caseItemCreateMany },
+      outboxEvent: {
+        createMany: vi.fn(async (args: { data: unknown[] }) => ({ count: args.data.length })),
+      },
+      evidenceRelationship: { findMany: vi.fn(async () => []) },
+    });
+    return { service, audit, caseItemCreateMany, prisma };
+  }
+
+  it('adds a large collection instead of timing out', async () => {
+    const { service } = bigCollection(20_000);
+    const result = await service.addItems(
+      auth,
+      CASE_ID,
+      { source: { kind: 'collection', collectionId: COLLECTION_ID }, includeFamilies: false },
+      fakeRequest(),
+    );
+    expect(result.added).toBe(20_000);
+  }, 20_000);
+
+  it('does NOT hold one transaction open for the whole add', async () => {
+    // The direct cause of the failure. Everything ran inside a single
+    // withTenantContext, so ~1,400 round trips had to finish inside the
+    // 30-second transaction limit. They did not. A fake cannot reproduce a
+    // real timeout, so this asserts the structure instead: the work is spread
+    // across many short transactions rather than held in one.
+    const { service, prisma } = bigCollection(20_000);
+    await service.addItems(
+      auth,
+      CASE_ID,
+      { source: { kind: 'collection', collectionId: COLLECTION_ID }, includeFamilies: false },
+      fakeRequest(),
+    );
+    expect(prisma.$transaction.mock.calls.length).toBeGreaterThan(10);
+  }, 20_000);
+
+  it('writes membership in chunks, not one giant insert', async () => {
+    const { service, caseItemCreateMany } = bigCollection(20_000);
+    await service.addItems(
+      auth,
+      CASE_ID,
+      { source: { kind: 'collection', collectionId: COLLECTION_ID }, includeFamilies: false },
+      fakeRequest(),
+    );
+    expect(caseItemCreateMany.mock.calls.length).toBeGreaterThan(1);
+    for (const call of caseItemCreateMany.mock.calls) {
+      expect((call[0] as { data: unknown[] }).data.length).toBeLessThanOrEqual(1_000);
+    }
+  }, 20_000);
+
+  it('still re-indexes what it filed, or the case filter finds nothing', async () => {
+    // Case membership lives in the SEARCH document. Without the re-index the
+    // items join the case and Review's case filter matches none of them.
+    const rows = Array.from({ length: 2_000 }, (_, i) => ({ id: `ev-${String(i)}`, version: 1 }));
+    const outboxCreateMany = vi.fn(async (args: { data: unknown[] }) => ({
+      count: args.data.length,
+    }));
+    const { service } = makeService({
+      case: { findFirst: vi.fn(async () => caseRow()) },
+      collection: { findFirst: vi.fn(async () => ({ id: COLLECTION_ID })) },
+      // Honour the `in` filter, as the database does: enqueueReindex looks up
+      // versions per chunk, and a fake that ignores it returns every row for
+      // every chunk and inflates the count.
+      evidenceItem: {
+        findMany: vi.fn(async (args: { where?: { id?: { in?: string[] } } }) => {
+          const wanted = args.where?.id?.in;
+          return wanted === undefined ? rows : rows.filter((r) => wanted.includes(r.id));
+        }),
+      },
+      caseItem: { createMany: vi.fn(async (a: { data: unknown[] }) => ({ count: a.data.length })) },
+      outboxEvent: { createMany: outboxCreateMany },
+      evidenceRelationship: { findMany: vi.fn(async () => []) },
+    });
+
+    await service.addItems(
+      auth,
+      CASE_ID,
+      { source: { kind: 'collection', collectionId: COLLECTION_ID }, includeFamilies: false },
+      fakeRequest(),
+    );
+
+    const topics = outboxCreateMany.mock.calls.flatMap((c) =>
+      (c[0] as { data: { topic: string }[] }).data.map((d) => d.topic),
+    );
+    expect(topics.length).toBe(2_000);
+    expect(new Set(topics)).toEqual(new Set(['search.index']));
+  }, 20_000);
 });

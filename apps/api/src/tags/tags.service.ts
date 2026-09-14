@@ -14,7 +14,7 @@ import type { AuthContext } from '../common/http.js';
 import { PRISMA } from '../common/tokens.js';
 import type { CursorQuery } from '../common/pagination.js';
 import { zodValidate } from '../common/zod-validate.js';
-import { chunk, expandDescendants, expandFamilies } from '../common/families.js';
+import { chunk, expandDescendants, expandFamilies, onTx } from '../common/families.js';
 import { enqueueReindex } from '../common/reindex.js';
 import { AuditService } from '../audit/audit.service.js';
 
@@ -210,10 +210,10 @@ export class TagsService {
     ids: string[],
   ): Promise<string[]> {
     if (behavior === TagFamilyBehavior.apply_to_family) {
-      return expandFamilies(tx, tenantId, ids);
+      return expandFamilies(onTx(tx), tenantId, ids);
     }
     if (behavior === TagFamilyBehavior.apply_to_descendants) {
-      return expandDescendants(tx, tenantId, ids);
+      return expandDescendants(onTx(tx), tenantId, ids);
     }
     return [...ids];
   }
