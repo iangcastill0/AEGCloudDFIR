@@ -22,11 +22,19 @@ function row(i: number, over: Partial<ManifestItemRow> = {}): ManifestItemRow {
   };
 }
 
-/** A fake table of `total` rows, served a page at a time by cursor. */
+/**
+ * A fake table of `total` rows, served a page at a time by cursor.
+ *
+ * The cursor lookup is a Map, not findIndex. A linear scan per page is O(n*n)
+ * across the walk — at 185,119 rows over 93 pages that is ~17 million string
+ * comparisons, which took 9 seconds on CI and timed the test out. The fake was
+ * slow, not the code under test.
+ */
 function pagedSource(total: number, over: (i: number) => Partial<ManifestItemRow> = () => ({})) {
   const all = Array.from({ length: total }, (_, i) => row(i, over(i)));
+  const indexById = new Map(all.map((r, i) => [r.id, i]));
   const read = vi.fn((cursor: string | undefined, take: number) => {
-    const start = cursor === undefined ? 0 : all.findIndex((r) => r.id === cursor) + 1;
+    const start = cursor === undefined ? 0 : (indexById.get(cursor) ?? -1) + 1;
     return Promise.resolve(all.slice(start, start + take));
   });
   return { read, all };
@@ -40,12 +48,15 @@ describe('loadManifestItems', () => {
    * also held every row in memory at once — 5.2 GiB for one manifest.
    */
   it('returns every item across many pages', async () => {
-    const { read } = pagedSource(185_119);
+    // 100,000 is 50 pages. The real matter held 434,910 evidence items; the
+    // walk is the same shape at either size, and a test near the timeout is a
+    // test that flakes.
+    const { read } = pagedSource(100_000);
     const items = await loadManifestItems(read);
-    expect(items).toHaveLength(185_119);
+    expect(items).toHaveLength(100_000);
     // Nothing duplicated or dropped by the cursor walk.
-    expect(new Set(items.map((i) => i.evidenceItemId)).size).toBe(185_119);
-  });
+    expect(new Set(items.map((i) => i.evidenceItemId)).size).toBe(100_000);
+  }, 20_000);
 
   it('never asks for more than one page at a time', async () => {
     // The whole point: no single query big enough to blow the transaction
@@ -113,29 +124,31 @@ describe('loadManifestItems stops rather than spinning', () => {
    * the worker, and a worker that spins forever in silence is worse than one
    * that stops and says why.
    */
+  /** A source that ignores the cursor and always returns a full page. */
+  const stuck = () => {
+    const full = Array.from({ length: 100 }, (_, i) => row(i));
+    return vi.fn(() => Promise.resolve(full));
+  };
+
   it('throws instead of looping when the cursor never advances', async () => {
-    // A source that ignores the cursor and always returns a full page. Without
-    // the cap this call never returns.
-    const full = Array.from({ length: 1_000 }, (_, i) => row(i));
-    const read = vi.fn(() => Promise.resolve(full));
-    await expect(loadManifestItems(read, 1_000)).rejects.toBeInstanceOf(ManifestTooLargeError);
+    // The cap is injected so the guard is proved in a handful of iterations
+    // rather than walking five million rows to reach it.
+    await expect(loadManifestItems(stuck(), 100, 500)).rejects.toBeInstanceOf(
+      ManifestTooLargeError,
+    );
   });
 
   it('says plainly that no manifest was written', async () => {
-    // The operator needs to know the collection was NOT sealed, not just that
-    // something went wrong.
-    const full = Array.from({ length: 1_000 }, (_, i) => row(i));
-    const err = await loadManifestItems(
-      vi.fn(() => Promise.resolve(full)),
-      1_000,
-    ).catch((e: unknown) => e as Error);
+    // The operator needs to know the collection was NOT sealed, not merely
+    // that something went wrong.
+    const err = await loadManifestItems(stuck(), 100, 500).catch((e: unknown) => e as Error);
     expect(err.message).toContain('No manifest was written');
-    expect(err.message).toContain(MANIFEST_ROW_CAP.toLocaleString('en-US'));
+    expect(err.message).toContain('500');
   });
 
-  it('leaves a real collection far below the cap', async () => {
-    // 434,910 items is the largest seen; the cap is an order of magnitude above
-    // it, so a legitimate collection must never trip this.
+  it('defaults to a cap a real collection never reaches', async () => {
+    // 434,910 items is the largest seen. The default must stay far above it so
+    // a legitimate collection can never trip this.
     expect(MANIFEST_ROW_CAP).toBeGreaterThan(434_910 * 10);
   });
 });

@@ -102,6 +102,7 @@ export function toManifestItem(row: ManifestItemRow): ManifestItem {
 export async function loadManifestItems(
   readPage: ReadManifestPage,
   pageSize: number = MANIFEST_PAGE_SIZE,
+  rowCap: number = MANIFEST_ROW_CAP,
 ): Promise<ManifestItem[]> {
   const items: ManifestItem[] = [];
   let cursor: string | undefined;
@@ -112,7 +113,7 @@ export async function loadManifestItems(
     if (page.length === 0) return items;
 
     rowsRead += page.length;
-    if (rowsRead > MANIFEST_ROW_CAP) throw new ManifestTooLargeError(MANIFEST_ROW_CAP);
+    if (rowsRead > rowCap) throw new ManifestTooLargeError(rowCap);
 
     for (const row of page) {
       if (row.sha256 === '') continue;

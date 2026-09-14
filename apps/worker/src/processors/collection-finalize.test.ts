@@ -214,7 +214,7 @@ describe('buildCompletenessNarrative', () => {
 describe('processCollectionFinalize on a large collection', () => {
   /**
    * The production failure. Finalize loaded every evidence item in ONE
-   * transaction, which on a 185,119-item matter took 44-72 seconds against a
+   * transaction, which on a 434,910-item matter took 44-72 seconds against a
    * 30-second limit. It retried every 30 seconds for hours and could never
    * seal, so the collection had no manifest — the document that records what
    * was and was not collected.
@@ -253,26 +253,33 @@ describe('processCollectionFinalize on a large collection', () => {
       acquiredAt: new Date('2026-01-02T00:00:00Z'),
       isApiExportDerivative: false,
     }));
+    // Map, not findIndex: a linear cursor lookup is O(n*n) across the walk and
+    // took 9 seconds on CI, timing the test out. The fake was slow, not the
+    // code under test.
+    const indexById = new Map(rows.map((r, i) => [r.id, i]));
     f.tx.evidenceItem.findMany.mockImplementation(
       (args: { take?: number; cursor?: { id: string } }) => {
-        const start =
-          args.cursor === undefined ? 0 : rows.findIndex((r) => r.id === args.cursor?.id) + 1;
+        const start = args.cursor === undefined ? 0 : (indexById.get(args.cursor.id) ?? -1) + 1;
         return Promise.resolve(rows.slice(start, start + (args.take ?? rows.length)));
       },
     );
   }
 
-  it('seals a 185,119-item collection instead of timing out forever', async () => {
+  it('seals a multi-page collection without dropping or duplicating an item', async () => {
+    // 50,000 is 25 pages — enough to prove the cursor walk end to end. The real
+    // matter held 434,910 evidence items; building and serializing that many
+    // here costs seconds of CI time for no extra assurance, and a test close to
+    // the timeout is a test that flakes.
     const f = fakeCtx();
-    armLarge(f, 185_119);
+    armLarge(f, 50_000);
 
     await processCollectionFinalize(f.ctx, payload);
 
     const { manifest } = storedEnvelope(f);
     // Every item is in the manifest — paging must not drop or duplicate any.
-    expect(manifest.items).toHaveLength(185_119);
-    expect(new Set(manifest.items.map((i) => i.evidenceItemId)).size).toBe(185_119);
-  });
+    expect(manifest.items).toHaveLength(50_000);
+    expect(new Set(manifest.items.map((i) => i.evidenceItemId)).size).toBe(50_000);
+  }, 20_000);
 
   it('never issues one query large enough to blow the transaction limit', async () => {
     // The direct cause: a single unbounded findMany. Any page size is fine so
@@ -288,7 +295,7 @@ describe('processCollectionFinalize on a large collection', () => {
     for (const call of reads) {
       expect((call[0] as { take: number }).take).toBeLessThanOrEqual(2_000);
     }
-  });
+  }, 20_000);
 
   it('still marks the collection finished and signs the manifest', async () => {
     const f = fakeCtx();
