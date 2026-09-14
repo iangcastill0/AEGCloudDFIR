@@ -15,6 +15,7 @@ import {
 
 const auth = makeAuth([TenantRole.case_manager]);
 const COLLECTION_ID = '77777777-7777-4777-8777-777777777777';
+const CASE_ID = '00000000-0000-4000-8000-0000000000ca';
 const CUSTODIAN_ID = '88888888-8888-4888-8888-888888888888';
 
 const createBody = {
@@ -29,7 +30,16 @@ const createBody = {
 
 function makeService(models: Record<string, unknown>, opts?: { store?: unknown }) {
   const audit = fakeAudit();
-  const prisma = fakePrisma(models);
+  // Every collection now files itself under a case, so every create path
+  // touches tx.case. Defaulted here rather than in each test: a test that
+  // forgets it fails on a missing mock instead of on what it is checking.
+  const prisma = fakePrisma({
+    case: {
+      create: vi.fn(async () => ({ id: CASE_ID })),
+      findFirst: vi.fn(async () => ({ id: CASE_ID, status: 'open' })),
+    },
+    ...models,
+  });
   const service = new CollectionsService(
     prisma,
     audit.service,
@@ -68,7 +78,14 @@ describe('CollectionsService.create', () => {
     });
 
     const result = await service.create(auth, createBody, fakeRequest());
-    expect(result).toEqual({ id: COLLECTION_ID, status: 'created', replayed: false });
+    // caseId is part of the response now: a collection always names the case
+    // its evidence will be filed under, so the caller can link straight to it.
+    expect(result).toEqual({
+      id: COLLECTION_ID,
+      status: 'created',
+      replayed: false,
+      caseId: CASE_ID,
+    });
 
     // Exactly one transaction bundles the whole logical operation.
     const txMock = (prisma as unknown as { $transaction: ReturnType<typeof vi.fn> }).$transaction;
@@ -176,7 +193,14 @@ describe('CollectionsService.create', () => {
       },
     };
     const result = await service.create(auth, body, fakeRequest());
-    expect(result).toEqual({ id: COLLECTION_ID, status: 'created', replayed: false });
+    // caseId is part of the response now: a collection always names the case
+    // its evidence will be filed under, so the caller can link straight to it.
+    expect(result).toEqual({
+      id: COLLECTION_ID,
+      status: 'created',
+      replayed: false,
+      caseId: CASE_ID,
+    });
     // No custodian belong-to-connector lookup and no custodian rows created.
     expect(custodianFindMany).not.toHaveBeenCalled();
     expect(custodiansCreateMany).not.toHaveBeenCalled();
@@ -241,7 +265,14 @@ describe('CollectionsService.create (uploads)', () => {
     const { service } = makeService(models);
 
     const result = await service.create(auth, uploadBody, fakeRequest());
-    expect(result).toEqual({ id: COLLECTION_ID, status: 'created', replayed: false });
+    // caseId is part of the response now: a collection always names the case
+    // its evidence will be filed under, so the caller can link straight to it.
+    expect(result).toEqual({
+      id: COLLECTION_ID,
+      status: 'created',
+      replayed: false,
+      caseId: CASE_ID,
+    });
 
     // Existing synthetic connector is reused, never duplicated.
     expect(models.connectorAccount.findFirst).toHaveBeenCalledWith(
@@ -383,7 +414,7 @@ describe('CollectionsService.action', () => {
         findFirst: vi.fn(async () => ({ id: COLLECTION_ID, status: CollectionStatus.failed })),
         update: collectionUpdate,
       },
-      collectionItem: { findMany: failedQuery },
+      collectionItem: { findMany: failedQuery, updateMany: vi.fn(async () => ({ count: 0 })) },
       // Retry now also sweeps processing exceptions, so these must exist.
       evidenceItem: { findMany: vi.fn(async () => []), updateMany: vi.fn(async () => ({})) },
       collectionException: { findMany: vi.fn(async () => []), deleteMany: vi.fn(async () => ({})) },
@@ -597,7 +628,10 @@ describe('CollectionsService.action — retry covers processing exceptions', () 
         findFirst: vi.fn(async () => ({ id: COLLECTION_ID, status: CollectionStatus.completed })),
         update: vi.fn(async () => ({})),
       },
-      collectionItem: { findMany: vi.fn(async () => opts.failedFetches ?? []) },
+      collectionItem: {
+        findMany: vi.fn(async () => opts.failedFetches ?? []),
+        updateMany: vi.fn(async () => ({ count: 0 })),
+      },
       evidenceItem: { findMany: vi.fn(async () => opts.exceptedItems ?? []), updateMany },
       collectionException: { findMany: vi.fn(async () => opts.ledger ?? []), deleteMany },
       outboxEvent: { createMany: outboxCreateMany },
@@ -681,5 +715,236 @@ describe('CollectionsService.action — retry covers processing exceptions', () 
         summary: expect.objectContaining({ retriedItems: 1, retriedProcessing: 1 }),
       }),
     );
+  });
+});
+
+describe('CollectionsService.create files the collection under a case', () => {
+  /**
+   * Collecting was only half the job. The evidence had to be reviewable, and
+   * that meant creating a case by hand and adding the collection to it — a
+   * step easy to forget, and silent when forgotten: the collection showed as
+   * completed while nothing in it could be opened.
+   */
+  function baseModels(over: Record<string, unknown> = {}) {
+    return {
+      collection: {
+        findFirst: vi.fn(async () => null),
+        count: vi.fn(async () => 0),
+        create: vi.fn(async () => ({ id: COLLECTION_ID, status: CollectionStatus.created })),
+      },
+      connectorAccount: {
+        findFirst: vi.fn(async () => ({ id: CONNECTOR_ID, status: ConnectorStatus.connected })),
+      },
+      custodian: { findMany: vi.fn(async () => [{ id: CUSTODIAN_ID }]) },
+      tenant: { findUnique: vi.fn(async () => ({ id: TENANT_ID, planQuota: {} })) },
+      collectionCustodian: { createMany: vi.fn(async () => ({ count: 1 })) },
+      outboxEvent: { create: vi.fn(async () => ({})) },
+      ...over,
+    };
+  }
+
+  const body = () => ({
+    idempotencyKey: 'idem-case-0001',
+    connectorAccountId: CONNECTOR_ID,
+    name: 'Rorke mailbox',
+    sources: ['email'],
+    custodianIds: [CUSTODIAN_ID],
+    scope: { dateRange: { kind: 'all_time' } },
+  });
+
+  it('creates a case named after the collection and links the two', async () => {
+    const caseCreate = vi.fn(async () => ({ id: CASE_ID }));
+    const collectionCreate = vi.fn(async () => ({
+      id: COLLECTION_ID,
+      status: CollectionStatus.created,
+    }));
+    const { service } = makeService(
+      baseModels({
+        case: { create: caseCreate, findFirst: vi.fn() },
+        collection: {
+          findFirst: vi.fn(async () => null),
+          count: vi.fn(async () => 0),
+          create: collectionCreate,
+        },
+      }),
+    );
+
+    await service.create(auth, body(), fakeRequest());
+
+    const created = caseCreate.mock.calls[0]?.[0] as { data: { name: string } };
+    expect(created.data.name).toContain('Rorke mailbox');
+    // The link is what makes the evidence findable later.
+    const linked = collectionCreate.mock.calls[0]?.[0] as { data: { caseId: string } };
+    expect(linked.data.caseId).toBe(CASE_ID);
+  });
+
+  it('uses an existing case when the request names one', async () => {
+    // A matter runs several collections — one per custodian, or a second pass
+    // after a scope change. Each making its own case would scatter the matter.
+    const caseCreate = vi.fn();
+    const { service } = makeService(
+      baseModels({
+        case: {
+          create: caseCreate,
+          findFirst: vi.fn(async () => ({ id: CASE_ID, status: 'open' })),
+        },
+      }),
+    );
+    await service.create(auth, { ...body(), caseId: CASE_ID }, fakeRequest());
+    expect(caseCreate).not.toHaveBeenCalled();
+  });
+
+  it('refuses to collect into a closed case', async () => {
+    const { service } = makeService(
+      baseModels({
+        case: {
+          create: vi.fn(),
+          findFirst: vi.fn(async () => ({ id: CASE_ID, status: 'closed' })),
+        },
+      }),
+    );
+    await expect(
+      service.create(auth, { ...body(), caseId: CASE_ID }, fakeRequest()),
+    ).rejects.toThrow(/closed case/);
+  });
+
+  it('404s on a case id from another tenant', async () => {
+    const { service } = makeService(
+      baseModels({ case: { create: vi.fn(), findFirst: vi.fn(async () => null) } }),
+    );
+    await expect(
+      service.create(auth, { ...body(), caseId: CASE_ID }, fakeRequest()),
+    ).rejects.toThrow();
+  });
+
+  it('audits the case it invented, so nobody wonders where it came from', async () => {
+    const { service, audit } = makeService(
+      baseModels({ case: { create: vi.fn(async () => ({ id: CASE_ID })), findFirst: vi.fn() } }),
+    );
+    await service.create(auth, body(), fakeRequest());
+    const actions = audit.appendTx.mock.calls.map((c) => (c[1] as { action: string }).action);
+    expect(actions).toContain('case.created');
+    expect(actions).toContain('collection.created');
+  });
+});
+
+describe('retry recovers indexing failures without re-downloading', () => {
+  /**
+   * The production failure this exists for: an overloaded worker timed out on
+   * database transactions inside the search-index stage, and 15,624 items were
+   * marked failed with "search indexing failed". Every one still had its bytes
+   * and its sha256. Re-fetching them would have pulled 15,624 messages from
+   * Microsoft to replace files already on disk, byte for byte.
+   */
+  const preserved = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      id: `ci-${String(i)}`,
+      custodianId: CUSTODIAN_ID,
+      source: 'email',
+      providerItemId: `msg-${String(i)}`,
+      attempts: 1,
+      // Present = the bytes were collected. This is the whole signal.
+      evidenceItemId: `ev-${String(i)}`,
+    }));
+
+  const notCollected = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      id: `nf-${String(i)}`,
+      custodianId: CUSTODIAN_ID,
+      source: 'email',
+      providerItemId: `gone-${String(i)}`,
+      attempts: 1,
+      evidenceItemId: null,
+    }));
+
+  function retryService(items: Record<string, unknown>[]) {
+    const outboxCreateMany = vi.fn(async () => ({ count: 0 }));
+    const itemUpdateMany = vi.fn(async (args: { where: { id: { in: string[] } } }) => ({
+      count: args.where.id.in.length,
+    }));
+    const { service } = makeService({
+      collection: {
+        findFirst: vi.fn(async () => ({ id: COLLECTION_ID, status: CollectionStatus.failed })),
+        update: vi.fn(async () => ({})),
+      },
+      collectionItem: { findMany: vi.fn(async () => items), updateMany: itemUpdateMany },
+      evidenceItem: {
+        findMany: vi.fn(async (args: { where: { id?: { in?: string[] } } }) =>
+          (args.where.id?.in ?? []).map((id) => ({ id, version: 1 })),
+        ),
+        updateMany: vi.fn(async () => ({})),
+      },
+      collectionException: { findMany: vi.fn(async () => []), deleteMany: vi.fn(async () => ({})) },
+      outboxEvent: { createMany: outboxCreateMany },
+    });
+    return { service, outboxCreateMany, itemUpdateMany };
+  }
+
+  /** Every outbox row the retry wrote, flattened. */
+  function topics(outbox: ReturnType<typeof vi.fn>): string[] {
+    return outbox.mock.calls.flatMap((c) =>
+      (c[0] as { data: { topic: string }[] }).data.map((d) => d.topic),
+    );
+  }
+
+  it('re-indexes an item whose bytes are already preserved', async () => {
+    const { service, outboxCreateMany } = retryService(preserved(3));
+    const result = await service.action(auth, COLLECTION_ID, 'retry', fakeRequest());
+    expect(result.retriedIndexing).toBe(3);
+    expect(topics(outboxCreateMany)).toContain('search.index');
+  });
+
+  it('does NOT call the provider for anything already collected', async () => {
+    // The point of the whole change.
+    const { service, outboxCreateMany } = retryService(preserved(3));
+    const result = await service.action(auth, COLLECTION_ID, 'retry', fakeRequest());
+    expect(topics(outboxCreateMany)).not.toContain('collection.fetch-item');
+    expect(result.retriedItems).toBe(0);
+  });
+
+  it('still re-fetches items that have no preserved bytes', async () => {
+    const { service, outboxCreateMany } = retryService(notCollected(2));
+    const result = await service.action(auth, COLLECTION_ID, 'retry', fakeRequest());
+    expect(result.retriedItems).toBe(2);
+    expect(result.retriedIndexing).toBe(0);
+    expect(topics(outboxCreateMany)).toContain('collection.fetch-item');
+  });
+
+  it('splits a mixed batch, reporting each separately', async () => {
+    const { service } = retryService([...preserved(4), ...notCollected(2)]);
+    const result = await service.action(auth, COLLECTION_ID, 'retry', fakeRequest());
+    expect(result.retriedIndexing).toBe(4);
+    expect(result.retriedItems).toBe(2);
+  });
+
+  it('gives the re-index round a fresh dedup key', async () => {
+    // A dedup key works once, ever, and these items were already indexed at
+    // this version — that attempt is what failed. Without a round marker the
+    // outbox drops every row and the retry silently does nothing.
+    const { service, outboxCreateMany } = retryService(preserved(1));
+    await service.action(auth, COLLECTION_ID, 'retry', fakeRequest());
+    const keys = outboxCreateMany.mock.calls.flatMap((c) =>
+      (c[0] as { data: { topic: string; dedupKey: string }[] }).data
+        .filter((d) => d.topic === 'search.index')
+        .map((d) => d.dedupKey),
+    );
+    expect(keys[0]).toMatch(/:retry\d+$/);
+  });
+
+  it('moves re-indexed items back to preserved, not left failed', async () => {
+    // The bytes ARE preserved; only indexing is outstanding. Leaving them
+    // 'failed' understates what was collected, and finalize counts preserved
+    // as in flight so the collection waits instead of sealing short.
+    const { service, itemUpdateMany } = retryService(preserved(2));
+    await service.action(auth, COLLECTION_ID, 'retry', fakeRequest());
+    const data = itemUpdateMany.mock.calls[0]?.[0] as { data: { state: string } };
+    expect(data.data.state).toBe('preserved');
+  });
+
+  it('handles a real-sized failure without sixteen rounds of clicking', async () => {
+    // 15,770 items failed for real. The old 1,000 cap applied to everything.
+    const { service } = retryService(preserved(15_770));
+    const result = await service.action(auth, COLLECTION_ID, 'retry', fakeRequest());
+    expect(result.retriedIndexing).toBe(15_770);
   });
 });

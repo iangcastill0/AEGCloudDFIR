@@ -292,9 +292,19 @@ model Collection {
   /// Manifest object key once finalized.
   manifestKey        String             @default("")
   manifestSha256     String             @default("")
+  /// The case this collection belongs to.
+  ///
+  /// Every collection gets one: created with the collection unless the request
+  /// named an existing case. Nullable only because collections made before
+  /// this existed have none — a new one always does.
+  caseId             String?            @db.Uuid
 
   tenant           Tenant                 @relation(fields: [tenantId], references: [id])
   connectorAccount ConnectorAccount       @relation(fields: [connectorAccountId], references: [id])
+  // Restrict, not the SET NULL Prisma defaults to for an optional relation:
+  // quietly detaching a collection from its case would leave evidence with
+  // no route back to the matter it was gathered for.
+  case             Case?                  @relation(fields: [caseId], references: [id], onDelete: Restrict)
   custodians       CollectionCustodian[]
   checkpoints      CollectionCheckpoint[]
   items            CollectionItem[]
@@ -302,6 +312,7 @@ model Collection {
 
   @@unique([tenantId, idempotencyKey])
   @@index([tenantId, status])
+  @@index([caseId])
   @@map("collections")
 }
 
@@ -1054,6 +1065,7 @@ model Case {
   savedSearches SavedSearch[]
   exports       Export[]
   productions   Production[]
+  collections   Collection[]
 
   @@index([tenantId, status])
   @@map("cases")

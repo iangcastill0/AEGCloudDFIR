@@ -28,7 +28,8 @@ import { APP_CONFIG, EVIDENCE_STORE, PRISMA } from '../common/tokens.js';
 import type { CursorQuery } from '../common/pagination.js';
 import { assertWithinQuota, readQuota } from '../common/quotas.js';
 import { zodValidate } from '../common/zod-validate.js';
-import { chunk, FAMILY_QUERY_CHUNK } from '../common/families.js';
+import { chunk, queryInChunks, FAMILY_QUERY_CHUNK } from '../common/families.js';
+import { autoCaseDescription, autoCaseName } from './auto-case.js';
 import { AuditService } from '../audit/audit.service.js';
 import type { AppConfig } from '@aeg-clouddfir/config';
 import { derivativeKey, type EvidenceObjectStore } from '@aeg-clouddfir/evidence';
@@ -117,6 +118,13 @@ const LEGAL_TRANSITIONS: Record<CollectionActionName, CollectionStatus[]> = {
 };
 
 const RETRY_ITEM_CAP = 1000;
+/**
+ * Re-indexing is capped far higher than re-fetching because it costs no
+ * provider call — it re-reads bytes already on disk. A real failure ran to
+ * 15,770 items, and a 1,000 cap would have meant sixteen rounds of clicking
+ * with no way to tell which thousand you had already done.
+ */
+const RETRY_INDEX_CAP = 50_000;
 const RETRY_BATCH_SIZE = 200;
 
 const COMPLETENESS_NARRATIVES: Record<string, string> = {
@@ -277,7 +285,7 @@ export class CollectionsService {
     auth: AuthContext,
     body: unknown,
     request: FastifyRequest,
-  ): Promise<{ id: string; status: string; replayed: boolean }> {
+  ): Promise<{ id: string; status: string; replayed: boolean; caseId: string | null }> {
     const input = zodValidate(createCollectionApiSchema, body);
     const includesAudit = input.sources.includes('audit');
     const uploadsScope = input.scope.uploads;
@@ -287,9 +295,16 @@ export class CollectionsService {
         // Idempotent replay: same key returns the existing collection.
         const existing = await tx.collection.findFirst({
           where: { tenantId: auth.tenantId, idempotencyKey: input.idempotencyKey },
-          select: { id: true, status: true },
+          select: { id: true, status: true, caseId: true },
         });
-        if (existing) return { id: existing.id, status: existing.status, replayed: true };
+        if (existing) {
+          return {
+            id: existing.id,
+            status: existing.status,
+            replayed: true,
+            caseId: existing.caseId,
+          };
+        }
 
         let connector: { id: string; mode: string };
         let custodianIds = input.custodianIds;
@@ -366,6 +381,37 @@ export class CollectionsService {
           readQuota(tenant, 'maxConcurrentCollections'),
         );
 
+        // Every collection lands in a case. Either the one the request named,
+        // or a new one carrying the collection's name — because a collection
+        // with no case reads as finished while being unreviewable, and doing
+        // it by hand is a step that gets forgotten silently.
+        let caseId: string;
+        let caseCreated = false;
+        if (input.caseId !== undefined) {
+          const existing = await tx.case.findFirst({
+            where: { id: input.caseId, tenantId: auth.tenantId },
+            select: { id: true, status: true },
+          });
+          if (!existing) throw new NotFoundException();
+          if (existing.status !== 'open') {
+            throw new ConflictException('cannot collect into a closed case');
+          }
+          caseId = existing.id;
+        } else {
+          const now = new Date();
+          const createdCase = await tx.case.create({
+            data: {
+              tenantId: auth.tenantId,
+              name: autoCaseName(input.name, now),
+              description: autoCaseDescription(input.name),
+              createdById: auth.userId,
+            },
+            select: { id: true },
+          });
+          caseId = createdCase.id;
+          caseCreated = true;
+        }
+
         const collection = await tx.collection.create({
           data: {
             tenantId: auth.tenantId,
@@ -377,8 +423,24 @@ export class CollectionsService {
             status: CollectionStatus.created,
             idempotencyKey: input.idempotencyKey,
             createdById: auth.userId,
+            caseId,
           },
         });
+        if (caseCreated) {
+          // Audited as its own event: a case appearing without anyone asking
+          // for one needs a record of where it came from.
+          await this.audit.appendTx(tx, {
+            tenantId: auth.tenantId,
+            actorUserId: auth.userId,
+            actorDisplay: auth.actorDisplay,
+            effectiveRoles: auth.roles,
+            action: 'case.created',
+            targetType: 'case',
+            targetId: caseId,
+            summary: { createdFor: 'collection', collectionId: collection.id },
+            request,
+          });
+        }
         if (custodianIds.length > 0) {
           await tx.collectionCustodian.createMany({
             data: custodianIds.map((custodianId) => ({
@@ -409,13 +471,15 @@ export class CollectionsService {
             name: input.name,
             sources: input.sources,
             custodianCount: custodianIds.length,
+            caseId,
+            caseCreated,
             ...(uploadsScope !== undefined
               ? { uploadedContainers: uploadsScope.evidenceItemIds.length }
               : {}),
           },
           request,
         });
-        return { id: collection.id, status: collection.status, replayed: false };
+        return { id: collection.id, status: collection.status, replayed: false, caseId };
       });
       return result;
     } catch (err) {
@@ -424,10 +488,17 @@ export class CollectionsService {
         const existing = await withTenantContext(this.prisma, auth.tenantId, (tx) =>
           tx.collection.findFirst({
             where: { tenantId: auth.tenantId, idempotencyKey: input.idempotencyKey },
-            select: { id: true, status: true },
+            select: { id: true, status: true, caseId: true },
           }),
         );
-        if (existing) return { id: existing.id, status: existing.status, replayed: true };
+        if (existing) {
+          return {
+            id: existing.id,
+            status: existing.status,
+            replayed: true,
+            caseId: existing.caseId,
+          };
+        }
       }
       throw err;
     }
@@ -609,7 +680,10 @@ export class CollectionsService {
     return withTenantContext(this.prisma, auth.tenantId, async (tx) => {
       const collection = await tx.collection.findFirst({
         where: { id, tenantId: auth.tenantId },
-        include: { custodians: { include: { custodian: true } } },
+        include: {
+          custodians: { include: { custodian: true } },
+          case: { select: { id: true, name: true } },
+        },
       });
       if (!collection) throw new NotFoundException();
 
@@ -654,6 +728,8 @@ export class CollectionsService {
                 downloadAvailable: true,
               }
             : null,
+        case:
+          collection.case === null ? null : { id: collection.case.id, name: collection.case.name },
       };
     });
   }
@@ -728,8 +804,19 @@ export class CollectionsService {
         return { id, status: CollectionStatus.cancelling };
       }
 
-      // retry: re-enqueue failed items (one fetch-item job per item, capped).
-      const failedItems = await tx.collectionItem.findMany({
+      // retry: re-enqueue failed items.
+      //
+      // Split by whether the bytes are already here. An item that HAS an
+      // evidence item was collected, hashed and preserved — what failed came
+      // later. Re-fetching it would download from the provider something we
+      // already hold, byte-identical, and for a real failure of 15,770 items
+      // that is hours of provider calls to replace nothing.
+      //
+      // Seen in production: an overloaded worker timed out on database
+      // transactions inside the search-index stage, so 15,624 items were
+      // marked failed with "search indexing failed". Every one of them still
+      // had its bytes and its sha256. They needed re-indexing, not collecting.
+      const allFailed = await tx.collectionItem.findMany({
         where: { tenantId: auth.tenantId, collectionId: id, state: CollectionItemState.failed },
         select: {
           id: true,
@@ -737,10 +824,19 @@ export class CollectionsService {
           source: true,
           providerItemId: true,
           attempts: true,
+          evidenceItemId: true,
         },
         orderBy: { id: 'asc' },
-        take: RETRY_ITEM_CAP,
+        take: RETRY_INDEX_CAP,
       });
+      const hasEvidence = (item: { evidenceItemId: string | null }): boolean =>
+        typeof item.evidenceItemId === 'string' && item.evidenceItemId !== '';
+      const reindexable = allFailed.filter(
+        (item): item is typeof item & { evidenceItemId: string } => hasEvidence(item),
+      );
+      // Only items with nothing preserved go back to the provider, and those
+      // keep the original per-round cap: each one is a real API call.
+      const failedItems = allFailed.filter((item) => !hasEvidence(item)).slice(0, RETRY_ITEM_CAP);
       // Worker payload/dedup contract: item:{coll}:{cust}:{source}:{provId}
       // plus an :a{attempts} suffix so a retry round gets a fresh dedup key.
       for (const batch of chunk(failedItems, RETRY_BATCH_SIZE)) {
@@ -760,6 +856,49 @@ export class CollectionsService {
           skipDuplicates: true,
         });
       }
+      // Re-index the ones that only failed to reach the search index. No
+      // provider call: the bytes never left.
+      let reindexed = 0;
+      if (reindexable.length > 0) {
+        const evidenceIds = reindexable.map((item) => item.evidenceItemId);
+        const versions = await queryInChunks(evidenceIds, (batch) =>
+          tx.evidenceItem.findMany({
+            where: { tenantId: auth.tenantId, id: { in: batch } },
+            select: { id: true, version: true },
+          }),
+        );
+        const round = Date.now();
+        for (const batch of chunk(versions, RETRY_BATCH_SIZE)) {
+          await tx.outboxEvent.createMany({
+            data: batch.map((item) => ({
+              tenantId: auth.tenantId,
+              topic: 'search.index',
+              // A dedup key works once, ever, and these items were already
+              // indexed once at this version — that attempt is what failed.
+              // Without a fresh round marker the outbox drops every row and
+              // the retry silently does nothing.
+              dedupKey: `index:${item.id}:v${String(item.version)}:retry${String(round)}`,
+              payload: { tenantId: auth.tenantId, evidenceItemId: item.id, version: item.version },
+            })),
+            skipDuplicates: true,
+          });
+        }
+        // Back to 'preserved': the bytes ARE preserved and only indexing is
+        // outstanding. Leaving them 'failed' would understate what was
+        // collected, and finalize counts preserved as still in flight, so the
+        // collection correctly waits for them rather than sealing short.
+        for (const batch of chunk(
+          reindexable.map((item) => item.id),
+          RETRY_BATCH_SIZE,
+        )) {
+          const updated = await tx.collectionItem.updateMany({
+            where: { id: { in: batch } },
+            data: { state: CollectionItemState.preserved, lastError: '' },
+          });
+          reindexed += updated.count;
+        }
+      }
+
       // Processing exceptions are a DIFFERENT failure from a failed fetch: the
       // bytes were collected fine, but a later stage (text extraction, OCR)
       // could not read them. Retrying only fetch failures left these stuck
@@ -829,7 +968,11 @@ export class CollectionsService {
         auth,
         id,
         'collection.retried',
-        { retriedItems: failedItems.length, retriedProcessing: stuckItems.length },
+        {
+          retriedItems: failedItems.length,
+          retriedProcessing: stuckItems.length,
+          retriedIndexing: reindexed,
+        },
         request,
       );
       return {
@@ -837,6 +980,7 @@ export class CollectionsService {
         status: failedItems.length > 0 ? CollectionStatus.fetching : collection.status,
         retriedItems: failedItems.length,
         retriedProcessing: stuckItems.length,
+        retriedIndexing: reindexed,
       };
     });
   }

@@ -14,6 +14,9 @@ import {
 import { errorMessage } from '@/lib/errors';
 import { formatBytes, formatDateTime, humanizeToken } from '@/lib/format';
 
+/** Statuses after which the case holds everything the collection got. */
+const FINISHED_STATUSES = new Set(['completed', 'failed', 'cancelled']);
+
 type CollectionAction = 'pause' | 'resume' | 'cancel' | 'retry';
 
 const ACTION_LABEL: Record<CollectionAction, string> = {
@@ -142,6 +145,18 @@ export default function CollectionDetailPage({ params }: { params: Promise<{ id:
                   <ManifestDownload collectionId={data.id} sha256={data.manifest.sha256} />
                 ) : null}
               </div>
+
+              {/* Where the evidence is reviewable. Collecting is only half the
+                  job; without this the page says "completed" and gives a
+                  reviewer nowhere to go. */}
+              {data.case ? (
+                <p className="cdfir-collection-case">
+                  Filed in case <Link href={`/cases/${data.case.id}`}>{data.case.name}</Link>
+                  {FINISHED_STATUSES.has(data.status)
+                    ? null
+                    : ' — items appear there once the collection finishes.'}
+                </p>
+              ) : null}
 
               <StatusLive politeness="polite">{statusText}</StatusLive>
 

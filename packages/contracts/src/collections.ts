@@ -166,6 +166,15 @@ export const createCollectionRequestFields = z.object({
   custodianIds: z.array(uuid),
   uploadCustodian: uploadCustodian.optional(),
   scope: collectionScope,
+  /**
+   * Case to file this collection under.
+   *
+   * Omit it and one is created, named after the collection. A matter usually
+   * runs several collections — one per custodian, or a second pass after a
+   * scope change — so naming an existing case keeps them together instead of
+   * scattering the evidence across a case each.
+   */
+  caseId: uuid.optional(),
 });
 
 export const createCollectionRequest = createCollectionRequestFields.superRefine((value, ctx) => {
@@ -257,6 +266,12 @@ export const collectionStatusResponse = z.object({
   manifest: z
     .object({ objectKey: z.string(), sha256: z.string(), downloadAvailable: z.boolean() })
     .nullable(),
+  /**
+   * The case this collection is filed under, so the page can link straight to
+   * the reviewable copy of what it collected. Null only for collections made
+   * before cases became automatic.
+   */
+  case: z.object({ id: uuid, name: z.string() }).nullable().default(null),
 });
 export type CollectionStatusResponse = z.infer<typeof collectionStatusResponse>;
 
@@ -271,8 +286,16 @@ export const collectionAction = z.enum(['pause', 'resume', 'cancel', 'retry']);
 export const collectionActionResponse = z.object({
   id: uuid,
   status: z.string(),
+  /** Items with no preserved bytes: re-fetched from the provider. */
   retriedItems: z.number().int().optional(),
+  /** Items collected but unreadable by a later stage: re-extracted. */
   retriedProcessing: z.number().int().optional(),
+  /**
+   * Items whose bytes are already preserved and hashed, and which only failed
+   * to reach the search index. Re-indexed, NOT re-downloaded — reported apart
+   * so an operator can see that nothing was fetched from the provider again.
+   */
+  retriedIndexing: z.number().int().optional(),
 });
 
 /**

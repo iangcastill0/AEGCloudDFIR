@@ -492,3 +492,9 @@ h2 {
   border: 1px solid var(--border, #d4d4d8);
   background: #fff;
 }
+
+/* Link from a collection to the case its evidence is filed in. */
+.cdfir-collection-case {
+  margin: 0.5rem 0 0;
+  font-size: 0.9375rem;
+}
