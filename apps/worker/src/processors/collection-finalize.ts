@@ -18,6 +18,8 @@ import {
 import type { WorkerContext } from '../context.js';
 import { parseCollectionScope } from '../scope.js';
 import type { FinalizePayload } from './payloads.js';
+import { fileCollectionIntoCase } from './file-into-case.js';
+import { loadManifestItems } from './manifest-items.js';
 
 /** Static per-provider API surface documented in manifests. */
 const API_ENDPOINTS: Record<'microsoft' | 'google' | 'upload', string[]> = {
@@ -234,26 +236,39 @@ export async function processCollectionFinalize(
     allTimeScope: scope.dateRange.kind === 'all_time',
   });
 
-  // Manifest items: every evidence item preserved into this collection.
-  const evidenceItems = await withTenantContext(ctx.prisma, tenantId, (tx) =>
-    tx.evidenceItem.findMany({
-      where: { collectionId },
-      include: { blob: { select: { objectKey: true } } },
-      orderBy: { createdAt: 'asc' },
-    }),
+  // Manifest items: every evidence item preserved into this collection, read a
+  // page at a time.
+  //
+  // This was one findMany inside one transaction. It worked until a collection
+  // got large and then failed forever: 434,910 evidence items took 44-72
+  // seconds against the 30-second transaction limit, so finalize retried every
+  // 30 seconds and never sealed.
+  //
+  // Note which count matters. The collection showed 185,119 collection_items,
+  // but the manifest is built from evidence_items — and every attachment is one
+  // of those, so the real figure was 169,998 emails plus 249,787 attachments.
+  // Sizing this against the smaller number is how it was underestimated.
+  // See manifest-items.ts for the full account.
+  const manifestItems: ManifestItem[] = await loadManifestItems((cursor, take) =>
+    withTenantContext(ctx.prisma, tenantId, (tx) =>
+      tx.evidenceItem.findMany({
+        where: { collectionId },
+        select: {
+          id: true,
+          providerItemId: true,
+          custodianId: true,
+          sha256: true,
+          size: true,
+          acquiredAt: true,
+          isApiExportDerivative: true,
+          blob: { select: { objectKey: true } },
+        },
+        orderBy: { id: 'asc' },
+        take,
+        ...(cursor === undefined ? {} : { cursor: { id: cursor }, skip: 1 }),
+      }),
+    ),
   );
-  const manifestItems: ManifestItem[] = evidenceItems
-    .filter((item) => item.sha256 !== '')
-    .map((item) => ({
-      evidenceItemId: item.id,
-      providerItemId: item.providerItemId,
-      custodianId: item.custodianId ?? '',
-      sha256: item.sha256,
-      size: Number(item.size),
-      objectKey: item.blob?.objectKey ?? '',
-      acquiredAt: item.acquiredAt.toISOString(),
-      ...(item.isApiExportDerivative ? { apiExportDerivative: true } : {}),
-    }));
 
   const manifestExceptions: ManifestException[] = exceptions.map((ex) => ({
     kind: ex.kind,
@@ -354,4 +369,9 @@ export async function processCollectionFinalize(
       },
     });
   });
+
+  // Last, and deliberately after the manifest is sealed and the collection is
+  // marked final: filing is what makes the evidence reviewable, but it must
+  // never be able to undo a finished collection.
+  await fileCollectionIntoCase(ctx, tenantId, collectionId, collection.caseId);
 }

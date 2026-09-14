@@ -210,3 +210,97 @@ describe('buildCompletenessNarrative', () => {
     );
   });
 });
+
+describe('processCollectionFinalize on a large collection', () => {
+  /**
+   * The production failure. Finalize loaded every evidence item in ONE
+   * transaction, which on a 185,119-item matter took 44-72 seconds against a
+   * 30-second limit. It retried every 30 seconds for hours and could never
+   * seal, so the collection had no manifest — the document that records what
+   * was and was not collected.
+   */
+  function armLarge(f: FakeCtx, total: number): void {
+    f.tx.collection.findUnique.mockResolvedValue({
+      id: COLLECTION,
+      tenantId: TENANT,
+      name: 'City Of Winder',
+      kind: 'snapshot',
+      status: 'fetching',
+      sources: ['email'],
+      scope: { dateRange: { kind: 'all_time' } },
+      startedAt: new Date('2026-09-10T19:43:00Z'),
+      custodians: [{ custodian: { id: CUSTODIAN, email: 'a@b.com', displayName: 'A' } }],
+      connectorAccount: {
+        provider: 'microsoft',
+        mode: 'organization',
+        label: 'Winder',
+        externalIdentity: '',
+      },
+    });
+    f.tx.collectionItem.groupBy.mockResolvedValue([{ state: 'indexed', _count: { _all: total } }]);
+    f.tx.collectionCheckpoint.count.mockResolvedValue(0);
+    f.tx.collectionException.findMany.mockResolvedValue([]);
+    f.tx.evidenceItem.count.mockResolvedValue(0);
+
+    // A table that honours cursor and take, the way Prisma does.
+    const rows = Array.from({ length: total }, (_, i) => ({
+      id: `cdfir-${String(i).padStart(7, '0')}`,
+      providerItemId: `m${String(i)}`,
+      custodianId: CUSTODIAN,
+      sha256: SHA,
+      size: 10n,
+      blob: { objectKey: `tenants/${TENANT}/originals/sha256/aa/${SHA}` },
+      acquiredAt: new Date('2026-01-02T00:00:00Z'),
+      isApiExportDerivative: false,
+    }));
+    f.tx.evidenceItem.findMany.mockImplementation(
+      (args: { take?: number; cursor?: { id: string } }) => {
+        const start =
+          args.cursor === undefined ? 0 : rows.findIndex((r) => r.id === args.cursor?.id) + 1;
+        return Promise.resolve(rows.slice(start, start + (args.take ?? rows.length)));
+      },
+    );
+  }
+
+  it('seals a 185,119-item collection instead of timing out forever', async () => {
+    const f = fakeCtx();
+    armLarge(f, 185_119);
+
+    await processCollectionFinalize(f.ctx, payload);
+
+    const { manifest } = storedEnvelope(f);
+    // Every item is in the manifest — paging must not drop or duplicate any.
+    expect(manifest.items).toHaveLength(185_119);
+    expect(new Set(manifest.items.map((i) => i.evidenceItemId)).size).toBe(185_119);
+  });
+
+  it('never issues one query large enough to blow the transaction limit', async () => {
+    // The direct cause: a single unbounded findMany. Any page size is fine so
+    // long as there is one.
+    const f = fakeCtx();
+    armLarge(f, 50_000);
+    await processCollectionFinalize(f.ctx, payload);
+
+    const reads = f.tx.evidenceItem.findMany.mock.calls.filter(
+      (c) => (c[0] as { take?: number }).take !== undefined,
+    );
+    expect(reads.length).toBeGreaterThan(1);
+    for (const call of reads) {
+      expect((call[0] as { take: number }).take).toBeLessThanOrEqual(2_000);
+    }
+  });
+
+  it('still marks the collection finished and signs the manifest', async () => {
+    const f = fakeCtx();
+    armLarge(f, 5_000);
+    await processCollectionFinalize(f.ctx, payload);
+
+    const { signature } = storedEnvelope(f);
+    expect(signature.signature).toBeTruthy();
+    const update = f.tx.collection.update.mock.calls.at(-1)?.[0] as {
+      data: { status: string; finishedAt: Date };
+    };
+    expect(['completed', 'failed', 'cancelled']).toContain(update.data.status);
+    expect(update.data.finishedAt).toBeInstanceOf(Date);
+  });
+});
