@@ -8,17 +8,20 @@ mechanics, [deploy](deploy.md) for how images reach a host.
 
 Far less than you would expect, because evidence is not on the server.
 
+Volume sizes, measured 2026-09-15. Re-measure before you plan a window; these
+grow. `docker system df -v` prints them.
+
 | Store                 | Size    | Moves?                          |
 | --------------------- | ------- | ------------------------------- |
-| PostgreSQL (`cdfir`)  | 10.5 GB | yes                             |
+| PostgreSQL (`cdfir`)  | 10.2 GB | yes                             |
 | OpenSearch index      | 5.3 GB  | yes — copy it, do not rebuild   |
-| **Redis**             | 638 MB  | **yes — see the warning below** |
+| **Redis**             | 462 MB  | **yes — see the warning below** |
 | Authentik PostgreSQL  | 85 MB   | yes                             |
-| Prometheus / Grafana  | 570 MB  | optional (metrics history)      |
+| Prometheus / Grafana  | 580 MB  | optional (metrics history)      |
 | MinIO                 | 6.6 MB  | effectively empty               |
 | **Evidence (Wasabi)** | —       | **no — it never lived here**    |
 
-About 17 GB total. The evidence itself stays exactly where it is; the new host
+About 16 GB total. The evidence itself stays exactly where it is; the new host
 just needs the same S3 credentials.
 
 ## Warning: Redis is NOT disposable during a migration
@@ -55,6 +58,12 @@ done
 
 If the queues are non-empty, the Redis volume comes with you.
 
+Re-measured 2026-09-15, while planning the Linode move: **0 pending in the
+outbox against 244,984 waiting in Redis** (214,761 extract, 30,223 OCR). So this
+is not a one-off from a single bad day — it is the normal state of a host that
+is working through a large collection. Assume the queues are full and check
+rather than the other way round.
+
 ## Rebuild OpenSearch, or copy it?
 
 **Copy it.** Rebuilding is supported (`pnpm tsx scripts/reindex.ts`) but each
@@ -84,6 +93,48 @@ mkdir -p /var/www && git clone https://github.com/iangcastill0/AEGCloudDFIR /var
 **Do not install pnpm and do not build images here.** CI builds them; the host
 pulls. A build cache on this box once reached 48 GB and broke a deploy.
 
+### Pull every image now, before the downtime window
+
+Nothing here needs the old host, so it costs you nothing to do it days early. It
+takes about 11 GB and 10 minutes off the clock later.
+
+```bash
+# NEW host. TAG is whatever production runs today — see step 2.
+TAG=sha-xxxxxxx
+cd /var/www/AEGCloudDFIR
+grep -hE '^\s+image:' infra/compose/docker-compose.yml \
+  | sed -E 's/^\s+image:\s*//' | sed "s/\${CDFIR_IMAGE_TAG:-dev}/$TAG/" | sort -u \
+  | while read -r img; do docker pull -q "$img" || echo "FAILED $img"; done
+```
+
+**The MinIO images are no longer on Docker Hub.** Both `minio/minio` and
+`minio/mc` now answer `pull access denied ... repository does not exist`, so that
+pull fails on any new machine. They are not gone — they are still on the old
+host, and copying them needs no login and no credentials:
+
+```bash
+# from your Mac, which can reach both. Writes to neither disk.
+ssh cdfir-server 'docker save \
+  minio/minio:RELEASE.2025-04-22T22-12-26Z \
+  minio/mc:RELEASE.2025-04-16T18-13-26Z | gzip -1' \
+  | ssh cdfir-linode 'gunzip | docker load'
+```
+
+**Pull `alpine` onto both hosts too.** The volume copy in step 3 and the restore
+in step 4 both run `docker run --rm ... alpine tar`. Neither host had it before
+the 2026-09-15 move, so each would have fetched it from Docker Hub mid-window —
+the same registry already refusing the MinIO pulls above. 13 MB, and it removes
+an anonymous Docker Hub fetch from your downtime:
+
+```bash
+ssh cdfir-server 'docker pull -q alpine'
+ssh cdfir-linode 'docker pull -q alpine'
+```
+
+These two images now exist **only on your own servers**. A deploy prunes old
+tags, keeping anything running — so they survive while MinIO is up. If MinIO is
+ever stopped and pruned, they are unrecoverable. Save a copy somewhere.
+
 ## 2. Carry the secrets across by hand
 
 `.env` holds `CDFIR_KEK_LOCAL_MASTER_KEY`. **Without it every connector
@@ -98,15 +149,26 @@ currently running:
 grep CDFIR_IMAGE_TAG /var/www/AEGCloudDFIR/.env    # on the OLD host
 ```
 
-While you are in there, set the new machine's concurrency — this is the whole
-point of a bigger box:
+While you are in there, look at the new machine's concurrency. **Measure the box
+first. Do not copy a number out of this file.**
 
-```
-CDFIR_WORKER_CPU_CONCURRENCY=8     # ~1/4 of cores; 32-core box -> 8
+```bash
+nproc; free -g | awk 'NR==2{print $2" GB RAM"}'; df -h / | awk 'NR==2{print $2}'
 ```
 
-Left at the default of 4, a 32-core host runs exactly the same four jobs at a
-time as a 5-core host did.
+The rule of thumb is about a quarter of the cores, so a 32-core box would take
+`CDFIR_WORKER_CPU_CONCURRENCY=8`. It goes wrong in both directions:
+
+- **Too low on a big box.** Left at the default of 4, a 32-core host runs the
+  same four jobs at a time that a 5-core host did. The machine idles.
+- **Too low on a small one.** The quarter rule can land _under_ the default. The
+  2026-09-15 Linode move went from 5 cores to 8, where a quarter is **2** —
+  which would have been slower than what was already running.
+
+**Never set it below the value you run today.** If the new box wins on RAM and
+disk rather than cores, say so and leave concurrency alone. That move gained
+15 GB -> 31 GB of RAM and 98 GB -> 630 GB of disk, and only three cores. The disk
+was the real reason to move; the CPU barely changed.
 
 Symlink so either compose invocation works:
 
@@ -118,45 +180,61 @@ ln -sf /var/www/AEGCloudDFIR/.env /var/www/AEGCloudDFIR/infra/compose/.env
 
 Downtime starts here. Budget an hour.
 
-```bash
-# OLD host, repo root
-cd /var/www/AEGCloudDFIR
-docker exec cdfir-redis-1 redis-cli SAVE          # flush the queues to disk FIRST
-docker compose -f infra/compose/docker-compose.yml --env-file .env stop \
-  api web worker                                   # stop producers, leave stores up
+**Check the old host's free space first, and do not write the dumps onto it.**
 
-docker exec cdfir-postgres-1 pg_dump -U postgres -Fc -d cdfir > /tmp/cdfir.dump
-docker exec cdfir-authentik-postgres-1 pg_dump -U authentik -Fc -d authentik > /tmp/authentik.dump
-ls -lh /tmp/*.dump
+```bash
+df -h /tmp        # /tmp is on / here, not its own filesystem
 ```
+
+On 2026-09-15 that read `18G` free at 82% used, against dumps totalling roughly
+7-10 GB. It would probably have fit. "Probably" is not good enough on the box
+where a full disk once crashed PostgreSQL and then stopped it restarting,
+because replaying the log also needs space.
+
+So stream everything straight to the new host, which has the room. Nothing is
+written to the old disk at any point. Run these **from your Mac**, which can
+reach both machines:
+
+```bash
+# OLD host: flush the queues to disk, then stop the producers only.
+ssh cdfir-server 'cd /var/www/AEGCloudDFIR \
+  && docker exec cdfir-redis-1 redis-cli SAVE \
+  && docker compose -f infra/compose/docker-compose.yml --env-file .env stop api web worker'
+
+# Dumps: read on the old host, land on the new one.
+ssh cdfir-server 'docker exec cdfir-postgres-1 pg_dump -U postgres -Fc -d cdfir' \
+  | ssh cdfir-linode 'cat > /tmp/cdfir.dump'
+ssh cdfir-server 'docker exec cdfir-authentik-postgres-1 pg_dump -U authentik -Fc -d authentik' \
+  | ssh cdfir-linode 'cat > /tmp/authentik.dump'
+ssh cdfir-linode 'ls -lh /tmp/*.dump'
+```
+
+A dump that streams to another machine cannot be checked afterwards on the box
+it came from, so read the sizes on the new host and make sure neither is
+suspiciously small before you tear the old stack down.
 
 `pg_dump` **must run as a superuser**. Every tenant table carries
 `FORCE ROW LEVEL SECURITY`, which applies to the owner too — a dump taken as
 `cdfir` or `cdfir_migrator` produces a table of contents that looks complete
 over data that is empty. `pg_restore --list` cannot detect it.
 
-Now stop the rest and tar the volumes:
+Now stop the rest and stream the volumes across the same way. Note there is no
+`-v /tmp:/out` mount: the tar goes to stdout, so nothing lands on the old disk.
 
 ```bash
-docker compose -f infra/compose/docker-compose.yml --env-file .env down
-for v in cdfir_redis-data cdfir_opensearch-data; do
-  docker run --rm -v "$v":/src -v /tmp:/out alpine \
-    tar czf "/out/$v.tgz" -C /src .
+ssh cdfir-server 'cd /var/www/AEGCloudDFIR \
+  && docker compose -f infra/compose/docker-compose.yml --env-file .env down'
+
+for v in redis opensearch; do
+  ssh cdfir-server "docker run --rm -v cdfir_${v}-data:/src alpine tar cz -C /src ." \
+    | ssh cdfir-linode "cat > /tmp/${v}.tgz"
 done
-ls -lh /tmp/*.tgz
+ssh cdfir-linode 'ls -lh /tmp/*.tgz'
 ```
 
-Transfer (run from your Mac, which can reach both):
-
-```bash
-ssh cdfir-server 'cat /tmp/cdfir.dump'            > /tmp/cdfir.dump
-ssh cdfir-server 'cat /tmp/authentik.dump'        > /tmp/authentik.dump
-ssh cdfir-server 'cat /tmp/cdfir_redis-data.tgz'  > /tmp/redis.tgz
-ssh cdfir-server 'cat /tmp/cdfir_opensearch-data.tgz' > /tmp/opensearch.tgz
-for f in cdfir.dump authentik.dump redis.tgz opensearch.tgz; do
-  scp "/tmp/$f" cdfir-linode:/tmp/
-done
-```
+Carry `cdfir_authentik-pg-data` the same way if you would rather move the volume
+than restore the dump. `cdfir_prometheus-data` and `cdfir_grafana-data` are
+optional — they are only metrics history, and skipping them saves 580 MB.
 
 ## 4. Restore on the new host
 
@@ -204,6 +282,9 @@ docker compose -f infra/compose/docker-compose.yml --env-file .env \
 Do not skip this. A restore that looks fine and is empty is the failure mode
 this project has actually hit.
 
+Run this on the **old** host before you stop it, write the numbers down, then
+run it on the new one:
+
 ```bash
 docker exec -i cdfir-postgres-1 psql -U postgres -d cdfir <<'SQL'
 SELECT (SELECT count(*) FROM evidence_items)  AS evidence_items,
@@ -213,7 +294,10 @@ SELECT (SELECT count(*) FROM evidence_items)  AS evidence_items,
 SQL
 ```
 
-Every number must match the old host. Then:
+Every number must match. For scale, on 2026-09-15 this host held
+`evidence_items=480989`, `collections=6`, `case_items=478305`,
+`audit_events=499326`. Those are a sanity check on the order of magnitude, not
+your target — take your own baseline, because the counts move. Then:
 
 ```bash
 # queues came across intact
