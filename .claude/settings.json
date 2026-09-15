@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PROJECT_DIR:-/Users/ic/Documents/CloudDiscovery}/.claude/hooks/collect-live-state.sh\"",
+            "timeout": 60,
+            "async": true,
+            "statusMessage": "Reading the real state of the servers"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PROJECT_DIR:-/Users/ic/Documents/CloudDiscovery}/.claude/hooks/inject-live-state.sh\"",
+            "timeout": 40,
+            "statusMessage": "Checking what the servers are actually doing"
+          }
+        ]
+      }
+    ]
+  }
+}

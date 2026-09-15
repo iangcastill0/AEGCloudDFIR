@@ -252,7 +252,15 @@ monitor treats a stale stamp as a failed backup. Restore procedure:
 
 ## Working style in this repo
 
-- **Never report pipeline or deployment state from inference — check it.** Run
+- **Never report pipeline or deployment state from inference — check it.** This
+  is now enforced by a hook, not by memory: `.claude/hooks/inject-live-state.sh`
+  runs on **every** prompt and puts the rule plus a fresh snapshot of both
+  machines in front of Claude. `.claude/hooks/collect-live-state.sh` gathers it
+  (read-only, time-bounded, SSH-multiplexed, cached ~90s in
+  `~/.claude/projects/-Users-ic-Documents-CloudDiscovery/live-state.cache`).
+  Tests: `.claude/hooks/live-state.test.sh`. The snapshot is a starting point —
+  it has an age printed on it and covers only a few fields, so anything else
+  still needs its own command. Run
   `gh run list --workflow=CI -L 5 --json headSha,status,conclusion`. Same for
   `"Release images"`. For what is actually running, `grep CDFIR_IMAGE_TAG` in the
   server's `.env` / `.env.staging`. Never describe a queue, an ETA, or what an
