@@ -107,10 +107,22 @@ Measured against the real backlog, of 200,341 items with
 It would recover **none** of them.
 
 What the database does hold is `evidence_items.processingStatus`, which names
-every unfinished item exactly. So a recovery script is _possible_ — walk the
-`pending` rows and enqueue the right stage with fresh dedup keys. **No such
-script exists.** Until one does, the Redis volume is the only copy of the
-instruction to do that work, and it comes with you.
+every unfinished item exactly. `scripts/requeue-pending.ts` walks that column and
+re-enqueues the stage each item still needs:
+
+```bash
+# inside the worker container, which already has node_modules and the right env
+docker exec cdfir-worker-1 sh -c 'cd /app && ./node_modules/.bin/tsx requeue-pending.ts'
+docker exec cdfir-worker-1 sh -c 'cd /app && ./node_modules/.bin/tsx requeue-pending.ts --commit'
+```
+
+Dry run by default. Verified on staging 2026-09-15: 200 items enqueued, 199
+reached `indexed` within a minute.
+
+**It is a repair tool, not a safety net.** It re-reads every file from object
+storage, so a full run costs the same CPU the original run would have, and it
+cannot recover anything that never reached the database. Carrying the Redis
+volume is still far cheaper than rebuilding from it.
 
 Re-measured 2026-09-15, while planning the Linode move: **0 pending in the
 outbox against 244,984 waiting in Redis** (214,761 extract, 30,223 OCR). So this
