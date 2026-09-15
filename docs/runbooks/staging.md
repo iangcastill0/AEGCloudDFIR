@@ -45,7 +45,8 @@ second web image tagged `…-staging`.
 
 ### 1. DNS
 
-Add two A records pointing at `38.248.7.156`:
+Add two A records pointing at `74.207.235.208` (the Linode; staging moved there
+with production on 2026-09-15):
 
 - `staging.aegclouddfir.com`
 - `api-staging.aegclouddfir.com`

@@ -55,17 +55,47 @@ can replace production containers.
 
 Settings → Secrets and variables → Actions → **Variables**:
 
-| Variable                    | Value                                                                                           |
-| --------------------------- | ----------------------------------------------------------------------------------------------- |
-| `CDFIR_DEPLOY_TARGET`       | `ian@38.248.7.156`                                                                              |
-| `CDFIR_SSH_KNOWN_HOSTS`     | `38.248.7.156 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDMB2YnlrTAXNHou9evfR7otouV6r6x6pGHO3s9ajWpP` |
-| `CDFIR_DEPLOY_PATH`         | `/var/www/AEGCloudDFIR` (optional — this is the default)                                        |
-| `NEXT_PUBLIC_API_URL`       | `https://api.aegclouddfir.com` (optional — this is the default)                                 |
-| `NEXT_PUBLIC_AUTHENTIK_URL` | `https://auth.aegclouddfir.com` (optional — this is the default)                                |
+| Variable                    | Value                                                                                             |
+| --------------------------- | ------------------------------------------------------------------------------------------------- |
+| `CDFIR_DEPLOY_TARGET`       | `root@74.207.235.208`                                                                             |
+| `CDFIR_SSH_KNOWN_HOSTS`     | `74.207.235.208 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIAagaEGGkqSIOSgrh5VvwXTpa8vsd8zD0+O/tyb1iSX` |
+| `CDFIR_DEPLOY_PATH`         | `/var/www/AEGCloudDFIR` (optional — this is the default)                                          |
+| `NEXT_PUBLIC_API_URL`       | `https://api.aegclouddfir.com` (optional — this is the default)                                   |
+| `NEXT_PUBLIC_AUTHENTIK_URL` | `https://auth.aegclouddfir.com` (optional — this is the default)                                  |
 
 The host key is pinned rather than accepted on first use, so a hijacked DNS
 record cannot harvest the deploy key. If you ever rebuild the server, refresh it
-with `ssh-keyscan -t ed25519 <ip>`.
+with `ssh-keyscan -t ed25519 <ip> | grep -v '^#'`.
+
+**Moving hosts means changing three things, not one.** After the 2026-09-15 move
+to the Linode, both variables still named the old box, and the deploy key was
+not on the new one. A deploy would have SSH'd to the retired server, succeeded,
+and changed nothing users could see — the failure this project has hit before in
+the other direction. The three:
+
+1. `CDFIR_DEPLOY_TARGET` — the new `user@ip`
+2. `CDFIR_SSH_KNOWN_HOSTS` — the new host's key, or CI refuses to connect
+3. The `github-actions-deploy` **public** key in the new host's
+   `authorized_keys`, or CI cannot log in
+
+Check all three agree before trusting a green deploy:
+
+```bash
+gh variable list -R <owner>/<repo>
+ssh <newhost> 'ssh-keygen -lf ~/.ssh/authorized_keys'   # look for github-actions-deploy
+ssh-keyscan -t ed25519 <new-ip> | grep -v '^#'          # must equal the variable
+```
+
+If `gh` fails with `Unable to read current working directory`, that is macOS
+blocking your terminal, not a broken repo. Add `-R <owner>/<repo>` and it stops
+needing to resolve the repo from the current folder.
+
+Then prove it with a **staging** deploy, which needs no reviewer, and verify by
+tag rather than by the green tick:
+
+```bash
+ssh <newhost> 'grep CDFIR_IMAGE_TAG /var/www/AEGCloudDFIR/.env.staging'
+```
 
 ### 4. Turn on the approval gate
 

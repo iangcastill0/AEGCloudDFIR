@@ -2,12 +2,20 @@
 
 This guide takes the stack from `localhost` to real hostnames with HTTPS,
 written for the live deployment: domain **aegclouddfir.com** (DNS at Porkbun)
-on the server **38.248.7.156**. Substitute if either changes.
+on the server **74.207.235.208**. Substitute if either changes.
+
+> Production moved from `38.248.7.156` to the Linode `74.207.235.208` on
+> 2026-09-15. Any older copy of this guide, or anything still naming the old IP,
+> is describing the retired host. See
+> [server-migration](../runbooks/server-migration.md).
 
 ## 0. Prerequisites on this server (verified state)
 
-`38.248.7.156` is Ubuntu 24.04.3 LTS, 5 vCPU, 15 GB RAM (14 GB available) —
-comfortable for this stack. Two gaps to close first:
+`74.207.235.208` is Ubuntu 24.04.4 LTS, 8 vCPU, 31 GB RAM, 630 GB disk. The
+disk is the headroom that matters: the previous 98 GB host reached 82% and had
+already taken PostgreSQL down once. The CPU is not generous — see the measured
+throughput numbers in
+[server-migration](../runbooks/server-migration.md). Two gaps to close first:
 
 **Docker is not installed.** The whole stack ships as containers, so nothing can
 start until it is:
@@ -67,7 +75,7 @@ wildcard, so the three records below are enough — but deleting the wildcard is
 cleaner, because otherwise any typo'd hostname silently resolves to a parking
 page instead of failing loudly.
 
-**Add these A records** (Type `A`, TTL 600) — all answer `38.248.7.156`:
+**Add these A records** (Type `A`, TTL 600) — all answer `74.207.235.208`:
 
 | Host    | Serves                                                      |
 | ------- | ----------------------------------------------------------- |
@@ -104,8 +112,8 @@ the old parking records can delay it):
 ```bash
 dig +short app.aegclouddfir.com api.aegclouddfir.com auth.aegclouddfir.com \
             admin.aegclouddfir.com aegclouddfir.com www.aegclouddfir.com
-# every answer must be exactly 38.248.7.156
-# — NOT 207.207.210.x and NOT uixie.porkbun.com
+# every answer must be exactly 74.207.235.208
+# — NOT 38.248.7.156 (the retired host), NOT 207.207.210.x, NOT uixie.porkbun.com
 ```
 
 If you still see the parking host, wait for the old TTL to expire and re-check;

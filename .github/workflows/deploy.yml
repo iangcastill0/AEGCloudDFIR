@@ -112,7 +112,7 @@ jobs:
           DRY: ${{ inputs.dry_run }}
         run: |
           if [ -z "$TARGET" ]; then
-            echo "::error::set the CDFIR_DEPLOY_TARGET variable (e.g. ian@38.248.7.156)"
+            echo "::error::set the CDFIR_DEPLOY_TARGET variable (e.g. root@74.207.235.208)"
             exit 1
           fi
           args=""
