@@ -16,6 +16,7 @@ export const QUEUES = {
   processPreview: 'process.preview',
   processScan: 'process.scan',
   searchIndex: 'search.index',
+  searchCaseCollection: 'search.case-collection',
   exportRun: 'export.run',
   productionRun: 'production.run',
   deletionRun: 'deletion.run',

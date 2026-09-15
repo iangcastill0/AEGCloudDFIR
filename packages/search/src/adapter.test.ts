@@ -40,6 +40,7 @@ interface MockClient extends MinimalOpenSearchClient {
   bulk: ReturnType<typeof vi.fn>;
   search: ReturnType<typeof vi.fn>;
   deleteByQuery: ReturnType<typeof vi.fn>;
+  updateByQuery: ReturnType<typeof vi.fn>;
   cluster: { health: ReturnType<typeof vi.fn> };
 }
 
@@ -57,6 +58,9 @@ function mockClient(): MockClient {
       body: { hits: { total: { value: 0 }, hits: [] } } satisfies RawSearchBody,
     }),
     deleteByQuery: vi.fn().mockResolvedValue({ body: {} }),
+    updateByQuery: vi
+      .fn()
+      .mockResolvedValue({ body: { total: 0, updated: 0, noops: 0, version_conflicts: 0 } }),
     cluster: { health: vi.fn().mockResolvedValue({ body: { status: 'green' } }) },
   };
 }
@@ -440,5 +444,128 @@ describe('health', () => {
     client.cluster.health.mockRejectedValue(new Error('ECONNREFUSED'));
     expect(await adapter(client).health()).toBe(false);
     consoleError.mockRestore();
+  });
+});
+
+describe('addCaseToCollection', () => {
+  /**
+   * Why this exists at all: the alternative is one re-index job per item, and a
+   * re-index rebuilds the whole document — a database read with eleven nested
+   * includes plus a download of the item's extracted text from object storage.
+   * On a real 434,910-item collection that measured 10-25 hours of queue, to
+   * append one string to one field. This is a single request.
+   */
+  function callBody(client: MockClient): Record<string, unknown> {
+    return client.updateByQuery.mock.calls[0]?.[0]?.body as Record<string, unknown>;
+  }
+
+  function filters(client: MockClient): Record<string, unknown>[] {
+    const query = callBody(client).query as { bool?: { filter?: Record<string, unknown>[] } };
+    return query.bool?.filter ?? [];
+  }
+
+  it('filters on the tenant as well as the collection', async () => {
+    // The index holds every tenant's documents in one place, and the tenant
+    // term is the only isolation it has. A collection id is unique in practice,
+    // but "in practice" is not a boundary.
+    const client = mockClient();
+    await adapter(client).addCaseToCollection('tenant-1', 'coll-1', 'case-1');
+
+    expect(filters(client)).toEqual([
+      { term: { tenantId: 'tenant-1' } },
+      { term: { collectionId: 'coll-1' } },
+    ]);
+  });
+
+  it('writes to the alias, not a versioned index name', async () => {
+    const client = mockClient();
+    await adapter(client).addCaseToCollection('tenant-1', 'coll-1', 'case-1');
+    expect(client.updateByQuery.mock.calls[0]?.[0]?.index).toBe('test-evidence');
+  });
+
+  it('passes the case id as a script parameter, never inlined', async () => {
+    // Inlining it into the script source would be a painless injection point
+    // and would defeat the script cache.
+    const client = mockClient();
+    await adapter(client).addCaseToCollection('tenant-1', 'coll-1', 'case-1');
+
+    const script = callBody(client).script as { source: string; params: Record<string, string> };
+    expect(script.params).toEqual({ caseId: 'case-1' });
+    expect(script.source).not.toContain('case-1');
+  });
+
+  it('makes a document that already carries the id a no-op', async () => {
+    // Without this, re-running rewrites every document that is already correct.
+    // On a 434,910-item collection that is a long and completely pointless
+    // write, and it is the normal case for a retry.
+    const client = mockClient();
+    await adapter(client).addCaseToCollection('tenant-1', 'coll-1', 'case-1');
+
+    const script = callBody(client).script as { source: string };
+    expect(script.source).toContain("ctx.op = 'noop'");
+    expect(script.source).toContain('contains(params.caseId)');
+  });
+
+  it('creates the field when a document has no caseIds yet', async () => {
+    // buildSearchDoc omits caseIds entirely when the list is empty, so most
+    // documents reaching this script have no such field at all. Appending to a
+    // null would throw for every one of them.
+    const client = mockClient();
+    await adapter(client).addCaseToCollection('tenant-1', 'coll-1', 'case-1');
+
+    const script = callBody(client).script as { source: string };
+    expect(script.source).toContain('ctx._source.caseIds == null');
+  });
+
+  it('refreshes, because the caller is about to search for these documents', async () => {
+    const client = mockClient();
+    await adapter(client).addCaseToCollection('tenant-1', 'coll-1', 'case-1');
+    expect(client.updateByQuery.mock.calls[0]?.[0]?.refresh).toBe(true);
+  });
+
+  it('proceeds through version conflicts rather than aborting', async () => {
+    // A document being re-indexed at the same moment is a normal race. The
+    // loser keeps the case id anyway: that re-index reads case_items from the
+    // database, which the API wrote before queueing this work.
+    const client = mockClient();
+    await adapter(client).addCaseToCollection('tenant-1', 'coll-1', 'case-1');
+    expect(client.updateByQuery.mock.calls[0]?.[0]?.conflicts).toBe('proceed');
+  });
+
+  it('reports what actually changed', async () => {
+    const client = mockClient();
+    client.updateByQuery.mockResolvedValue({
+      body: { total: 100, updated: 90, noops: 8, version_conflicts: 2 },
+    });
+
+    expect(await adapter(client).addCaseToCollection('tenant-1', 'coll-1', 'case-1')).toEqual({
+      updated: 90,
+      unchanged: 8,
+      conflicts: 2,
+    });
+  });
+
+  it('treats missing counters as zero rather than NaN', async () => {
+    const client = mockClient();
+    client.updateByQuery.mockResolvedValue({ body: {} });
+
+    expect(await adapter(client).addCaseToCollection('tenant-1', 'coll-1', 'case-1')).toEqual({
+      updated: 0,
+      unchanged: 0,
+      conflicts: 0,
+    });
+  });
+
+  it('throws when the engine reports per-document failures', async () => {
+    // A partial success reported as success would leave a case quietly missing
+    // items, and nothing downstream would ever notice.
+    const client = mockClient();
+    client.updateByQuery.mockResolvedValue({
+      body: { updated: 10, failures: [{ id: 'doc-1', cause: { reason: 'mapping conflict' } }] },
+    });
+
+    await expect(
+      adapter(client).addCaseToCollection('tenant-1', 'coll-1', 'case-1'),
+    ).rejects.toThrow(/mapping conflict/);
   });
 });

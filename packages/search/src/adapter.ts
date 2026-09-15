@@ -14,6 +14,16 @@ export interface BulkIndexResult {
   errors: { id: string; error: string }[];
 }
 
+/** Outcome of a server-side bulk field update (see addCaseToCollection). */
+export interface UpdateByQueryResult {
+  /** Documents the script actually changed. */
+  updated: number;
+  /** Documents matched but already correct — the script made them a no-op. */
+  unchanged: number;
+  /** Version conflicts skipped because another writer got there first. */
+  conflicts: number;
+}
+
 export interface SearchHit {
   id: string;
   score: number | null;
@@ -37,6 +47,19 @@ export interface SearchResponse {
 export interface SearchAdapter {
   ensureIndex(): Promise<{ created: boolean; indexName: string }>;
   indexBulk(docs: EvidenceSearchDoc[]): Promise<BulkIndexResult>;
+  /**
+   * Add one case id to every document of one collection, engine-side.
+   *
+   * The alternative is re-indexing each item, and that rebuilds the whole
+   * document: ~12 SQL queries plus a download of its extracted text from object
+   * storage, to change one field. On a 434,910-item collection that measured
+   * out at 10-25 hours. This is one request.
+   */
+  addCaseToCollection(
+    tenantId: string,
+    collectionId: string,
+    caseId: string,
+  ): Promise<UpdateByQueryResult>;
   deleteByTenant(tenantId: string): Promise<void>;
   search(req: SearchRequestBody): Promise<SearchResponse>;
   reindexToNewVersion(
@@ -109,9 +132,23 @@ export interface MinimalOpenSearchClient {
     body: Record<string, unknown>;
     refresh?: boolean;
   }): Promise<OsApiResponse<unknown>>;
+  updateByQuery(params: {
+    index: string;
+    body: Record<string, unknown>;
+    refresh?: boolean;
+    conflicts?: string;
+  }): Promise<OsApiResponse<UpdateByQueryBody>>;
   cluster: {
     health(): Promise<OsApiResponse<{ status: string }>>;
   };
+}
+
+export interface UpdateByQueryBody {
+  total?: number;
+  updated?: number;
+  noops?: number;
+  version_conflicts?: number;
+  failures?: unknown[];
 }
 
 export interface OpenSearchAdapterOptions {
@@ -249,6 +286,75 @@ export class OpenSearchAdapter implements SearchAdapter {
     }
 
     return { indexed, errors };
+  }
+
+  /**
+   * Stamp one case id onto every document of one collection, in one request.
+   *
+   * Why this exists: adding a collection to a case used to queue one re-index
+   * job per item, and a re-index rebuilds the entire document — a Prisma read
+   * with eleven nested includes, plus a download of the item's extracted text
+   * from object storage, then a bulk call carrying a single document. All of
+   * that to append one string to one field. Measured on a 434,910-item
+   * collection that is 10-25 hours of queue. `_update_by_query` does it inside
+   * the engine, touching no other service.
+   *
+   * This is a shortcut, not a second source of truth. `case_items` in Postgres
+   * remains authoritative and the indexer rebuilds `caseIds` from it, so an
+   * item re-indexed later for any other reason lands on the same answer. The
+   * only thing this changes is how long the index takes to agree.
+   *
+   * `tenantId` is filtered on as well as `collectionId`, always. A collection
+   * id is unique in practice, but the index holds every tenant's documents in
+   * one place and the tenant term is the only isolation it has — so it is not
+   * left to chance.
+   */
+  async addCaseToCollection(
+    tenantId: string,
+    collectionId: string,
+    caseId: string,
+  ): Promise<UpdateByQueryResult> {
+    const response = await this.client.updateByQuery({
+      index: this.alias,
+      // 'proceed' rather than aborting: a document being re-indexed at the same
+      // moment is a normal race, not a failure. The loser keeps the case id
+      // anyway, because that re-index reads case_items from the database.
+      conflicts: 'proceed',
+      // The caller's next action is a search that must find these documents.
+      refresh: true,
+      body: {
+        query: {
+          bool: {
+            filter: [{ term: { tenantId } }, { term: { collectionId } }],
+          },
+        },
+        script: {
+          lang: 'painless',
+          // ctx.op = 'noop' matters: without it, re-running this rewrites every
+          // document that already carries the id, which on a large collection
+          // is a long and completely pointless write.
+          source:
+            'if (ctx._source.caseIds == null) { ctx._source.caseIds = [params.caseId]; } ' +
+            'else if (!ctx._source.caseIds.contains(params.caseId)) { ctx._source.caseIds.add(params.caseId); } ' +
+            "else { ctx.op = 'noop'; }",
+          params: { caseId },
+        },
+      },
+    });
+
+    const body = response.body;
+    const failures = body.failures ?? [];
+    if (failures.length > 0) {
+      throw new Error(
+        `adding case ${caseId} to collection ${collectionId} failed for ` +
+          `${String(failures.length)} document(s): ${JSON.stringify(failures[0])}`,
+      );
+    }
+    return {
+      updated: body.updated ?? 0,
+      unchanged: body.noops ?? 0,
+      conflicts: body.version_conflicts ?? 0,
+    };
   }
 
   async deleteByTenant(tenantId: string): Promise<void> {

@@ -16,8 +16,10 @@ import { processScan } from './processors/process-scan.js';
 import { processPstExtract } from './processors/pst-extract.js';
 import { processProductionRun } from './processors/production-run.js';
 import { deletionRun, deletionRunPayload } from './processors/deletion-run.js';
+import { processSearchCaseCollection } from './processors/search-case-collection.js';
 import { processSearchIndex } from './processors/search-index.js';
 import {
+  caseCollectionPayload,
   discoverPayload,
   evidenceStagePayload,
   exportRunPayload,
@@ -32,25 +34,58 @@ import { BACKOFF_STRATEGIES, DEFAULT_JOB_OPTIONS, QUEUES, type QueueName } from 
 import { failureTargetFor, isTerminalFailure, recordTerminalFailure } from './terminal-failure.js';
 import { classifyProviderError } from './permanent-errors.js';
 
-/** Per-queue concurrency: IO-heavy stages fan out; run-level stages serialize. */
-export const QUEUE_CONCURRENCY: Record<QueueName, number> = {
-  [QUEUES.collectionDiscover]: 2,
-  [QUEUES.collectionFetchPage]: 2,
-  [QUEUES.collectionFetchItem]: 8,
-  [QUEUES.collectionFinalize]: 2,
-  // Container extraction is memory/disk heavy (temp copy of the whole PST).
-  [QUEUES.pstExtract]: 1,
-  [QUEUES.processParse]: 4,
-  [QUEUES.processExtract]: 4,
-  [QUEUES.processOcr]: 4,
-  [QUEUES.processPreview]: 4,
-  [QUEUES.processScan]: 4,
-  [QUEUES.searchIndex]: 8,
-  [QUEUES.exportRun]: 1,
-  [QUEUES.productionRun]: 1,
-  [QUEUES.deletionRun]: 1,
-  [QUEUES.deadLetter]: 2,
-};
+/**
+ * Per-queue concurrency: CPU-heavy stages scale with the machine, provider and
+ * run-level stages do not.
+ *
+ * `cpuConcurrency` comes from CDFIR_WORKER_CPU_CONCURRENCY and applies ONLY to
+ * the four stages that burn CPU locally — parse, extract, OCR, preview. Those
+ * were fixed at 4, which meant a bigger machine bought nothing: on a five-core
+ * host, load sat at 27 with 218,746 extractions and 26,957 OCR jobs queued, and
+ * a 32-core host would have run exactly the same four at a time.
+ *
+ * Everything else is deliberately left alone, and the reasons differ:
+ *
+ * - Provider fetches are limited by Microsoft and Google rate limits, not by
+ *   this machine. Raising them buys 429s, not throughput.
+ * - pstExtract holds a temp copy of a whole container on disk, so one at a time
+ *   is a memory and disk decision.
+ * - Run-level stages (export, production, deletion) must serialize to produce
+ *   one coherent artifact.
+ * - processScan is bounded by ClamAV's own thread pool, not by cores here;
+ *   raising it past clamd's MaxThreads just queues inside clamd instead.
+ */
+export function queueConcurrency(cpuConcurrency: number): Record<QueueName, number> {
+  return {
+    [QUEUES.collectionDiscover]: 2,
+    [QUEUES.collectionFetchPage]: 2,
+    [QUEUES.collectionFetchItem]: 8,
+    [QUEUES.collectionFinalize]: 2,
+    // Container extraction is memory/disk heavy (temp copy of the whole PST).
+    [QUEUES.pstExtract]: 1,
+    [QUEUES.processParse]: cpuConcurrency,
+    [QUEUES.processExtract]: cpuConcurrency,
+    [QUEUES.processOcr]: cpuConcurrency,
+    [QUEUES.processPreview]: cpuConcurrency,
+    [QUEUES.processScan]: 4,
+    [QUEUES.searchIndex]: 8,
+    // One long engine-side request per job, not something to fan out. Two so a
+    // second case add is not stuck behind a large one.
+    [QUEUES.searchCaseCollection]: 2,
+    [QUEUES.exportRun]: 1,
+    [QUEUES.productionRun]: 1,
+    [QUEUES.deletionRun]: 1,
+    [QUEUES.deadLetter]: 2,
+  };
+}
+
+/** The stages CDFIR_WORKER_CPU_CONCURRENCY governs. */
+export const CPU_BOUND_QUEUES: readonly QueueName[] = [
+  QUEUES.processParse,
+  QUEUES.processExtract,
+  QUEUES.processOcr,
+  QUEUES.processPreview,
+];
 
 type QueueHandler = (ctx: WorkerContext, data: unknown) => Promise<void>;
 
@@ -72,6 +107,8 @@ export function buildHandlers(): Record<QueueName, QueueHandler> {
     [QUEUES.processPreview]: (ctx, data) => processPreview(ctx, evidenceStagePayload.parse(data)),
     [QUEUES.processScan]: (ctx, data) => processScan(ctx, evidenceStagePayload.parse(data)),
     [QUEUES.searchIndex]: (ctx, data) => processSearchIndex(ctx, evidenceStagePayload.parse(data)),
+    [QUEUES.searchCaseCollection]: (ctx, data) =>
+      processSearchCaseCollection(ctx, caseCollectionPayload.parse(data)),
     [QUEUES.exportRun]: (ctx, data) => processExportRun(ctx, exportRunPayload.parse(data)),
     [QUEUES.productionRun]: (ctx, data) =>
       processProductionRun(ctx, productionRunPayload.parse(data)),
@@ -92,6 +129,7 @@ export function buildHandlers(): Record<QueueName, QueueHandler> {
  * are copied to the dead-letter queue for operator triage.
  */
 export function createWorkers(ctx: WorkerContext, connection: Redis): Worker[] {
+  const concurrency = queueConcurrency(ctx.config.CDFIR_WORKER_CPU_CONCURRENCY);
   const handlers = buildHandlers();
   const workers: Worker[] = [];
   const maxAttempts = DEFAULT_JOB_OPTIONS.attempts ?? 8;
@@ -128,7 +166,7 @@ export function createWorkers(ctx: WorkerContext, connection: Redis): Worker[] {
       },
       {
         connection,
-        concurrency: QUEUE_CONCURRENCY[queueName],
+        concurrency: concurrency[queueName],
         settings: {
           backoffStrategy: (attemptsMade: number) =>
             BACKOFF_STRATEGIES['cdfir-jitter'](attemptsMade),

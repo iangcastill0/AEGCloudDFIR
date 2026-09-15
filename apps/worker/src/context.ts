@@ -26,7 +26,10 @@ export type ObjectStorePort = Pick<
   | 'verifyObjectHash'
 >;
 
-export type SearchPort = Pick<SearchAdapter, 'indexBulk' | 'search' | 'ensureIndex'>;
+export type SearchPort = Pick<
+  SearchAdapter,
+  'indexBulk' | 'search' | 'ensureIndex' | 'addCaseToCollection'
+>;
 
 export interface WorkerContext {
   config: AppConfig;

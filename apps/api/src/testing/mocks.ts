@@ -38,6 +38,9 @@ export function makeAuth(roles: TenantRole[], overrides: Partial<AuthContext> = 
 export function fakePrisma(models: Record<string, unknown>): PrismaClient {
   const base: Record<string, unknown> = {
     $executeRaw: vi.fn(async () => 0),
+    // Defaults to an empty result. Paged raw reads treat that as "no more
+    // rows", so a test that does not care about them simply sees none.
+    $queryRaw: vi.fn(async () => []),
     ...models,
   };
   base.$transaction = vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(base));

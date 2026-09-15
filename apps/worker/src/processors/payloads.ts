@@ -102,6 +102,14 @@ export const evidenceStagePayload = z.object({
 });
 export type EvidenceStagePayload = z.infer<typeof evidenceStagePayload>;
 
+/** search.case-collection: stamp one case id across one collection's documents. */
+export const caseCollectionPayload = z.object({
+  tenantId: uuid,
+  caseId: uuid,
+  collectionId: uuid,
+});
+export type CaseCollectionPayload = z.infer<typeof caseCollectionPayload>;
+
 export const exportRunPayload = z.object({
   tenantId: uuid,
   exportId: uuid,

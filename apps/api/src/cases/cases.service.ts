@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   BadRequestException,
   ConflictException,
@@ -28,6 +29,26 @@ import { AuditService } from '../audit/audit.service.js';
 import { SelectionService } from '../search/selection.service.js';
 
 const ITEM_INSERT_CHUNK = 1000;
+
+/**
+ * Rows per statement when a whole collection joins a case.
+ *
+ * Much larger than ITEM_INSERT_CHUNK because nothing travels through Node: the
+ * rows are selected and inserted by one SQL statement. Measured on production,
+ * reading 25,000 ids of a 434,910-item collection is ~410 ms, so a chunk sits
+ * far inside the 30-second transaction limit however big the collection gets.
+ */
+const COLLECTION_INSERT_CHUNK = 25_000;
+
+/** Sorts before every real uuid, so the first page needs no special case. */
+const UUID_ZERO = '00000000-0000-0000-0000-000000000000';
+
+/** One page of the collection-to-case insert. */
+interface CollectionInsertPage {
+  inserted: number;
+  scanned: number;
+  lastId: string | null;
+}
 
 const updateCaseSchema = z.object({
   name: z.string().min(1).max(200).optional(),
@@ -275,11 +296,11 @@ export class CasesService {
         // 404 rather than an empty add: adding zero items silently would look
         // exactly like a collection that happened to be empty.
         if (!collection) throw new NotFoundException();
-        const items = await tx.evidenceItem.findMany({
-          where: { tenantId: auth.tenantId, collectionId: collection.id },
-          select: { id: true },
-        });
-        sourceIds = items.map((item) => item.id);
+        // Deliberately NOT loading the ids. A collection has no upper bound —
+        // the largest here holds 434,910 items — and every one of them would
+        // then be carried through Node, through family expansion and through
+        // chunked inserts. addWholeCollection below does the whole thing in
+        // SQL instead, so all this path needs is proof the collection exists.
       } else if (input.source.kind === 'items') {
         const rows = await queryInChunks(sourceIds, (batch) =>
           tx.evidenceItem.findMany({
@@ -293,6 +314,12 @@ export class CasesService {
       }
     });
     void resolved;
+
+    // A whole collection takes the bulk path: one INSERT ... SELECT and one
+    // job, instead of half a million of each. See addWholeCollection.
+    if (input.source.kind === 'collection') {
+      return this.addWholeCollection(auth, id, input.source.collectionId, request);
+    }
 
     // Everything below runs OUTSIDE that transaction, each chunk in its own.
     //
@@ -355,6 +382,118 @@ export class CasesService {
     });
 
     return { requested: sourceIds.length, added };
+  }
+
+  /**
+   * Add every item of one collection to a case.
+   *
+   * The generic path above cannot do this at scale, and the reason is worth
+   * keeping. It loads every id into Node, expands families over them, then
+   * writes membership and one re-index row per item. On a 434,910-item
+   * collection that is ~1,400 database round trips and 434,910 queued jobs —
+   * and because a re-index rebuilds the whole document (a read with eleven
+   * nested includes plus a download of the item's text from object storage),
+   * the queue alone measured 10-25 hours. To add one string to one field.
+   *
+   * So this path does neither:
+   *
+   * - Membership is one INSERT ... SELECT per page. Nothing crosses the
+   *   process boundary, so a page is a single statement rather than a thousand.
+   * - The index is told once. One job stamps the case id onto every document of
+   *   the collection engine-side (see processSearchCaseCollection).
+   *
+   * Family expansion is skipped, and that is not a shortcut: a collection
+   * already contains its own attachments as items in their own right. Measured
+   * on the 434,910-item collection, expanding families added exactly zero ids.
+   *
+   * Paged by id, each page its own short transaction, for the reason this
+   * codebase keeps relearning — a single statement over an unbounded table is
+   * fine until the table is big, and then it is permanently broken. Every write
+   * skips duplicates, so a failure half way is completed by running it again.
+   */
+  private async addWholeCollection(
+    auth: AuthContext,
+    caseId: string,
+    collectionId: string,
+    request: FastifyRequest,
+  ): Promise<{ requested: number; added: number }> {
+    let added = 0;
+    let requested = 0;
+    let cursor = UUID_ZERO;
+
+    for (;;) {
+      const page = await withTenantContext(this.prisma, auth.tenantId, async (tx) => {
+        const rows = await tx.$queryRaw<CollectionInsertPage[]>`
+          WITH batch AS (
+            SELECT e."id", e."tenantId"
+              FROM evidence_items e
+             WHERE e."tenantId" = ${auth.tenantId}::uuid
+               AND e."collectionId" = ${collectionId}::uuid
+               AND e."id" > ${cursor}::uuid
+             ORDER BY e."id"
+             LIMIT ${COLLECTION_INSERT_CHUNK}
+          ), inserted AS (
+            INSERT INTO case_items ("id", "tenantId", "caseId", "evidenceItemId", "addedById", "addedVia")
+            SELECT gen_random_uuid(), b."tenantId", ${caseId}::uuid, b."id", ${auth.userId}::uuid, 'collection'
+              FROM batch b
+            ON CONFLICT ("caseId", "evidenceItemId") DO NOTHING
+            RETURNING 1
+          )
+          SELECT (SELECT count(*) FROM inserted)::int AS "inserted",
+                 (SELECT count(*) FROM batch)::int    AS "scanned",
+                 (SELECT max(b."id") FROM batch b)    AS "lastId"`;
+        return rows[0] ?? { inserted: 0, scanned: 0, lastId: null };
+      });
+
+      added += page.inserted;
+      requested += page.scanned;
+      // A short page is the end. `lastId` is null only on an empty page, and
+      // without a cursor the next statement would repeat this one forever.
+      if (page.scanned < COLLECTION_INSERT_CHUNK || page.lastId === null) break;
+      cursor = page.lastId;
+    }
+
+    // One job, not one per item. Queued in its own transaction AFTER the rows
+    // are committed: the worker stamps documents from the collection id, but
+    // anything re-indexed later rebuilds `caseIds` from these rows, so they
+    // must exist first for the two to agree.
+    await withTenantContext(this.prisma, auth.tenantId, async (tx) => {
+      await tx.outboxEvent.createMany({
+        data: [
+          {
+            tenantId: auth.tenantId,
+            topic: 'search.case-collection',
+            // A fresh token per call. Dispatched outbox rows are kept and
+            // (topic, dedupKey) is unique, so a key built from the case and
+            // collection alone would work exactly once ever and every later
+            // add of the same pair would be silently dropped.
+            dedupKey: `case-collection:${caseId}:${collectionId}:${randomUUID()}`,
+            payload: { tenantId: auth.tenantId, caseId, collectionId },
+          },
+        ],
+        skipDuplicates: true,
+      });
+
+      await this.audit.appendTx(tx, {
+        tenantId: auth.tenantId,
+        actorUserId: auth.userId,
+        actorDisplay: auth.actorDisplay,
+        effectiveRoles: auth.roles,
+        action: 'case.items_added',
+        targetType: 'case',
+        targetId: caseId,
+        summary: {
+          sourceKind: 'collection',
+          collectionId,
+          requested,
+          withFamilies: requested,
+          added,
+        },
+        request,
+      });
+    });
+
+    return { requested, added };
   }
 
   async items(

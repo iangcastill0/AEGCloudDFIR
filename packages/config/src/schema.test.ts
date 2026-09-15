@@ -103,3 +103,31 @@ describe('Dropbox connector configuration', () => {
     expect(JSON.stringify(redacted)).not.toContain('the-real-secret');
   });
 });
+
+describe('CDFIR_WORKER_CPU_CONCURRENCY', () => {
+  /**
+   * How many CPU-bound jobs the worker runs at once, per stage. This was
+   * hardcoded at 4, which made throughput independent of the machine: a
+   * five-core host sat at load 27 with 218,746 extractions and 26,957 OCR jobs
+   * queued, and a 32-core host would have run the same four at a time.
+   */
+  it('defaults to the value that used to be hardcoded', () => {
+    // An operator who never sets it must get exactly today's behaviour.
+    expect(loadConfig(validEnv).CDFIR_WORKER_CPU_CONCURRENCY).toBe(4);
+  });
+
+  it('coerces the string a .env file actually supplies', () => {
+    const config = loadConfig({ ...validEnv, CDFIR_WORKER_CPU_CONCURRENCY: '8' });
+    expect(config.CDFIR_WORKER_CPU_CONCURRENCY).toBe(8);
+  });
+
+  it('refuses zero, which would stop those stages entirely', () => {
+    expect(() => loadConfig({ ...validEnv, CDFIR_WORKER_CPU_CONCURRENCY: '0' })).toThrow();
+  });
+
+  it('refuses a value no machine could honour', () => {
+    // A typo does not fail loudly at runtime, it just thrashes. Better to
+    // refuse to boot than to spend a day wondering why everything is slow.
+    expect(() => loadConfig({ ...validEnv, CDFIR_WORKER_CPU_CONCURRENCY: '1000' })).toThrow();
+  });
+});

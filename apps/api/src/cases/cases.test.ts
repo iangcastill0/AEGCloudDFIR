@@ -52,6 +52,49 @@ function makeService(models: Record<string, unknown>, selection?: Partial<Select
   return { service, audit, prisma: prisma as unknown as { $transaction: Mock } };
 }
 
+/** Cursor value the service starts from; sorts before every real uuid. */
+const UUID_ZERO = '00000000-0000-0000-0000-000000000000';
+
+/**
+ * A fake of the paged INSERT ... SELECT that files a collection into a case.
+ *
+ * The service calls $queryRaw as a tagged template, so the mock receives the
+ * SQL fragments and then the interpolated values in order:
+ * tenantId, collectionId, cursor, limit, caseId, addedById.
+ */
+function pagedInsert(total: number) {
+  const ids = Array.from(
+    { length: total },
+    (_, i) => `00000000-0000-4000-8000-${i.toString(16).padStart(12, '0')}`,
+  );
+  // A Map, not findIndex: a linear scan per page is quadratic across the walk,
+  // which is how an earlier test in this repo took nine seconds and timed out.
+  const indexById = new Map(ids.map((id, i) => [id, i]));
+
+  const queryRaw = vi.fn(async (_sql: unknown, ...values: unknown[]) => {
+    const cursor = values[2] as string;
+    const take = values[3] as number;
+    const start = cursor === UUID_ZERO ? 0 : (indexById.get(cursor) ?? -1) + 1;
+    const page = ids.slice(start, start + take);
+    return [
+      {
+        inserted: page.length,
+        scanned: page.length,
+        lastId: page.length > 0 ? (page[page.length - 1] ?? null) : null,
+      },
+    ];
+  });
+
+  return {
+    queryRaw,
+    ids,
+    /** The SQL text of call `n`, fragments joined. */
+    sqlOf: (n: number) => ((queryRaw.mock.calls[n]?.[0] ?? []) as unknown as string[]).join('?'),
+    /** The interpolated values of call `n`. */
+    valuesOf: (n: number) => queryRaw.mock.calls[n]?.slice(1) ?? [],
+  };
+}
+
 describe('CasesService.addItems', () => {
   it('adds every item carrying the tag (reference-only) and audits the counts', async () => {
     const createMany = vi.fn(async (args: { data: unknown[] }) => ({ count: args.data.length }));
@@ -99,23 +142,22 @@ describe('CasesService.addItems', () => {
     );
   });
 
-  it('adds everything in a collection, recording how it got there', async () => {
-    // "Add from a collection" is how a case starts: you collect first, then scope
-    // a matter to what came back. Doing it by tag first meant tagging thousands
-    // of items just to reference them.
-    const createMany = vi.fn(async (args: { data: unknown[] }) => ({ count: args.data.length }));
-    const findMany = vi.fn(async () => [
-      { id: ITEM_A, version: 1 },
-      { id: ITEM_B, version: 1 },
-    ]);
+  it('adds everything in a collection without loading its ids', async () => {
+    // "Add from a collection" is how a case starts: you collect first, then
+    // scope a matter to what came back.
+    //
+    // The ids deliberately never reach this process. A collection has no upper
+    // bound — the largest here holds 434,910 items — so membership is written
+    // by one INSERT ... SELECT per page instead.
+    const findMany = vi.fn(async () => []);
     const { service, audit } = makeService({
       case: { findFirst: vi.fn(async () => caseRow()) },
       collection: { findFirst: vi.fn(async () => ({ id: COLLECTION_ID })) },
       evidenceItem: { findMany },
-      caseItem: { createMany },
       outboxEvent: {
         createMany: vi.fn(async (args: { data: unknown[] }) => ({ count: args.data.length })),
       },
+      $queryRaw: pagedInsert(2).queryRaw,
     });
 
     const result = await service.addItems(
@@ -126,19 +168,57 @@ describe('CasesService.addItems', () => {
     );
 
     expect(result).toEqual({ requested: 2, added: 2 });
-    // Scoped to the collection AND the tenant: a collection id from another
-    // tenant must not widen the query.
-    expect(findMany.mock.calls[0]?.[0]).toMatchObject({
-      where: { tenantId: TENANT_ID, collectionId: COLLECTION_ID },
-    });
-    const rows = (createMany.mock.calls[0]?.[0] as { data: { addedVia: string }[] }).data;
-    expect(rows[0]?.addedVia).toBe('collection');
+    expect(findMany).not.toHaveBeenCalled();
     expect(audit.appendTx).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
         summary: expect.objectContaining({ sourceKind: 'collection', added: 2 }),
       }),
     );
+  });
+
+  it('scopes the insert to the tenant as well as the collection', async () => {
+    // A collection id from another tenant must not widen the query. RLS is the
+    // real boundary, but raw SQL bypasses Prisma's own filtering, so the
+    // predicate is stated explicitly too.
+    const paged = pagedInsert(2);
+    const { service } = makeService({
+      case: { findFirst: vi.fn(async () => caseRow()) },
+      collection: { findFirst: vi.fn(async () => ({ id: COLLECTION_ID })) },
+      outboxEvent: { createMany: vi.fn(async () => ({ count: 1 })) },
+      $queryRaw: paged.queryRaw,
+    });
+
+    await service.addItems(
+      auth,
+      CASE_ID,
+      { source: { kind: 'collection', collectionId: COLLECTION_ID }, includeFamilies: false },
+      fakeRequest(),
+    );
+
+    const sql = paged.sqlOf(0);
+    expect(sql).toContain('e."tenantId" =');
+    expect(sql).toContain('e."collectionId" =');
+    expect(paged.valuesOf(0).slice(0, 2)).toEqual([TENANT_ID, COLLECTION_ID]);
+  });
+
+  it('skips duplicates so a half-finished add is completed by running it again', async () => {
+    const paged = pagedInsert(2);
+    const { service } = makeService({
+      case: { findFirst: vi.fn(async () => caseRow()) },
+      collection: { findFirst: vi.fn(async () => ({ id: COLLECTION_ID })) },
+      outboxEvent: { createMany: vi.fn(async () => ({ count: 1 })) },
+      $queryRaw: paged.queryRaw,
+    });
+
+    await service.addItems(
+      auth,
+      CASE_ID,
+      { source: { kind: 'collection', collectionId: COLLECTION_ID }, includeFamilies: false },
+      fakeRequest(),
+    );
+
+    expect(paged.sqlOf(0)).toContain('ON CONFLICT ("caseId", "evidenceItemId") DO NOTHING');
   });
 
   it('404s for a collection in another tenant, rather than adding nothing quietly', async () => {
@@ -158,12 +238,11 @@ describe('CasesService.addItems', () => {
   });
 
   it('reports zero for an empty collection without failing', async () => {
-    const createMany = vi.fn(async () => ({ count: 0 }));
     const { service } = makeService({
       case: { findFirst: vi.fn(async () => caseRow()) },
       collection: { findFirst: vi.fn(async () => ({ id: COLLECTION_ID })) },
-      evidenceItem: { findMany: vi.fn(async () => []) },
-      caseItem: { createMany },
+      outboxEvent: { createMany: vi.fn(async () => ({ count: 1 })) },
+      // $queryRaw defaults to no rows, which is what an empty collection reads.
     });
     const result = await service.addItems(
       auth,
@@ -627,120 +706,199 @@ const COLLECTION_ID = '00000000-0000-4000-8000-0000000000c1';
 
 describe('CasesService.addItems on a whole collection', () => {
   /**
-   * The production failure. Adding a 434,910-item collection to a case ran the
-   * entire operation — family expansion, membership inserts, re-index rows,
-   * roughly 1,400 round trips — inside ONE transaction, and died at 30,129 ms
-   * against the 30-second limit:
+   * Two production failures, one after the other.
    *
-   *   Transaction already closed: a query cannot be executed on an expired
-   *   transaction.
+   * First: adding a 434,910-item collection ran the entire operation — family
+   * expansion, membership inserts, re-index rows, ~1,400 round trips — inside
+   * ONE transaction and died at 30,129 ms against the 30-second limit.
    *
-   * Chunking the queries had not helped, because the transaction was the limit
-   * rather than any single query. The work now runs in short transactions, one
-   * per chunk.
+   * Then, with that fixed, the add succeeded but Review still could not find
+   * the case for 10-25 hours: it queued one re-index job per item, and a
+   * re-index rebuilds the whole document (a read with eleven nested includes
+   * plus a download of the item's text from object storage) to append one
+   * string to one field.
+   *
+   * So the shape asserted here is: many short transactions, no ids in this
+   * process, and exactly ONE job.
    */
   function bigCollection(total: number) {
-    const rows = Array.from({ length: total }, (_, i) => ({ id: `ev-${String(i)}` }));
-    const txStarts: string[] = [];
-    const caseItemCreateMany = vi.fn(async (args: { data: unknown[] }) => {
-      txStarts.push('caseItem');
-      return { count: args.data.length };
-    });
-    const { service, audit, prisma } = makeService({
-      case: { findFirst: vi.fn(async () => caseRow()) },
-      collection: { findFirst: vi.fn(async () => ({ id: COLLECTION_ID })) },
-      evidenceItem: {
-        findMany: vi.fn(async (args: { where?: { id?: { in?: string[] } } }) => {
-          const all = rows.map((r) => ({ id: r.id, version: 1 }));
-          const wanted = args.where?.id?.in;
-          return wanted === undefined ? all : all.filter((r) => wanted.includes(r.id));
-        }),
-      },
-      caseItem: { createMany: caseItemCreateMany },
-      outboxEvent: {
-        createMany: vi.fn(async (args: { data: unknown[] }) => ({ count: args.data.length })),
-      },
-      evidenceRelationship: { findMany: vi.fn(async () => []) },
-    });
-    return { service, audit, caseItemCreateMany, prisma };
-  }
-
-  it('adds a large collection instead of timing out', async () => {
-    const { service } = bigCollection(20_000);
-    const result = await service.addItems(
-      auth,
-      CASE_ID,
-      { source: { kind: 'collection', collectionId: COLLECTION_ID }, includeFamilies: false },
-      fakeRequest(),
-    );
-    expect(result.added).toBe(20_000);
-  }, 20_000);
-
-  it('does NOT hold one transaction open for the whole add', async () => {
-    // The direct cause of the failure. Everything ran inside a single
-    // withTenantContext, so ~1,400 round trips had to finish inside the
-    // 30-second transaction limit. They did not. A fake cannot reproduce a
-    // real timeout, so this asserts the structure instead: the work is spread
-    // across many short transactions rather than held in one.
-    const { service, prisma } = bigCollection(20_000);
-    await service.addItems(
-      auth,
-      CASE_ID,
-      { source: { kind: 'collection', collectionId: COLLECTION_ID }, includeFamilies: false },
-      fakeRequest(),
-    );
-    expect(prisma.$transaction.mock.calls.length).toBeGreaterThan(10);
-  }, 20_000);
-
-  it('writes membership in chunks, not one giant insert', async () => {
-    const { service, caseItemCreateMany } = bigCollection(20_000);
-    await service.addItems(
-      auth,
-      CASE_ID,
-      { source: { kind: 'collection', collectionId: COLLECTION_ID }, includeFamilies: false },
-      fakeRequest(),
-    );
-    expect(caseItemCreateMany.mock.calls.length).toBeGreaterThan(1);
-    for (const call of caseItemCreateMany.mock.calls) {
-      expect((call[0] as { data: unknown[] }).data.length).toBeLessThanOrEqual(1_000);
-    }
-  }, 20_000);
-
-  it('still re-indexes what it filed, or the case filter finds nothing', async () => {
-    // Case membership lives in the SEARCH document. Without the re-index the
-    // items join the case and Review's case filter matches none of them.
-    const rows = Array.from({ length: 2_000 }, (_, i) => ({ id: `ev-${String(i)}`, version: 1 }));
+    const paged = pagedInsert(total);
     const outboxCreateMany = vi.fn(async (args: { data: unknown[] }) => ({
       count: args.data.length,
     }));
+    const evidenceFindMany = vi.fn(async () => []);
+    const relationshipFindMany = vi.fn(async () => []);
+    const { service, audit, prisma } = makeService({
+      case: { findFirst: vi.fn(async () => caseRow()) },
+      collection: { findFirst: vi.fn(async () => ({ id: COLLECTION_ID })) },
+      evidenceItem: { findMany: evidenceFindMany },
+      evidenceRelationship: { findMany: relationshipFindMany },
+      outboxEvent: { createMany: outboxCreateMany },
+      $queryRaw: paged.queryRaw,
+    });
+    return {
+      service,
+      audit,
+      prisma,
+      paged,
+      outboxCreateMany,
+      evidenceFindMany,
+      relationshipFindMany,
+    };
+  }
+
+  function addCollection(service: CasesService, includeFamilies = false) {
+    return service.addItems(
+      auth,
+      CASE_ID,
+      { source: { kind: 'collection', collectionId: COLLECTION_ID }, includeFamilies },
+      fakeRequest(),
+    );
+  }
+
+  it('files a large collection and reports the counts', async () => {
+    const { service } = bigCollection(434_910);
+    expect(await addCollection(service)).toEqual({ requested: 434_910, added: 434_910 });
+  }, 20_000);
+
+  it('queues ONE job, not one per item', async () => {
+    // The 10-25 hours. 434,910 re-index jobs, each rebuilding a whole document
+    // from the database and object storage, to add one case id.
+    const { service, outboxCreateMany } = bigCollection(434_910);
+    await addCollection(service);
+
+    const rows = outboxCreateMany.mock.calls.flatMap(
+      (c) => (c[0] as { data: { topic: string }[] }).data,
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.topic).toBe('search.case-collection');
+  }, 20_000);
+
+  it('carries the case and collection to the worker, not a list of items', async () => {
+    const { service, outboxCreateMany } = bigCollection(1_000);
+    await addCollection(service);
+
+    const row = (outboxCreateMany.mock.calls[0]?.[0] as { data: { payload: unknown }[] }).data[0];
+    expect(row?.payload).toEqual({
+      tenantId: TENANT_ID,
+      caseId: CASE_ID,
+      collectionId: COLLECTION_ID,
+    });
+  });
+
+  it('gives the job a fresh dedup key every time', async () => {
+    // Dispatched outbox rows are KEPT and (topic, dedupKey) is unique, so a key
+    // built from the case and collection alone works exactly once ever — the
+    // second add of the same pair would be dropped by skipDuplicates and the
+    // index would never hear about it.
+    const first = bigCollection(10);
+    await addCollection(first.service);
+    const second = bigCollection(10);
+    await addCollection(second.service);
+
+    const keyOf = (m: typeof first.outboxCreateMany) =>
+      (m.mock.calls[0]?.[0] as { data: { dedupKey: string }[] }).data[0]?.dedupKey;
+
+    expect(keyOf(first.outboxCreateMany)).not.toBe(keyOf(second.outboxCreateMany));
+    expect(keyOf(first.outboxCreateMany)).toContain(`case-collection:${CASE_ID}:${COLLECTION_ID}:`);
+  });
+
+  it('does NOT hold one transaction open for the whole add', async () => {
+    // The original failure: ~1,400 round trips inside a single
+    // withTenantContext, against a 30-second limit. A fake cannot reproduce a
+    // real timeout, so this asserts the structure instead.
+    const { service, prisma } = bigCollection(434_910);
+    await addCollection(service);
+    expect(prisma.$transaction.mock.calls.length).toBeGreaterThan(10);
+  }, 20_000);
+
+  it('never asks for more than one page of rows at a time', async () => {
+    const { service, paged } = bigCollection(434_910);
+    await addCollection(service);
+
+    expect(paged.queryRaw.mock.calls.length).toBeGreaterThan(1);
+    for (const call of paged.queryRaw.mock.calls) {
+      expect(call[4] as number).toBeLessThanOrEqual(25_000);
+    }
+  }, 20_000);
+
+  it('pages with a cursor rather than an offset', async () => {
+    // OFFSET makes the database walk every skipped row, so the last page of a
+    // 434,910-item collection would be the slowest — the opposite of what is
+    // needed.
+    const { service, paged } = bigCollection(60_000);
+    await addCollection(service);
+
+    expect(paged.valuesOf(0)[2]).toBe(UUID_ZERO);
+    expect(paged.valuesOf(1)[2]).toBe(paged.ids[24_999]);
+    expect(paged.valuesOf(2)[2]).toBe(paged.ids[49_999]);
+  }, 20_000);
+
+  it('stops on a short page instead of one pointless extra query', async () => {
+    const { service, paged } = bigCollection(30_000);
+    await addCollection(service);
+    expect(paged.queryRaw).toHaveBeenCalledTimes(2);
+  });
+
+  it('never loads the collection ids into this process', async () => {
+    // The ids are the thing that does not scale. Reading 434,910 of them to
+    // hand straight back to the database is the cost this path exists to avoid.
+    const { service, evidenceFindMany } = bigCollection(434_910);
+    await addCollection(service);
+    expect(evidenceFindMany).not.toHaveBeenCalled();
+  }, 20_000);
+
+  it('skips family expansion even when the caller asks for it', async () => {
+    // Not a shortcut: a collection already holds its own attachments as items
+    // in their own right. Measured on the 434,910-item collection, expanding
+    // families added exactly zero ids — at a cost of 87 extra round trips.
+    const { service, relationshipFindMany } = bigCollection(1_000);
+    await addCollection(service, true);
+    expect(relationshipFindMany).not.toHaveBeenCalled();
+  });
+
+  it('writes the membership rows before queueing the job', async () => {
+    // The worker stamps documents from the collection id, but anything
+    // re-indexed later rebuilds caseIds from these rows. If the job ran first
+    // it could stamp a document that a concurrent re-index then overwrote with
+    // a caseIds list that did not yet include this case.
+    const order: string[] = [];
+    const paged = pagedInsert(10);
+    const queryRaw = vi.fn(async (...args: unknown[]) => {
+      order.push('rows');
+      return paged.queryRaw(...(args as Parameters<typeof paged.queryRaw>));
+    });
     const { service } = makeService({
       case: { findFirst: vi.fn(async () => caseRow()) },
       collection: { findFirst: vi.fn(async () => ({ id: COLLECTION_ID })) },
-      // Honour the `in` filter, as the database does: enqueueReindex looks up
-      // versions per chunk, and a fake that ignores it returns every row for
-      // every chunk and inflates the count.
-      evidenceItem: {
-        findMany: vi.fn(async (args: { where?: { id?: { in?: string[] } } }) => {
-          const wanted = args.where?.id?.in;
-          return wanted === undefined ? rows : rows.filter((r) => wanted.includes(r.id));
+      outboxEvent: {
+        createMany: vi.fn(async () => {
+          order.push('job');
+          return { count: 1 };
         }),
       },
-      caseItem: { createMany: vi.fn(async (a: { data: unknown[] }) => ({ count: a.data.length })) },
-      outboxEvent: { createMany: outboxCreateMany },
-      evidenceRelationship: { findMany: vi.fn(async () => []) },
+      $queryRaw: queryRaw,
     });
 
-    await service.addItems(
-      auth,
-      CASE_ID,
-      { source: { kind: 'collection', collectionId: COLLECTION_ID }, includeFamilies: false },
-      fakeRequest(),
-    );
+    await addCollection(service);
+    expect(order).toEqual(['rows', 'job']);
+  });
 
-    const topics = outboxCreateMany.mock.calls.flatMap((c) =>
-      (c[0] as { data: { topic: string }[] }).data.map((d) => d.topic),
+  it('still audits the disclosure, with the collection it came from', async () => {
+    const { service, audit } = bigCollection(1_000);
+    await addCollection(service);
+
+    expect(audit.appendTx).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: 'case.items_added',
+        summary: expect.objectContaining({
+          sourceKind: 'collection',
+          collectionId: COLLECTION_ID,
+          requested: 1_000,
+          added: 1_000,
+        }),
+      }),
     );
-    expect(topics.length).toBe(2_000);
-    expect(new Set(topics)).toEqual(new Set(['search.index']));
-  }, 20_000);
+  });
 });

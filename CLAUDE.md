@@ -157,6 +157,18 @@ span files and are easy to break:
   (`MAPPING_VERSION` in `packages/search`). `ensureIndex()` must be called or
   OpenSearch auto-creates a dynamic mapping, and aggregations then fail on text
   fields. Reindex with `pnpm tsx scripts/reindex.ts`.
+- **A re-index rebuilds the WHOLE document, so never use one to change one
+  field.** `processSearchIndex` reads the item with eleven nested includes and
+  downloads its extracted text from object storage, then calls the bulk API with
+  a single document in it. That is fine as the last step of the pipeline, where
+  the document has to be built anyway. It is the wrong tool for "this item
+  joined a case" or "this item got a tag", which change one field and nothing
+  else. Adding a 434,910-item collection to a case queued 434,910 of them:
+  10-25 hours before Review could find the case, measured against the real
+  outbox drain rate. For a field change across a whole collection use
+  `addCaseToCollection` — one `_update_by_query`, engine-side, no database and
+  no object storage. Postgres stays the source of truth, so anything re-indexed
+  later still agrees.
 - **`apps/api` uses type-based DI**, so it needs `emitDecoratorMetadata`. Its
   `dev` script is `tsc --watch` + `node --watch`, **not** `tsx watch`. esbuild
   drops that option without a word. Nest then cannot resolve providers. Guarded

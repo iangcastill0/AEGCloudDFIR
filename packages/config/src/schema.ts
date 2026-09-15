@@ -134,6 +134,30 @@ export const configSchema = z.object({
   CDFIR_MAX_OCR_PAGES: z.coerce.number().int().min(1).default(2000),
   CDFIR_PREVIEW_TIMEOUT_MS: z.coerce.number().int().min(1000).default(120_000),
 
+  /**
+   * How many CPU-bound jobs run at once, per stage (parse, extract, OCR,
+   * preview).
+   *
+   * This was hardcoded at 4, which made the worker's throughput independent of
+   * the machine it ran on. A five-core host sat at load 27 with a backlog of
+   * 218,746 extractions and 26,957 OCR jobs — and moving to a bigger machine
+   * would have changed nothing, because four is four whether there are 5 cores
+   * or 50.
+   *
+   * Set it to roughly a quarter of the machine's cores: four stages share the
+   * CPU, and tesseract itself uses more than one thread. On 32 cores, 6-8 is a
+   * sensible starting point.
+   *
+   * NOT read from os.cpus(): inside a container that reports the host's cores,
+   * not the cgroup limit, so it would over-subscribe silently. Explicit beats
+   * clever here.
+   *
+   * Only CPU-bound stages scale. Provider fetches stay put — they are limited
+   * by Microsoft and Google rate limits, not by this machine, and raising them
+   * buys throttling rather than throughput.
+   */
+  CDFIR_WORKER_CPU_CONCURRENCY: z.coerce.number().int().min(1).max(64).default(4),
+
   // --- Demo mode (never enable in production) ---
   CDFIR_DEMO_MODE: booleanString('false'),
   CDFIR_DEMO_FAKE_PROVIDER_URL: z.string().url().optional(),
