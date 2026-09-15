@@ -83,6 +83,35 @@ done
 
 If the queues are non-empty, the Redis volume comes with you.
 
+### Checked 2026-09-15: nothing re-queues this work
+
+The obvious hope is that something notices the gap and re-drives it. It does
+not. `StalledItemSweeper` (`apps/worker/src/stalled-item-sweeper.ts`) runs every
+120 seconds and looks like the answer, but it is for a different pipeline:
+
+- It iterates **collection items**, and re-queues only `collectionFetchItem` or
+  `searchIndex`. It never enqueues `processExtract` or `processOcr` — those are
+  chained from `process-parse.ts:357` and `process-extract.ts:238`, which only
+  run when the stage before them runs.
+- It acts only on states `discovered`, `fetching` and `preserved`
+  (`stalled-items.ts:52`). Anything already `indexed` is treated as settled.
+
+Measured against the real backlog, of 200,341 items with
+`processingStatus = 'pending'`:
+
+|                                                | items   | why the sweeper misses them                                 |
+| ---------------------------------------------- | ------- | ----------------------------------------------------------- |
+| attachment children, no `collection_items` row | 197,641 | it iterates collection items, so it cannot see these at all |
+| have a `collection_items` row, state `indexed` | 2,468   | `indexed` is not in `IN_FLIGHT`, so the plan is `wait`      |
+
+It would recover **none** of them.
+
+What the database does hold is `evidence_items.processingStatus`, which names
+every unfinished item exactly. So a recovery script is _possible_ — walk the
+`pending` rows and enqueue the right stage with fresh dedup keys. **No such
+script exists.** Until one does, the Redis volume is the only copy of the
+instruction to do that work, and it comes with you.
+
 Re-measured 2026-09-15, while planning the Linode move: **0 pending in the
 outbox against 244,984 waiting in Redis** (214,761 extract, 30,223 OCR). So this
 is not a one-off from a single bad day — it is the normal state of a host that
