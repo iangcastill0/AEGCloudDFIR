@@ -177,17 +177,32 @@ span files and are easy to break:
 Design docs are in `docs/architecture.md` and `docs/adr/`; threat model in
 `THREAT_MODEL.md`. Read the relevant ADR before changing one of the above.
 
-## Two machines — always say which one
+## Three machines — always say which one
 
 Commands are not interchangeable, and the user has asked to be told explicitly.
-Label every command **[MAC]**, **[SERVER]**, or **[BROWSER]**.
+**`[SERVER]` on its own is banned — there are two servers.** Label every command
+**[MAC]**, **[LINODE]**, **[OLD SERVER]** or **[BROWSER]**.
 
-- **[MAC]** `/Users/ic/Documents/CloudDiscovery`. The `cdfir-server` ssh alias and
-  `pbcopy` exist only here.
-- **[SERVER]** `ssh cdfir-server` → `/var/www/AEGCloudDFIR`. Production. **Shared
-  with an unrelated application**: a host PostgreSQL owns 127.0.0.1:5432, so every
-  CloudDFIR host port is remapped in `.env` (`CDFIR_*_HOST_PORT`, e.g. postgres
-  55432, redis 56379, Grafana 53000). Never touch the host `postgresql` service.
+- **[MAC]** `/Users/ic/Documents/CloudDiscovery`. The ssh aliases and `pbcopy`
+  exist only here.
+- **[LINODE]** `ssh cdfir-linode` → `root@74.207.235.208`, hostname
+  `cdfir-prod`, `/var/www/AEGCloudDFIR`. **This is production, and staging, as
+  of 2026-09-15.** 8 cores, 31 GB, 630 GB. Both stacks run here: compose project
+  `cdfir` (13 containers) and `cdfir-staging` (6). `ufw` allows only 22, 80, 443
+  — but see the Docker caveat in [server-migration](docs/runbooks/server-migration.md).
+- **[OLD SERVER]** `ssh cdfir-server` → `ian@38.248.7.156`, hostname `gdf-cd06`.
+  **Retired on 2026-09-15, kept powered on as the rollback target.** Its stores
+  are consistent as of 04:30 UTC that day and its certificate is valid to
+  Nov 11. Rollback is a DNS change plus starting `api`, `web`, `worker` there.
+  **Shared with an unrelated application**: a host PostgreSQL owns
+  127.0.0.1:5432, so every CloudDFIR host port is remapped in `.env`. Never
+  touch the host `postgresql` service. Do not destroy it before 2026-09-22.
+
+The migration is written up in
+[docs/runbooks/server-migration.md](docs/runbooks/server-migration.md) — read it
+before touching either host. The short version of what bit hardest: **`.env`
+must be on a host before any container starts there**, or Postgres, OpenSearch
+and Authentik each bake in the wrong password.
 
 ## Deployment
 
