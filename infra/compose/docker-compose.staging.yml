@@ -70,6 +70,34 @@ services:
       timeout: 3s
       retries: 20
 
+  # Staging's OWN Tika, with OCR switched off.
+  #
+  # Production's Tika uses the `-full` image, which bundles Tesseract and OCRs
+  # every image it meets inside a document. Measured on 2026-09-15: that work is
+  # discarded for 50.6% of items, because ocr-policy.ts sends every image/* and
+  # application/pdf to the dedicated OCR stage without ever reading how much text
+  # Tika returned. Only the 0.4% that are Office documents can benefit, where
+  # Tika's OCR may push extractedChars past LOW_TEXT_THRESHOLD and save a
+  # LibreOffice convert-and-rasterise.
+  #
+  # This instance exists so that trade can be tested without touching production.
+  # Staging points at it via CDFIR_TIKA_URL in .env.staging; leave that unset and
+  # staging falls back to production's Tika, which is the old behaviour.
+  tika-staging:
+    container_name: cdfir-staging-tika
+    logging:
+      driver: json-file
+      options: { max-size: '10m', max-file: '3' }
+    image: apache/tika:2.9.2.1-full
+    command: ['-c', '/tika-config.xml']
+    volumes:
+      - ../tika/tika-config-no-ocr.xml:/tika-config.xml:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:9998/version >/dev/null']
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
   # Staging's OWN search cluster.
   #
   # Sharing production's cluster coupled them where it hurts: one JVM heap, one
@@ -125,7 +153,7 @@ services:
       CDFIR_DATABASE_MIGRATION_URL: postgresql://cdfir_migrator:${CDFIR_DB_PASSWORD}@postgres-staging:5432/cdfir
       CDFIR_REDIS_URL: redis://redis-staging:6379
       CDFIR_OPENSEARCH_URL: http://opensearch-staging:9200
-      CDFIR_TIKA_URL: http://tika:9998
+      CDFIR_TIKA_URL: ${CDFIR_TIKA_URL:-http://tika:9998}
       CDFIR_CLAMAV_HOST: clamav
     ports:
       - '127.0.0.1:${CDFIR_API_HOST_PORT:-4100}:4000'
@@ -157,7 +185,7 @@ services:
       CDFIR_DATABASE_MIGRATION_URL: postgresql://cdfir_migrator:${CDFIR_DB_PASSWORD}@postgres-staging:5432/cdfir
       CDFIR_REDIS_URL: redis://redis-staging:6379
       CDFIR_OPENSEARCH_URL: http://opensearch-staging:9200
-      CDFIR_TIKA_URL: http://tika:9998
+      CDFIR_TIKA_URL: ${CDFIR_TIKA_URL:-http://tika:9998}
       CDFIR_CLAMAV_HOST: clamav
     depends_on:
       postgres-staging:

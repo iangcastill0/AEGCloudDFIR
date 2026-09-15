@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Tika with OCR turned off.
+
+  The apache/tika:*-full image bundles Tesseract, so Tika runs OCR on any image
+  it meets inside a document. That is useful, but it competes for the same cores
+  as the worker's own OCR stage, which has a policy (ocr-policy.ts) and proper
+  instrumentation. This config excludes the Tesseract parser so extraction is
+  text-only and anything that needs OCR falls to that dedicated stage.
+
+  Used for the staging experiment only. Do not point production at this without
+  measuring what text is lost.
+-->
+<properties>
+  <parsers>
+    <parser class="org.apache.tika.parser.DefaultParser">
+      <parser-exclude class="org.apache.tika.parser.ocr.TesseractOCRParser"/>
+    </parser>
+  </parsers>
+</properties>
