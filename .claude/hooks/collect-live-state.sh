@@ -13,8 +13,10 @@ REPO="${CDFIR_REPO:-/Users/ic/Documents/CloudDiscovery}"
 CACHE_DIR="${CDFIR_LIVE_STATE_DIR:-$HOME/.claude/projects/-Users-ic-Documents-CloudDiscovery}"
 CACHE="$CACHE_DIR/live-state.cache"
 # Overridable so tests can aim at a dead host and check the failure path.
-PROD_HOST="${CDFIR_PROD_HOST:-cdfir-server}"
-NEW_HOST="${CDFIR_NEW_HOST:-cdfir-linode}"
+# Production and staging BOTH moved to the Linode on 2026-09-15; cdfir-server is
+# kept powered on only as a rollback target.
+PROD_HOST="${CDFIR_PROD_HOST:-cdfir-linode}"
+OLD_HOST="${CDFIR_OLD_HOST:-cdfir-server}"
 
 SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=5
           -o ServerAliveInterval=3 -o ServerAliveCountMax=2
@@ -104,6 +106,7 @@ server_lines() {
     sick=$(printf '%s\n' "$rows" | awk -F'|' '/unhealthy/ {printf "%s(unhealthy) ", $3}')
     local label tag
     if [ "$proj" = "cdfir" ]; then label="PROD "; tag="$prodtag"; else label="STG  "; tag="$stgtag"; fi
+    # both now run on the live host
     if [ "$total" = "0" ]; then
       echo "$label tag=${tag:-?} — NO containers exist for compose project '$proj'"
     else
@@ -113,21 +116,29 @@ server_lines() {
       echo "$label tag=${tag:-?} — $up/$total containers running${note}"
     fi
   done
-  echo "HOST  $PROD_HOST checkout @${head:-?}, disk ${disk:-?}"
+  echo "HOST  $PROD_HOST (live) checkout @${head:-?}, disk ${disk:-?}"
 }
 
 # ----------------------------------------------------------- Linode / new box ---
-linode_line() {
+old_host_line() {
   local raw
-  raw=$(bound 15 ssh "${SSH_OPTS[@]}" "$NEW_HOST" \
-        'echo "H=$(hostname)"; echo "D=$(df -h / | awk "NR==2{print \$5}")"; echo "K=$(docker ps -q 2>/dev/null | wc -l | tr -d " ")"; echo "R=$(ls -d /var/www/* 2>/dev/null | head -1)"')
-  if [ -z "$raw" ]; then echo "NEW   ? $NEW_HOST unreachable"; return; fi
-  local h d k r
+  raw=$(bound 15 ssh "${SSH_OPTS[@]}" "$OLD_HOST" \
+        'echo "H=$(hostname)"; echo "D=$(df -h / | awk "NR==2{print \$5}")"; echo "K=$(docker ps -q 2>/dev/null | wc -l | tr -d " ")"')
+  if [ -z "$raw" ]; then echo "OLD   ? $OLD_HOST unreachable (rollback target)"; return; fi
+  local h d k
   h=$(printf '%s\n' "$raw" | sed -n 's/^H=//p')
   d=$(printf '%s\n' "$raw" | sed -n 's/^D=//p')
   k=$(printf '%s\n' "$raw" | sed -n 's/^K=//p')
-  r=$(printf '%s\n' "$raw" | sed -n 's/^R=//p')
-  echo "NEW   $NEW_HOST (root@${h:-?}) disk ${d:-?}, ${k:-0} containers, app dir: ${r:-none}"
+  echo "OLD   $OLD_HOST (${h:-?}) RETIRED rollback target — ${k:-0} containers up, disk ${d:-?}"
+}
+
+# TLS matters now that both environments are public on one host.
+cert_line() {
+  local out
+  out=$(bound 15 ssh "${SSH_OPTS[@]}" "$PROD_HOST" \
+        'certbot certificates 2>/dev/null | awk "/Certificate Name:/{n=\$3} /VALID:/{match(\$0,/VALID: [0-9]+/); printf \"%s %sd \", n, substr(\$0,RSTART+7,RLENGTH-7)}"')
+  [ -z "$out" ] && { echo "CERT  ? could not read"; return; }
+  echo "CERT  ${out% }"
 }
 
 # ----------------------------------------------------------------- Assemble ---
@@ -139,6 +150,7 @@ TMP=$(mktemp)
   mac_line
   echo "CI    $(gh_one 'CI' 'CI') | $(gh_one 'Release images' 'Release')"
   server_lines
-  linode_line
+  old_host_line
+  cert_line
 } >"$TMP" 2>/dev/null
 mv "$TMP" "$CACHE"

@@ -87,6 +87,7 @@ emit "$RULE
 === LIVE STATE (measured ${age}s ago — not live, and only these fields) ===
 $snapshot
 
-Read it as: MAC = this laptop and its git; CI = GitHub Actions; PROD = the running
-app on cdfir-server; STG = staging on the same host; HOST = that host itself;
-NEW = the empty Linode box the operator calls cdfir-prod (ssh alias cdfir-linode)."
+Read it as: MAC = this laptop and its git; CI = GitHub Actions; PROD and STG =
+production and staging, BOTH now on the Linode (ssh alias cdfir-linode, hostname
+cdfir-prod) since the 2026-09-15 migration; HOST = that live host; OLD =
+cdfir-server, retired and kept only as a rollback target; CERT = TLS expiry."
