@@ -213,9 +213,14 @@ egress allowlist).
 - **[BROWSER] prod** — `https://aegclouddfir.com`. Real matters, **sensitive
   data**. Treat it as read-only: look to diagnose, do not change data, and never
   copy its data elsewhere. Debug here only when a bug is genuinely prod-only.
+  API `https://api.aegclouddfir.com` (`/healthz`, `/readyz`); sign-in
+  `https://auth.aegclouddfir.com` (Authentik). The web root 302s an
+  unauthenticated visitor to login.
 - **[BROWSER] staging** — `https://staging.aegclouddfir.com`. The test/dev
   server used to reproduce and fix bugs. **Start here** — it is the safe place
-  to click around and try things.
+  to click around and try things. API `https://api-staging.aegclouddfir.com`.
+
+(Reachability + TLS confirmed from a Cloud Agent on 2026-09-17.)
 
 ## Deployment
 
