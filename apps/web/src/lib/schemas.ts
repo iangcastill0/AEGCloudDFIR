@@ -118,10 +118,25 @@ export const createdIdResponse = z.object({ id: z.string() });
 
 // --- Search / evidence ---
 
+/**
+ * Batch-level audit fields, present only for `kind === 'audit_batch'` hits.
+ * Each value is set when the collected batch is uniform on that field; the
+ * per-event detail is reached through the audit-records drill-in.
+ */
+export const searchHitAudit = z.object({
+  workload: z.string().default(''),
+  operation: z.string().default(''),
+  actorEmail: z.string().default(''),
+  resultStatus: z.string().default(''),
+  occurredAt: z.string().nullable().default(null),
+});
+export type SearchHitAudit = z.infer<typeof searchHitAudit>;
+
 export const searchHit = evidenceSummary.extend({
   kind: z.string(),
   highlights: z.array(z.string()).default([]),
   familyRole: z.enum(['none', 'parent', 'child']).default('none'),
+  audit: searchHitAudit.nullable().default(null),
 });
 export type SearchHit = z.infer<typeof searchHit>;
 

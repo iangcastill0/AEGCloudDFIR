@@ -464,6 +464,7 @@ function SearchRail(props: {
         options={[
           { value: 'email', label: 'Email' },
           { value: 'drive', label: 'Drive' },
+          { value: 'audit', label: 'Audit logs' },
         ]}
       />
 
@@ -655,17 +656,37 @@ function ResultsPane(props: {
                         {item.name || '(no subject)'}
                       </button>
                       <div className="result-row__meta">
-                        {/* KNOWN GAP: Slack grants carry no email address, so
-                            every Slack message reads "unknown custodian" even
-                            though the custodian IS recorded. The honest fix is
-                            custodianDisplayName in the search document, which
-                            means a MAPPING_VERSION bump and a full reindex —
-                            not something to bolt on quietly. Faking an email
-                            here was tried and reverted: custodianEmail reaches
-                            the export CSV and the manifest. */}
-                        {item.custodianEmail ?? 'unknown custodian'} ·{' '}
-                        {formatDateTime(item.primaryDate)} · {item.sourcePath} ·{' '}
-                        {item.extension || item.mimeType} · {formatBytes(item.size)}
+                        {item.kind === 'audit_batch' && item.audit ? (
+                          // Collected audit batch: show the audit dimensions
+                          // (workload/operation/actor/result) instead of the
+                          // file-oriented meta. These are batch-uniform values;
+                          // per-event detail is in the Audit preview tab.
+                          <>
+                            {[
+                              item.audit.workload || 'audit log',
+                              item.audit.operation,
+                              item.audit.actorEmail || item.custodianEmail || '',
+                              item.audit.resultStatus,
+                            ]
+                              .filter((v) => v)
+                              .join(' · ')}{' '}
+                            · {formatDateTime(item.audit.occurredAt ?? item.primaryDate)}
+                          </>
+                        ) : (
+                          <>
+                            {/* KNOWN GAP: Slack grants carry no email address, so
+                                every Slack message reads "unknown custodian" even
+                                though the custodian IS recorded. The honest fix is
+                                custodianDisplayName in the search document, which
+                                means a MAPPING_VERSION bump and a full reindex —
+                                not something to bolt on quietly. Faking an email
+                                here was tried and reverted: custodianEmail reaches
+                                the export CSV and the manifest. */}
+                            {item.custodianEmail ?? 'unknown custodian'} ·{' '}
+                            {formatDateTime(item.primaryDate)} · {item.sourcePath} ·{' '}
+                            {item.extension || item.mimeType} · {formatBytes(item.size)}
+                          </>
+                        )}
                       </div>
                       {item.highlights[0] ? (
                         <div className="result-row__meta">

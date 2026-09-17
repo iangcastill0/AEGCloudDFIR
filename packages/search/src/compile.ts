@@ -339,6 +339,12 @@ export const FACET_FIELDS: Record<string, string> = {
   tagNames: 'tagNames',
   kind: 'kind',
   malwareStatus: 'malwareStatus',
+  // Audit-log facets. These aggregate the batch-level audit.* group, which is
+  // set only when a collected audit batch is uniform on that field (see
+  // buildAuditBatchIndex); per-record precision is the audit-records drill-in.
+  auditWorkload: 'audit.workload',
+  auditOperation: 'audit.operation',
+  auditActor: 'audit.actorEmail',
 };
 
 export interface SearchRequestOptions {

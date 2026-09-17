@@ -389,4 +389,15 @@ describe('buildSearchRequest', () => {
       QueryValidationError,
     );
   });
+
+  it('aggregates audit-log facets against the audit.* field group', () => {
+    const req = buildSearchRequest(validated('foo'), AUTH, {
+      facets: ['auditWorkload', 'auditOperation', 'auditActor'],
+    });
+    expect(req.aggs).toEqual({
+      auditWorkload: { terms: { field: 'audit.workload', size: 25 } },
+      auditOperation: { terms: { field: 'audit.operation', size: 25 } },
+      auditActor: { terms: { field: 'audit.actorEmail', size: 25 } },
+    });
+  });
 });
