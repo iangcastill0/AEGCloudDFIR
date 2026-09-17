@@ -204,6 +204,24 @@ before touching either host. The short version of what bit hardest: **`.env`
 must be on a host before any container starts there**, or Postgres, OpenSearch
 and Authentik each bake in the wrong password.
 
+## App URLs — say which one, like the machines above
+
+Two public sites. Both need to be reachable for browser / Chrome DevTools
+debugging (if the agent's network is ever locked down, add these domains to the
+egress allowlist).
+
+- **[BROWSER] prod** — `https://aegclouddfir.com`. Real matters, **sensitive
+  data**. Treat it as read-only: look to diagnose, do not change data, and never
+  copy its data elsewhere. Debug here only when a bug is genuinely prod-only.
+  API `https://api.aegclouddfir.com` (`/healthz`, `/readyz`); sign-in
+  `https://auth.aegclouddfir.com` (Authentik). The web root 302s an
+  unauthenticated visitor to login.
+- **[BROWSER] staging** — `https://staging.aegclouddfir.com`. The test/dev
+  server used to reproduce and fix bugs. **Start here** — it is the safe place
+  to click around and try things. API `https://api-staging.aegclouddfir.com`.
+
+(Reachability + TLS confirmed from a Cloud Agent on 2026-09-17.)
+
 ## Deployment
 
 CI (`ci.yml`) → images (`release.yml`, only on green CI) → deploy. Both deploys
