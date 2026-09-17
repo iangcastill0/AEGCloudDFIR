@@ -72,17 +72,18 @@ services:
 
   # Staging's OWN Tika, with OCR switched off.
   #
-  # Production's Tika uses the `-full` image, which bundles Tesseract and OCRs
-  # every image it meets inside a document. Measured on 2026-09-15: that work is
-  # discarded for 50.6% of items, because ocr-policy.ts sends every image/* and
-  # application/pdf to the dedicated OCR stage without ever reading how much text
-  # Tika returned. Only the 0.4% that are Office documents can benefit, where
-  # Tika's OCR may push extractedChars past LOW_TEXT_THRESHOLD and save a
-  # LibreOffice convert-and-rasterise.
+  # This began as the experiment that proved OCR-in-Tika was wasted: measured on
+  # 2026-09-15, its OCR is discarded for 50.6% of items, because ocr-policy.ts
+  # sends every image/* and application/pdf to the dedicated OCR stage without
+  # ever reading how much text Tika returned; only the 0.4% that are Office
+  # documents can benefit, where Tika's OCR may push extractedChars past
+  # LOW_TEXT_THRESHOLD and save a LibreOffice convert-and-rasterise.
   #
-  # This instance exists so that trade can be tested without touching production.
-  # Staging points at it via CDFIR_TIKA_URL in .env.staging; leave that unset and
-  # staging falls back to production's Tika, which is the old behaviour.
+  # That result has now been promoted: PRODUCTION's `tika` also runs OCR-off
+  # (same tika-config-no-ocr.xml). This separate instance is therefore redundant
+  # and can be retired by unsetting CDFIR_TIKA_URL in .env.staging, which makes
+  # staging fall back to the shared `tika`. Kept for now so staging can still
+  # pin a different Tika if a future experiment needs one.
   tika-staging:
     container_name: cdfir-staging-tika
     logging:

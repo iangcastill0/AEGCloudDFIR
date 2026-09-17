@@ -8,8 +8,12 @@
   instrumentation. This config excludes the Tesseract parser so extraction is
   text-only and anything that needs OCR falls to that dedicated stage.
 
-  Used for the staging experiment only. Do not point production at this without
-  measuring what text is lost.
+  Used by BOTH production and staging Tika. The trade was measured on staging
+  first (see docker-compose.staging.yml): text-only extraction loses OCR for
+  ~0.4% of items (Office docs with embedded images that OCR pushed past
+  LOW_TEXT_THRESHOLD), in exchange for removing the duplicate Tesseract load
+  that saturated the shared host. Images and PDFs are still OCR'd by the
+  dedicated worker stage (ocr-policy.ts).
 -->
 <properties>
   <parsers>

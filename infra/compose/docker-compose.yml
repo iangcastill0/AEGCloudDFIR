@@ -143,9 +143,25 @@ services:
       retries: 30
       start_period: 300s
 
+  # Extraction Tika, with OCR switched OFF.
+  #
+  # The `-full` image bundles Tesseract, so by default Tika OCRs every image it
+  # meets while extracting. Measured on 2026-09-15, that work is discarded for
+  # 50.6% of items: ocr-policy.ts already routes every image/* and
+  # application/pdf to the dedicated OCR stage, the single instrumented,
+  # rate-limited place OCR belongs. Running it in Tika as well doubled the
+  # Tesseract load and, under a large backlog, starved Tika until
+  # process.extract jobs timed out and retried (see the incident that motivated
+  # this). Excluding the Tesseract parser (tika-config-no-ocr.xml) makes
+  # extraction text-only; the 0.4% of items that benefited (Office docs whose
+  # embedded-image OCR pushed them past LOW_TEXT_THRESHOLD) now fall to the OCR
+  # stage like everything else.
   tika:
     image: apache/tika:2.9.2.1-full
+    command: ['-c', '/tika-config.xml']
     restart: unless-stopped
+    volumes:
+      - ../tika/tika-config-no-ocr.xml:/tika-config.xml:ro
     ports:
       - '127.0.0.1:${CDFIR_TIKA_HOST_PORT:-9998}:9998'
     healthcheck:
@@ -331,6 +347,12 @@ services:
       CDFIR_S3_ENDPOINT: ${CDFIR_S3_ENDPOINT:-http://minio:9000}
       CDFIR_CLAMAV_HOST: clamav
       CDFIR_TIKA_URL: http://tika:9998
+      # OCR/parse/extract/preview each run this many CPU-bound jobs at once.
+      # Defaulted to 2 here rather than the code default of 4: this host is 8
+      # cores shared with staging, Authentik and ClamAV, and across four CPU
+      # stages a value of 4 oversubscribed the box (load ~32) and made
+      # extraction time out under a large backlog. Still overridable from .env.
+      CDFIR_WORKER_CPU_CONCURRENCY: ${CDFIR_WORKER_CPU_CONCURRENCY:-2}
     depends_on:
       postgres:
         condition: service_healthy
