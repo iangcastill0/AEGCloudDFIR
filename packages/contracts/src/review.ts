@@ -90,7 +90,20 @@ export const addCaseItemsRequest = z.object({
 
 export const evidenceSummary = z.object({
   id: uuid,
-  kind: z.enum(['email', 'attachment', 'file', 'folder_metadata', 'container']),
+  // Mirrors the database EvidenceKind enum. audit_batch is the reviewable unit
+  // for collected provider audit logs (its individual events are AuditRecords,
+  // reached through the audit-records drill-in).
+  kind: z.enum([
+    'email',
+    'attachment',
+    'file',
+    'folder_metadata',
+    'container',
+    'audit_record',
+    'audit_batch',
+    'chat_message',
+    'chat_conversation',
+  ]),
   name: z.string(),
   extension: z.string(),
   mimeType: z.string(),

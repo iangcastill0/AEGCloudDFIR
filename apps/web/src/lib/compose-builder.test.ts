@@ -63,4 +63,23 @@ describe('composeBuilder', () => {
       BUILT,
     );
   });
+
+  it('turns the audit source into a kind audit_batch filter', () => {
+    expect(composeBuilder(input({ source: 'audit' }), BUILT)).toEqual({
+      op: 'and',
+      children: [BUILT, { field: 'kind', operator: 'equals', value: 'audit_batch' }],
+    });
+  });
+
+  it('maps ticked audit facets back to their audit query fields', () => {
+    const composed = composeBuilder(
+      input({ facetFilters: { auditWorkload: ['Exchange'], auditOperation: ['HardDelete'] } }),
+      BUILT,
+    ) as { children: unknown[] };
+    expect(composed.children).toEqual([
+      BUILT,
+      { field: 'workload', operator: 'equals', value: 'Exchange' },
+      { field: 'operation', operator: 'equals', value: 'HardDelete' },
+    ]);
+  });
 });

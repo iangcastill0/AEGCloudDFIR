@@ -292,13 +292,44 @@ export interface SearchRequestInput {
   limit?: number;
 }
 
-/** Facet fields we both aggregate on and can express as query-language filters. */
+/**
+ * Facet field (as returned by the API's aggregations) -> query-language field
+ * used to turn a ticked facet back into a filter clause. The audit.* facets map
+ * to the audit query fields in the search registry.
+ */
 const FACET_QUERY_FIELDS: Record<string, string> = {
   custodianEmail: 'custodian',
   extension: 'ext',
   provider: 'provider',
   tagNames: 'tag',
+  auditWorkload: 'workload',
+  auditOperation: 'operation',
+  auditActor: 'actor',
 };
+
+/** Human labels for facet groups in the rail (falls back to the raw field). */
+const FACET_LABELS: Record<string, string> = {
+  custodianEmail: 'Custodian',
+  extension: 'Extension',
+  provider: 'Provider',
+  tagNames: 'Tag',
+  auditWorkload: 'Audit workload',
+  auditOperation: 'Audit operation',
+  auditActor: 'Audit actor',
+};
+
+/**
+ * Which facets to aggregate, by source. The API caps facets at 6, so audit
+ * browsing swaps the file-oriented facets (extension/tag) for audit ones.
+ */
+const DEFAULT_FACET_FIELDS = ['custodianEmail', 'extension', 'provider', 'tagNames'];
+const AUDIT_FACET_FIELDS = [
+  'auditWorkload',
+  'auditOperation',
+  'auditActor',
+  'custodianEmail',
+  'provider',
+];
 
 /**
  * Compose the API's single query string from the rail's filters.
@@ -321,6 +352,7 @@ export function composeQuery(input: SearchRequestInput): string {
     parts.push(`(${eq('kind', 'email')} OR ${eq('kind', 'attachment')})`);
   }
   if (input.source === 'drive') parts.push(eq('kind', 'file'));
+  if (input.source === 'audit') parts.push(eq('kind', 'audit_batch'));
   for (const [field, values] of Object.entries(input.facetFilters ?? {})) {
     const queryField = FACET_QUERY_FIELDS[field];
     if (!queryField || values.length === 0) continue;
@@ -347,6 +379,7 @@ export function composeBuilder(input: SearchRequestInput, builder: unknown): unk
     extra.push({ op: 'or', children: [eq('kind', 'email'), eq('kind', 'attachment')] });
   }
   if (input.source === 'drive') extra.push(eq('kind', 'file'));
+  if (input.source === 'audit') extra.push(eq('kind', 'audit_batch'));
   for (const [field, values] of Object.entries(input.facetFilters ?? {})) {
     const queryField = FACET_QUERY_FIELDS[field];
     if (!queryField || values.length === 0) continue;
@@ -371,7 +404,7 @@ export function adaptSearchResponse(raw: RawSearchResponse): SearchResponse {
       raw.searchAfter && raw.searchAfter.length > 0 ? JSON.stringify(raw.searchAfter) : null,
     facets: Object.entries(raw.facets ?? {}).map(([field, values]) => ({
       field,
-      label: field,
+      label: FACET_LABELS[field] ?? field,
       values,
     })),
     items: raw.items.map(({ id, source, highlights }) => {
@@ -403,6 +436,19 @@ export function adaptSearchResponse(raw: RawSearchResponse): SearchResponse {
           : typeof doc['familyId'] === 'string' && doc['familyId'] !== ''
             ? 'parent'
             : 'none') as 'none' | 'parent' | 'child',
+        audit: (() => {
+          const a = doc['audit'];
+          if (typeof a !== 'object' || a === null) return null;
+          const rec = a as Record<string, unknown>;
+          return {
+            workload: docString(rec, 'workload'),
+            operation: docString(rec, 'operation'),
+            actorEmail: docString(rec, 'actorEmail'),
+            resultStatus: docString(rec, 'resultStatus'),
+            occurredAt:
+              typeof rec['occurredAt'] === 'string' ? (rec['occurredAt'] as string) : null,
+          };
+        })(),
       };
     }),
   };
@@ -433,7 +479,7 @@ export function useSearch(input: SearchRequestInput, enabled: boolean) {
           ...(input.caseId ? { caseId: input.caseId } : {}),
           ...(input.cursor ? { searchAfter: JSON.parse(input.cursor) as unknown[] } : {}),
           limit: input.limit ?? 100,
-          facets: Object.keys(FACET_QUERY_FIELDS),
+          facets: input.source === 'audit' ? AUDIT_FACET_FIELDS : DEFAULT_FACET_FIELDS,
           includeHighlights: true,
         },
         schema: rawSearchResponse,

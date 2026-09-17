@@ -54,4 +54,17 @@ describe('composeQuery', () => {
   it('is empty when nothing is set, which the API reads as browse-all', () => {
     expect(composeQuery({ queryText: '' })).toBe('');
   });
+
+  it('uses kind audit_batch for the Audit logs source filter', () => {
+    expect(composeQuery({ queryText: '', source: 'audit' })).toBe('kind:"audit_batch"');
+  });
+
+  it('maps ticked audit facets to their audit query fields', () => {
+    const q = composeQuery({
+      queryText: '',
+      source: 'audit',
+      facetFilters: { auditWorkload: ['Exchange'], auditActor: ['adele@example.com'] },
+    });
+    expect(q).toBe('kind:"audit_batch" AND workload:"Exchange" AND actor:"adele@example.com"');
+  });
 });
