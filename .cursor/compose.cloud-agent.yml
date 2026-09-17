@@ -1,0 +1,10 @@
+# Cloud Agent compose override. Layered on top of infra/compose/docker-compose.yml
+# by .cursor/start.sh.
+#
+# MinIO no longer publishes its images to Docker Hub under `minio/minio` and
+# `minio/mc` for anonymous pulls; the same releases are on quay.io. Point the
+# object-store service at quay so the stack comes up without a Docker Hub login.
+name: cdfir
+services:
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z

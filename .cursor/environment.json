@@ -1,0 +1,24 @@
+{
+  "name": "AEG-CloudDFIR",
+  "install": "bash .cursor/install.sh",
+  "start": "bash .cursor/start.sh",
+  "terminals": [
+    {
+      "name": "api",
+      "command": "cd apps/api && node --env-file=../../.env dist/main.js"
+    },
+    {
+      "name": "worker",
+      "command": "cd apps/worker && node --env-file=../../.env dist/main.js"
+    },
+    {
+      "name": "web",
+      "command": "cd apps/web && pnpm exec next start -p 3000"
+    },
+    {
+      "name": "demo-provider",
+      "command": "pnpm tsx scripts/demo-provider.ts"
+    }
+  ],
+  "ports": [3000, 4000, 9443]
+}
