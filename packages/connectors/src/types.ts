@@ -259,6 +259,8 @@ export type AuditSystem =
   | 'graph_directory_audits'
   | 'graph_signins'
   | 'google_reports'
+  /** Gmail message events read from the Workspace-logs-in-BigQuery export. */
+  | 'google_bigquery_gmail'
   | 'google_vault'
   /** Dropbox Business team event log. Team only: a personal account's token is
    *  refused with USER_AUTH_NOT_ALLOWED. */

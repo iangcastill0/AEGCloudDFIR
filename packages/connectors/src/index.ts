@@ -44,6 +44,11 @@ export {
   GMAIL_MAIL_EVENT_TYPES,
   type GoogleReportsOptions,
 } from './google/reports.js';
+export {
+  BigQueryGmailConnector,
+  BIGQUERY_READONLY_SCOPE,
+  type BigQueryGmailOptions,
+} from './google/bigquery-gmail.js';
 export { GoogleVaultConnector, type GoogleVaultOptions } from './google/vault.js';
 export {
   ImapEmailConnector,

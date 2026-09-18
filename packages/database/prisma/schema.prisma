@@ -800,6 +800,8 @@ enum AuditSystem {
   graph_directory_audits
   graph_signins
   google_reports
+  /// Gmail message events read from the Workspace-logs-in-BigQuery export.
+  google_bigquery_gmail
   google_vault
   /// Dropbox Business team event log (/2/team_log/get_events). Team only: the
   /// same call on a personal account is refused with USER_AUTH_NOT_ALLOWED,
