@@ -9,8 +9,8 @@
 # "Never report pipeline or deployment state from inference — check it."
 set -u
 
-REPO="${CDFIR_REPO:-/Users/ic/Documents/CloudDiscovery}"
-CACHE_DIR="${CDFIR_LIVE_STATE_DIR:-$HOME/.claude/projects/-Users-ic-Documents-CloudDiscovery}"
+REPO="${CDFIR_REPO:-/Users/ic/Desktop/AEGCloudDFIR}"
+CACHE_DIR="${CDFIR_LIVE_STATE_DIR:-$HOME/.claude/projects/-Users-ic-Desktop-AEGCloudDFIR}"
 CACHE="$CACHE_DIR/live-state.cache"
 # Overridable so tests can aim at a dead host and check the failure path.
 # Production and staging BOTH moved to the Linode on 2026-09-15; cdfir-server is
