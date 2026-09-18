@@ -34,17 +34,49 @@ export function chunkIds<T>(items: readonly T[], size: number = QUERY_ID_CHUNK):
 }
 
 /**
+ * How many batches may be in flight at once.
+ *
+ * `Promise.all` over every chunk is unbounded, and nothing bounds a collection.
+ * A 434,910-item export expands to 174 batches, which meant 174 concurrent
+ * queries against a Postgres already at 74% CPU. Six keeps the database busy
+ * without turning one export into a denial of service against everything else
+ * on the host.
+ */
+export const QUERY_CONCURRENCY = 6;
+
+/**
  * Run a query over an id list in batches and concatenate the rows.
  *
- * Batches run in parallel, so the rows come back in batch order rather than
- * database order. Sort afterwards where order matters.
+ * Batches run concurrently up to `concurrency`, so the rows come back in
+ * completion order rather than database order. Sort afterwards where order
+ * matters.
+ *
+ * `run` is called once per batch and may open its own transaction. Prefer that
+ * to wrapping the whole call in one: an interactive transaction is capped at 30
+ * seconds, and 174 round trips inside it is how a 434,910-item export failed at
+ * 30,244 ms with `Transaction already closed`.
  */
 export async function queryInChunks<T>(
   ids: readonly string[],
   run: (batch: string[]) => Promise<T[]>,
   size: number = QUERY_ID_CHUNK,
+  concurrency: number = QUERY_CONCURRENCY,
 ): Promise<T[]> {
   if (ids.length === 0) return [];
-  const batches = await Promise.all(chunkIds(ids, size).map(run));
-  return batches.flat();
+  const batches = chunkIds(ids, size);
+  const out: T[][] = new Array<T[]>(batches.length);
+  let next = 0;
+
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const i = next++;
+      const batch = batches[i];
+      if (batch === undefined) return;
+      out[i] = await run(batch);
+    }
+  };
+
+  const lanes = Math.max(1, Math.min(concurrency, batches.length));
+  await Promise.all(Array.from({ length: lanes }, worker));
+  return out.flat();
 }
