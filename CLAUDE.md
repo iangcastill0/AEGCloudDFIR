@@ -33,6 +33,11 @@ Do NOT offer; write the steps and let the user run them:
 The user creates and pastes their own secrets. Never ask for a private key and
 never print one.
 
+**Ask questions at the end, with options.** When you need input, put the
+questions last, as a numbered list, each with lettered answer options, and mark
+the one you recommend. The user replies with picks (e.g. "1B, 3C") or "all
+defaults".
+
 ## Commands
 
 ```bash
