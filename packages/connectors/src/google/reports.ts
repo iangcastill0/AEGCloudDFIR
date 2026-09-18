@@ -141,6 +141,40 @@ export const GMAIL_MAIL_EVENT_TYPES: Readonly<Record<string, string>> = {
   '35': 'Email send process initiated',
 };
 
+const GMAIL_MAX_RANGE_MS = GMAIL_MAX_RANGE_DAYS * 86_400_000;
+
+/** Reports API retention; an all-time Gmail collection defaults to this window. */
+const GMAIL_RETENTION_DAYS = 180;
+
+/**
+ * Gmail queries are capped at 30 days, so a wider (or all-time) range is walked
+ * as successive 30-day windows. This opaque cursor carries the current window
+ * start (epoch ms) and the provider page token within it, so the worker's
+ * generic paging loop advances the windows without knowing they exist.
+ */
+interface GmailWindowCursor {
+  ws: number;
+  pt?: string;
+}
+function encodeGmailCursor(cursor: GmailWindowCursor): string {
+  return Buffer.from(JSON.stringify(cursor), 'utf8').toString('base64url');
+}
+function decodeGmailCursor(value: string): GmailWindowCursor | undefined {
+  try {
+    const parsed: unknown = JSON.parse(Buffer.from(value, 'base64url').toString('utf8'));
+    if (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      typeof (parsed as { ws?: unknown }).ws === 'number'
+    ) {
+      return parsed as GmailWindowCursor;
+    }
+  } catch {
+    // not a gmail window cursor
+  }
+  return undefined;
+}
+
 export interface GoogleReportsOptions {
   tokenProvider: TokenProvider;
   /** Defaults to https://admin.googleapis.com (override for the fake server). */
@@ -246,29 +280,42 @@ export class GoogleReportsConnector implements AuditConnector {
 
   async fetchAuditPage(scopeKey: string, opts: FetchAuditPageOptions): Promise<AuditListPage> {
     const isGmail = scopeKey === GOOGLE_REPORTS_GMAIL_APPLICATION;
+
+    // Effective query window + page token. For most applications these are the
+    // caller's since/until/cursor as-is. Gmail is capped at 30 days per query,
+    // so a wider (or all-time) range is walked as successive 30-day windows
+    // encoded in the cursor.
+    let startTime = opts.since;
+    let endTime = opts.until;
+    let pageToken = opts.cursor;
+    let gmailWindow: { start: number; end: number; overallEnd: number } | undefined;
+
     if (isGmail) {
-      // Gmail is the one application the Reports API refuses without a bounded
-      // window, and caps to 30 days per query. Enforce it here so a missing or
-      // too-wide window fails clearly instead of returning a confusing empty
-      // page. The worker pages the requested range in <=30-day slices.
-      if (opts.since === undefined || opts.until === undefined) {
-        throw new AuditConfigError(
-          'gmail audit logs require both since and until (max 30-day window)',
-        );
-      }
-      const spanMs = Date.parse(opts.until) - Date.parse(opts.since);
-      if (Number.isNaN(spanMs)) {
+      const now = Date.now();
+      // An unbounded (all-time) collection defaults to the 180-day retention.
+      const overallStart =
+        opts.since !== undefined ? Date.parse(opts.since) : now - GMAIL_RETENTION_DAYS * 86_400_000;
+      const overallEnd = opts.until !== undefined ? Date.parse(opts.until) : now;
+      if (Number.isNaN(overallStart) || Number.isNaN(overallEnd)) {
         throw new AuditConfigError('gmail since/until must be valid ISO-8601 timestamps');
       }
-      if (spanMs < 0) {
+      if (overallStart >= overallEnd) {
         throw new AuditConfigError('gmail since must be before until');
       }
-      if (spanMs > GMAIL_MAX_RANGE_DAYS * 86_400_000) {
-        throw new AuditConfigError(
-          `gmail audit logs support at most a ${GMAIL_MAX_RANGE_DAYS}-day window per query`,
-        );
+      let windowStart = overallStart;
+      pageToken = undefined;
+      if (opts.cursor !== undefined) {
+        const decoded = decodeGmailCursor(opts.cursor);
+        if (decoded === undefined) throw new AuditConfigError('malformed gmail window cursor');
+        windowStart = decoded.ws;
+        pageToken = decoded.pt;
       }
+      const windowEnd = Math.min(windowStart + GMAIL_MAX_RANGE_MS, overallEnd);
+      startTime = new Date(windowStart).toISOString();
+      endTime = new Date(windowEnd).toISOString();
+      gmailWindow = { start: windowStart, end: windowEnd, overallEnd };
     }
+
     // A single actor narrows the report to one user; otherwise all users.
     const userKey =
       opts.actorFilter !== undefined && opts.actorFilter.length === 1
@@ -278,9 +325,9 @@ export class GoogleReportsConnector implements AuditConnector {
       `${this.base}/admin/reports/v1/activity/users/${encodeURIComponent(userKey)}/applications/${encodeURIComponent(scopeKey)}`,
     );
     u.searchParams.set('maxResults', '1000');
-    if (opts.since !== undefined) u.searchParams.set('startTime', opts.since);
-    if (opts.until !== undefined) u.searchParams.set('endTime', opts.until);
-    if (opts.cursor !== undefined) u.searchParams.set('pageToken', opts.cursor);
+    if (startTime !== undefined) u.searchParams.set('startTime', startTime);
+    if (endTime !== undefined) u.searchParams.set('endTime', endTime);
+    if (pageToken !== undefined) u.searchParams.set('pageToken', pageToken);
 
     const res = await ensureOk(await this.get(u.toString()), 'fetchAuditPage');
     const text = await res.text();
@@ -342,6 +389,23 @@ export class GoogleReportsConnector implements AuditConnector {
       });
     });
 
+    // Gmail advances 30-day windows via a composite cursor; other applications
+    // just follow the provider's page token.
+    let nextCursor: string | undefined;
+    if (isGmail && gmailWindow !== undefined) {
+      if (page.nextPageToken !== undefined) {
+        // More pages within the current 30-day window.
+        nextCursor = encodeGmailCursor({ ws: gmailWindow.start, pt: page.nextPageToken });
+      } else if (gmailWindow.end < gmailWindow.overallEnd) {
+        // Window exhausted; advance to the next 30-day window.
+        nextCursor = encodeGmailCursor({ ws: gmailWindow.end });
+      } else {
+        nextCursor = undefined; // whole requested range collected
+      }
+    } else {
+      nextCursor = page.nextPageToken;
+    }
+
     const batch: AuditBatch = {
       system: 'google_reports',
       batchId: `${scopeKey}:${opts.cursor ?? 'initial'}`,
@@ -352,6 +416,6 @@ export class GoogleReportsConnector implements AuditConnector {
       providerReportedCount: page.items.length,
     };
 
-    return { batches: [batch], nextCursor: page.nextPageToken };
+    return { batches: [batch], nextCursor };
   }
 }

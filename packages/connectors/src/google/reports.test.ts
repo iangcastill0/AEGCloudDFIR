@@ -134,20 +134,52 @@ describe('GoogleReportsConnector.fetchAuditPage', () => {
     });
   });
 
-  it('rejects a gmail query without a bounded window', async () => {
-    const c = new GoogleReportsConnector({
+  function gmailConnector() {
+    return new GoogleReportsConnector({
       tokenProvider: new StaticTokenProvider(TOKEN),
       googleApiBaseUrl: `${server.url}/google`,
       applications: ['gmail'],
       sleepImpl: () => Promise.resolve(),
     });
-    await expect(c.fetchAuditPage('gmail', {})).rejects.toThrow(/require both since and until/);
-    await expect(
-      c.fetchAuditPage('gmail', {
-        since: '2026-01-01T00:00:00.000Z',
+  }
+
+  it('defaults an all-time gmail query to the last 180 days, in a bounded window', async () => {
+    const page = await gmailConnector().fetchAuditPage('gmail', {});
+    const req = server.requests.find((r) => r.path.includes('/applications/gmail'));
+    expect(req?.query['startTime']).toBeDefined();
+    expect(req?.query['endTime']).toBeDefined();
+    const span =
+      Date.parse(req?.query['endTime'] as string) - Date.parse(req?.query['startTime'] as string);
+    expect(span).toBeLessThanOrEqual(30 * 86_400_000);
+    // 180 days > 30, so more windows remain.
+    expect(page.nextCursor).toBeDefined();
+  });
+
+  it('walks a wide gmail range as successive <=30-day windows', async () => {
+    const c = gmailConnector();
+    let cursor: string | undefined;
+    let calls = 0;
+    do {
+      const page = await c.fetchAuditPage('gmail', {
+        since: '2026-05-01T00:00:00.000Z',
         until: '2026-07-01T00:00:00.000Z',
-      }),
-    ).rejects.toThrow(/30-day window/);
+        ...(cursor !== undefined ? { cursor } : {}),
+      });
+      cursor = page.nextCursor;
+      calls += 1;
+    } while (cursor !== undefined && calls < 10);
+
+    const reqs = server.requests.filter((r) => r.path.includes('/applications/gmail'));
+    // 61-day range -> 30 + 30 + 1 = 3 windows.
+    expect(reqs).toHaveLength(3);
+    for (const r of reqs) {
+      const span =
+        Date.parse(r.query['endTime'] as string) - Date.parse(r.query['startTime'] as string);
+      expect(span).toBeLessThanOrEqual(30 * 86_400_000);
+    }
+    // Contiguous coverage of the whole requested range.
+    expect(reqs[0]?.query['startTime']).toBe('2026-05-01T00:00:00.000Z');
+    expect(reqs[2]?.query['endTime']).toBe('2026-07-01T00:00:00.000Z');
   });
 
   it('never leaks the bearer token in error messages', async () => {
