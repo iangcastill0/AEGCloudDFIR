@@ -152,7 +152,13 @@ export interface FakeCtx {
     getStream: Mock;
     verifyObjectHash: Mock;
   };
-  search: { indexBulk: Mock; search: Mock; ensureIndex: Mock; addCaseToCollection: Mock };
+  search: {
+    indexBulk: Mock;
+    search: Mock;
+    ensureIndex: Mock;
+    addCaseToCollection: Mock;
+    setEmailFolder: Mock;
+  };
   s3Send: Mock;
   enqueue: Mock;
 }
@@ -188,6 +194,7 @@ export function fakeCtx(options: FakeCtxOptions = {}): FakeCtx {
     search: vi.fn().mockResolvedValue({ total: 0, items: [] }),
     ensureIndex: vi.fn().mockResolvedValue({ created: false, indexName: 'test' }),
     addCaseToCollection: vi.fn().mockResolvedValue({ updated: 0, unchanged: 0, conflicts: 0 }),
+    setEmailFolder: vi.fn().mockResolvedValue({ updated: 0, unchanged: 0, conflicts: 0 }),
   };
   const s3Send = vi.fn().mockResolvedValue({});
   const enqueue = vi.fn().mockResolvedValue(undefined);

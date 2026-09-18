@@ -60,6 +60,21 @@ export interface SearchAdapter {
     collectionId: string,
     caseId: string,
   ): Promise<UpdateByQueryResult>;
+  /**
+   * Rewrite the top-level `folder` field on every document that carries one
+   * folder value. Not `email.folder` — the document builder writes it flat.
+   *
+   * Graph collections stored the raw mail-folder ID rather than its name
+   * (`collection-fetch-item.ts` wrote `meta?.folderId`), so Review cannot group
+   * a mailbox into Inbox / Sent / Drafts. Backfilling that is a one-field change
+   * across whole mailboxes — 211,990 documents in the case this was written for
+   * — which is precisely what a re-index must not be used for.
+   */
+  setEmailFolder(
+    tenantId: string,
+    fromFolder: string,
+    toFolder: string,
+  ): Promise<UpdateByQueryResult>;
   deleteByTenant(tenantId: string): Promise<void>;
   search(req: SearchRequestBody): Promise<SearchResponse>;
   reindexToNewVersion(
@@ -353,6 +368,58 @@ export class OpenSearchAdapter implements SearchAdapter {
     return {
       updated: body.updated ?? 0,
       unchanged: body.noops ?? 0,
+      conflicts: body.version_conflicts ?? 0,
+    };
+  }
+
+  /**
+   * Rename one folder value across every document that carries it, in one
+   * request. Same reasoning as `addCaseToCollection` above: this is one field
+   * across whole mailboxes, which is precisely what a re-index must not be
+   * used for.
+   */
+  async setEmailFolder(
+    tenantId: string,
+    fromFolder: string,
+    toFolder: string,
+  ): Promise<UpdateByQueryResult> {
+    const response = await this.client.updateByQuery({
+      index: this.alias,
+      // Same reasoning as addCaseToCollection: a document being re-indexed at
+      // the same moment is a race, not a failure.
+      conflicts: 'proceed',
+      refresh: true,
+      body: {
+        query: {
+          // `folder` is TOP-LEVEL on the document, not under `email`. The
+          // builder reads input.email.folder and writes it flat
+          // (search-index.ts:240); EvidenceEmailFields has no folder at all.
+          // Filtering on email.folder matches nothing and reports success.
+          bool: { filter: [{ term: { tenantId } }, { term: { folder: fromFolder } }] },
+        },
+        script: {
+          lang: 'painless',
+          // noop when it already reads correctly, so re-running the backfill
+          // does not rewrite documents it already fixed.
+          source:
+            'if (ctx._source.folder != params.to) { ctx._source.folder = params.to; } ' +
+            "else { ctx.op = 'noop'; }",
+          params: { to: toFolder },
+        },
+      },
+    });
+
+    const body = response.body;
+    const failures = body.failures ?? [];
+    if (failures.length > 0) {
+      throw new Error(
+        `renaming folder ${fromFolder} failed for ${String(failures.length)} document(s): ` +
+          JSON.stringify(failures[0]),
+      );
+    }
+    return {
+      updated: body.updated ?? 0,
+      unchanged: (body.total ?? 0) - (body.updated ?? 0) - (body.version_conflicts ?? 0),
       conflicts: body.version_conflicts ?? 0,
     };
   }

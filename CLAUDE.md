@@ -188,7 +188,7 @@ Commands are not interchangeable, and the user has asked to be told explicitly.
 **`[SERVER]` on its own is banned — there are two servers.** Label every command
 **[MAC]**, **[LINODE]**, **[OLD SERVER]** or **[BROWSER]**.
 
-- **[MAC]** `/Users/ic/Documents/CloudDiscovery`. The ssh aliases and `pbcopy`
+- **[MAC]** `/Users/ic/Desktop/AEGCloudDFIR`. The ssh aliases and `pbcopy`
   exist only here.
 - **[LINODE]** `ssh cdfir-linode` → `root@74.207.235.208`, hostname
   `cdfir-prod`, `/var/www/AEGCloudDFIR`. **This is production, and staging, as
@@ -303,7 +303,7 @@ monitor treats a stale stamp as a failed backup. Restore procedure:
   runs on **every** prompt and puts the rule plus a fresh snapshot of both
   machines in front of Claude. `.claude/hooks/collect-live-state.sh` gathers it
   (read-only, time-bounded, SSH-multiplexed, cached ~90s in
-  `~/.claude/projects/-Users-ic-Documents-CloudDiscovery/live-state.cache`).
+  `~/.claude/projects/-Users-ic-Desktop-AEGCloudDFIR/live-state.cache`).
   Tests: `.claude/hooks/live-state.test.sh`. The snapshot is a starting point —
   it has an age printed on it and covers only a few fields, so anything else
   still needs its own command. Run

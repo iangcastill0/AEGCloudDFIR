@@ -159,7 +159,8 @@ async function resolveSelectionIds(
   return [...new Set(ids)];
 }
 
-async function expandFamilies(
+/** Exported for tests: the transaction-per-batch behaviour is the whole point. */
+export async function expandFamilies(
   ctx: WorkerContext,
   tenantId: string,
   ids: string[],
@@ -169,10 +170,17 @@ async function expandFamilies(
   // Chunked, and at half the usual size: this query names every id TWICE, so
   // an unchunked call on a 43,379-item case is 86,758 bind variables and dies
   // before the export writes anything.
-  const relations = await withTenantContext(ctx.prisma, tenantId, (tx) =>
-    queryInChunks(
-      ids,
-      (batch) =>
+  //
+  // A transaction PER BATCH, not one around the loop. Chunking alone fixed the
+  // bind-variable ceiling and left the transaction timeout in place: 434,910
+  // ids is 174 round trips, and one interactive transaction is capped at 30
+  // seconds, so each had 172 ms to return. It failed at 30,244 ms with
+  // `Transaction already closed`. Nothing here writes, so there is no atomicity
+  // to give up — this only reads relationships to build a set of ids.
+  const relations = await queryInChunks(
+    ids,
+    (batch) =>
+      withTenantContext(ctx.prisma, tenantId, (tx) =>
         tx.evidenceRelationship.findMany({
           where: {
             kind: { in: [...FAMILY_KINDS] },
@@ -180,8 +188,8 @@ async function expandFamilies(
           },
           select: { parentId: true, childId: true },
         }),
-      Math.floor(QUERY_ID_CHUNK / 2),
-    ),
+      ),
+    Math.floor(QUERY_ID_CHUNK / 2),
   );
   const parentIds = new Set<string>();
   for (const rel of relations) {
@@ -190,8 +198,8 @@ async function expandFamilies(
     parentIds.add(rel.parentId);
   }
   // Include siblings: all children of every implicated parent.
-  const siblings = await withTenantContext(ctx.prisma, tenantId, (tx) =>
-    queryInChunks([...parentIds], (batch) =>
+  const siblings = await queryInChunks([...parentIds], (batch) =>
+    withTenantContext(ctx.prisma, tenantId, (tx) =>
       tx.evidenceRelationship.findMany({
         where: { kind: { in: [...FAMILY_KINDS] }, parentId: { in: batch } },
         select: { childId: true },
@@ -303,8 +311,13 @@ export async function processExportRun(
     // Chunked: `ids` is a whole case or collection and has no upper bound.
     // Unchunked, exporting the 43,379-item collection this was reported on
     // failed before writing a single byte.
-    const items = await withTenantContext(ctx.prisma, tenantId, (tx) =>
-      queryInChunks(ids, (batch) =>
+    // A transaction PER BATCH, for the same reason as expandFamilies above,
+    // and this is the heavier of the two: seven nested includes per item,
+    // 87 batches at 434,910 ids. Reading across separate snapshots is safe
+    // here because evidence is write-once — the rows an export reads do
+    // not change under it.
+    const items = await queryInChunks(ids, (batch) =>
+      withTenantContext(ctx.prisma, tenantId, (tx) =>
         tx.evidenceItem.findMany({
           where: { id: { in: batch } },
           include: {

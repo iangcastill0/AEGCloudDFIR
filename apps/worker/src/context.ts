@@ -28,7 +28,7 @@ export type ObjectStorePort = Pick<
 
 export type SearchPort = Pick<
   SearchAdapter,
-  'indexBulk' | 'search' | 'ensureIndex' | 'addCaseToCollection'
+  'indexBulk' | 'search' | 'ensureIndex' | 'addCaseToCollection' | 'setEmailFolder'
 >;
 
 export interface WorkerContext {
