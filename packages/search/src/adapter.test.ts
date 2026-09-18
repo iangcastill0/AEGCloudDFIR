@@ -569,3 +569,81 @@ describe('addCaseToCollection', () => {
     ).rejects.toThrow(/mapping conflict/);
   });
 });
+
+describe('setEmailFolder', () => {
+  /**
+   * Graph collections stored the raw mail-folder id, so Review cannot group a
+   * mailbox into Inbox / Sent / Drafts. Fixing that is one field across whole
+   * mailboxes — 211,990 documents in the case this was written for — which is
+   * exactly what a re-index must not be used for.
+   */
+  function callBody(client: MockClient): Record<string, unknown> {
+    return client.updateByQuery.mock.calls[0]?.[0]?.body as Record<string, unknown>;
+  }
+
+  it('filters the TOP-LEVEL folder field, not email.folder', async () => {
+    // The document builder reads input.email.folder and writes it flat
+    // (search-index.ts:240); EvidenceEmailFields has no folder. Filtering on
+    // email.folder matched zero documents and reported success — which is how
+    // a backfill can claim to work and change nothing.
+    const client = mockClient();
+    await adapter(client).setEmailFolder('tenant-1', 'AAMkAD-opaque', '/Inbox');
+
+    const query = callBody(client).query as { bool?: { filter?: Record<string, unknown>[] } };
+    expect(query.bool?.filter).toEqual([
+      { term: { tenantId: 'tenant-1' } },
+      { term: { folder: 'AAMkAD-opaque' } },
+    ]);
+  });
+
+  it('passes the new name as a script parameter, never inlined', async () => {
+    // A folder name is provider-controlled text. Inlining it into painless
+    // source would be an injection point and would defeat the script cache.
+    const client = mockClient();
+    await adapter(client).setEmailFolder('tenant-1', 'AAMkAD-opaque', "/Sent Items'");
+
+    const script = callBody(client).script as { source: string; params: Record<string, string> };
+    expect(script.params).toEqual({ to: "/Sent Items'" });
+    expect(script.source).not.toContain('Sent Items');
+  });
+
+  it('makes a document that already reads correctly a no-op', async () => {
+    // Without this, re-running the backfill rewrites every document it already
+    // fixed — a long and completely pointless write on a large mailbox.
+    const client = mockClient();
+    await adapter(client).setEmailFolder('tenant-1', 'x', '/Inbox');
+    const script = callBody(client).script as { source: string };
+    expect(script.source).toContain("ctx.op = 'noop'");
+  });
+
+  it('writes to the alias and proceeds past version conflicts', async () => {
+    const client = mockClient();
+    await adapter(client).setEmailFolder('tenant-1', 'x', '/Inbox');
+    const call = client.updateByQuery.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(call.index).toBe('test-evidence');
+    expect(call.conflicts).toBe('proceed');
+    expect(call.refresh).toBe(true);
+  });
+
+  it('reports updated, unchanged and conflicts separately', async () => {
+    const client = mockClient();
+    client.updateByQuery.mockResolvedValue({
+      body: { total: 10, updated: 6, version_conflicts: 1, failures: [] },
+    });
+    await expect(adapter(client).setEmailFolder('t', 'x', '/Inbox')).resolves.toEqual({
+      updated: 6,
+      unchanged: 3,
+      conflicts: 1,
+    });
+  });
+
+  it('throws rather than silently losing documents when the engine reports failures', async () => {
+    const client = mockClient();
+    client.updateByQuery.mockResolvedValue({
+      body: { total: 2, updated: 0, failures: [{ cause: 'mapper_parsing_exception' }] },
+    });
+    await expect(adapter(client).setEmailFolder('t', 'x', '/Inbox')).rejects.toThrow(
+      /renaming folder x failed/,
+    );
+  });
+});
