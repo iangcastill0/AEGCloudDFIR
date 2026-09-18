@@ -13,6 +13,38 @@ MC_IMAGE="quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z"
 
 log() { echo "start.sh: $*"; }
 
+# 0. SSH credentials for reaching self-hosted machines from the agent terminal.
+#    Materialized from the AGENT_SSH_KEY secret (injected as an env var) so
+#    `ssh cdfir-linode` works like on the operator's Mac. Runs before the Docker
+#    section on purpose — it is independent of the local stack and must still
+#    happen on a base image without Docker. No-op when the secret is absent;
+#    best-effort so it never blocks environment start. Host/user are
+#    overridable via AGENT_SSH_HOST / AGENT_SSH_USER (default: the Linode root).
+if [ -n "${AGENT_SSH_KEY:-}" ]; then
+  log "materializing agent SSH key from AGENT_SSH_KEY"
+  install -d -m 700 "$HOME/.ssh"
+  ( umask 077; printf '%s\n' "$AGENT_SSH_KEY" > "$HOME/.ssh/cdfir_agent" )
+  chmod 600 "$HOME/.ssh/cdfir_agent"
+  ssh_config="$HOME/.ssh/config"
+  touch "$ssh_config"
+  chmod 600 "$ssh_config"
+  # Rewrite our managed block idempotently so host/user changes take effect and
+  # re-runs never duplicate it.
+  sed -i '/# >>> cdfir-agent managed >>>/,/# <<< cdfir-agent managed <<</d' "$ssh_config" 2>/dev/null || true
+  {
+    echo '# >>> cdfir-agent managed >>>'
+    echo 'Host cdfir-linode'
+    echo "  HostName ${AGENT_SSH_HOST:-74.207.235.208}"
+    echo "  User ${AGENT_SSH_USER:-root}"
+    echo '  IdentityFile ~/.ssh/cdfir_agent'
+    echo '  IdentitiesOnly yes'
+    echo '  StrictHostKeyChecking accept-new'
+    echo '# <<< cdfir-agent managed <<<'
+  } >> "$ssh_config"
+else
+  log "AGENT_SSH_KEY not set; skipping SSH key setup"
+fi
+
 if ! command -v docker >/dev/null 2>&1; then
   log "docker not installed; skipping stack bring-up (unit gate still works)"
   exit 0
