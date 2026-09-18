@@ -89,18 +89,52 @@ export const collectionScope = z.object({
         .optional(),
       google: z
         .object({
-          /** Admin SDK Reports API application names. */
+          /**
+           * Admin SDK Reports API application names. Full catalog; kept in sync
+           * with GOOGLE_REPORTS_APPLICATIONS in @aeg-clouddfir/connectors (the
+           * contracts package must not import from connectors). `gmail` is
+           * special — it needs a bounded <=30-day window (see the collection's
+           * date range) and its events are decoded from event_info.mail_event_type.
+           */
           reportApplications: z
             .array(
               z.enum([
                 'login',
-                'drive',
                 'admin',
+                'drive',
                 'token',
-                'mobile',
                 'user_accounts',
+                'mobile',
                 'groups',
+                'groups_enterprise',
                 'saml',
+                'calendar',
+                'chat',
+                'meet',
+                'chrome',
+                'gcp',
+                'gplus',
+                'rules',
+                'context_aware_access',
+                'access_transparency',
+                'keep',
+                'vault',
+                'classroom',
+                'data_studio',
+                'gemini_in_workspace_apps',
+                'jamboard',
+                'meet_hardware',
+                'ldap',
+                'profile',
+                'tasks',
+                'contacts',
+                'cloud_search',
+                'data_migration',
+                'directory_sync',
+                'admin_data_action',
+                'access_evaluation',
+                'assignments',
+                'gmail',
               ]),
             )
             .default([]),

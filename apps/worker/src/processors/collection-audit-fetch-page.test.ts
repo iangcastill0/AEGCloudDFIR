@@ -217,6 +217,27 @@ describe('processAuditFetchPage', () => {
     expect(f.tx.evidenceItem.create).not.toHaveBeenCalled();
   });
 
+  it('treats a per-scope 400 (unavailable log type) as an exception, not a hard failure', async () => {
+    const f = fakeCtx();
+    arm(f);
+    armConnector(vi.fn().mockRejectedValue(new ProviderApiError('bad request', { status: 400 })));
+
+    // Must resolve (not throw): one unavailable log type in the expanded Google
+    // catalog cannot sink the whole collection.
+    await processAuditFetchPage(f.ctx, payload);
+
+    expect(f.tx.collectionException.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ kind: 'unsupported_item' }),
+      }),
+    );
+    const reset = f.tx.collectionCheckpoint.updateMany.mock.calls[0]?.[0] as {
+      data: Record<string, unknown>;
+    };
+    expect(reset.data['cursorKind']).toBe('none');
+    expect(f.tx.evidenceItem.create).not.toHaveBeenCalled();
+  });
+
   it('bails quietly when the collection is not fetching', async () => {
     const f = fakeCtx();
     arm(f);
