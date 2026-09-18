@@ -51,15 +51,46 @@ const MS_CONTENT_TYPES = [
   { value: 'DLP.All', label: 'DLP' },
 ] as const;
 
-const GOOGLE_REPORT_APPS = [
-  'login',
-  'drive',
-  'admin',
-  'token',
-  'mobile',
-  'user_accounts',
-  'groups',
-  'saml',
+// Full Admin SDK Reports catalog, mirroring GOOGLE_REPORT_APPLICATIONS in the
+// connectors package. `gmail` is special (message-view events; needs a <=30-day
+// window) — see the notice rendered when it is selected.
+const GOOGLE_REPORT_APPS: ReadonlyArray<{ value: string; label: string }> = [
+  { value: 'login', label: 'Login' },
+  { value: 'admin', label: 'Admin console' },
+  { value: 'drive', label: 'Drive' },
+  { value: 'token', label: 'OAuth tokens' },
+  { value: 'user_accounts', label: 'User accounts' },
+  { value: 'gmail', label: 'Gmail (message events, incl. Message viewed)' },
+  { value: 'mobile', label: 'Mobile / devices' },
+  { value: 'groups', label: 'Groups' },
+  { value: 'groups_enterprise', label: 'Groups (Enterprise)' },
+  { value: 'saml', label: 'SAML' },
+  { value: 'calendar', label: 'Calendar' },
+  { value: 'chat', label: 'Chat' },
+  { value: 'meet', label: 'Meet' },
+  { value: 'chrome', label: 'Chrome' },
+  { value: 'gcp', label: 'Google Cloud (GCP)' },
+  { value: 'gplus', label: 'Currents / Google+' },
+  { value: 'rules', label: 'Rules' },
+  { value: 'context_aware_access', label: 'Context-aware access' },
+  { value: 'access_transparency', label: 'Access transparency' },
+  { value: 'keep', label: 'Keep' },
+  { value: 'vault', label: 'Vault (audit actions)' },
+  { value: 'classroom', label: 'Classroom' },
+  { value: 'data_studio', label: 'Looker Studio' },
+  { value: 'gemini_in_workspace_apps', label: 'Gemini in Workspace apps' },
+  { value: 'jamboard', label: 'Jamboard' },
+  { value: 'meet_hardware', label: 'Meet hardware' },
+  { value: 'ldap', label: 'LDAP' },
+  { value: 'profile', label: 'Profile' },
+  { value: 'tasks', label: 'Tasks' },
+  { value: 'contacts', label: 'Contacts' },
+  { value: 'cloud_search', label: 'Cloud Search' },
+  { value: 'data_migration', label: 'Data migration' },
+  { value: 'directory_sync', label: 'Directory sync' },
+  { value: 'admin_data_action', label: 'Admin data actions' },
+  { value: 'access_evaluation', label: 'Access evaluation' },
+  { value: 'assignments', label: 'Assignments' },
 ] as const;
 
 function toggle<T>(list: readonly T[], value: T, on: boolean): T[] {
@@ -1017,16 +1048,16 @@ function AuditScopeFields({ state, dispatch }: StepProps) {
           <p>Admin SDK Reports applications</p>
           {GOOGLE_REPORT_APPS.map((app) => (
             <Checkbox
-              key={app}
-              label={app}
-              checked={a.googleReportApplications.includes(app)}
+              key={app.value}
+              label={app.label}
+              checked={a.googleReportApplications.includes(app.value)}
               onChange={(e) =>
                 dispatch({
                   type: 'patchAudit',
                   patch: {
                     googleReportApplications: toggle(
                       a.googleReportApplications,
-                      app,
+                      app.value,
                       e.target.checked,
                     ),
                   },
@@ -1034,6 +1065,13 @@ function AuditScopeFields({ state, dispatch }: StepProps) {
               }
             />
           ))}
+          {a.googleReportApplications.includes('gmail') ? (
+            <Notice variant="info">
+              Gmail records message events, including “Message viewed”. Its logs need a date range
+              of 30 days or less per query (retention is 180 days); wider ranges are collected in
+              30-day windows.
+            </Notice>
+          ) : null}
           <Checkbox
             label="Include Google Vault (matters / exports — metadata only)"
             checked={a.includeVault}
