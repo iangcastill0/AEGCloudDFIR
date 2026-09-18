@@ -119,10 +119,12 @@ export const wizardStateSchema = z.object({
       ),
       includeGraphSignins: z.boolean(),
       includeGraphDirectoryAudits: z.boolean(),
-      /** Google Admin SDK Reports application names. */
-      googleReportApplications: z.array(
-        z.enum(['login', 'drive', 'admin', 'token', 'mobile', 'user_accounts', 'groups', 'saml']),
-      ),
+      /**
+       * Google Admin SDK Reports application names. Kept as free strings here;
+       * the create contract (packages/contracts) validates them against the
+       * authoritative full catalog on submit.
+       */
+      googleReportApplications: z.array(z.string()),
       includeVault: z.boolean(),
       vaultMatterIdsText: z.string(),
       /** Optional actor (UPN/email) filter, one per line/comma. */
@@ -176,7 +178,10 @@ export function freshWizard(idempotencyKey: string): WizardState {
         msContentTypes: [],
         includeGraphSignins: false,
         includeGraphDirectoryAudits: false,
-        googleReportApplications: [],
+        // Sensible core pre-checked for a Google audit collection (only used
+        // when provider === 'google'). gmail is left unchecked by default
+        // because it needs a bounded <=30-day window.
+        googleReportApplications: ['login', 'admin', 'drive', 'token', 'user_accounts'],
         includeVault: false,
         vaultMatterIdsText: '',
         actorFilterText: '',
@@ -577,7 +582,10 @@ function buildAuditScope(state: WizardState): WebCreateCollectionRequest['scope'
     ...(state.provider === 'google'
       ? {
           google: {
-            reportApplications: a.googleReportApplications,
+            // Validated against the authoritative catalog by the create contract.
+            reportApplications: a.googleReportApplications as NonNullable<
+              NonNullable<WebCreateCollectionRequest['scope']['audit']>['google']
+            >['reportApplications'],
             includeVault: a.includeVault,
             vaultMatterIds: parseIdList(a.vaultMatterIdsText),
           },

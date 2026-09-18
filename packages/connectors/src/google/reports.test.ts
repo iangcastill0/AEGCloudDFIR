@@ -106,6 +106,50 @@ describe('GoogleReportsConnector.fetchAuditPage', () => {
     expect(req?.query['endTime']).toBe('2026-07-02T00:00:00.000Z');
   });
 
+  it('decodes gmail event_info.mail_event_type into a readable operation and message id', async () => {
+    const c = new GoogleReportsConnector({
+      tokenProvider: new StaticTokenProvider(TOKEN),
+      googleApiBaseUrl: `${server.url}/google`,
+      applications: ['gmail'],
+      sleepImpl: () => Promise.resolve(),
+    });
+    const page = await c.fetchAuditPage('gmail', {
+      since: '2026-07-01T00:00:00.000Z',
+      until: '2026-07-08T00:00:00.000Z',
+    });
+    const records = page.batches[0]?.records ?? [];
+    expect(records).toHaveLength(2);
+    // 31 = "Message viewed" — the forensic event we care about.
+    expect(records[0]).toMatchObject({
+      operation: 'Message viewed',
+      recordType: 'gmail_mail_event:31',
+      workload: 'gmail',
+      actorEmail: 'avery.chen@example.com',
+      targetId: '<q3-contract@mail.example.com>',
+    });
+    // 7 = "Message opened (first time)".
+    expect(records[1]).toMatchObject({
+      operation: 'Message opened (first time)',
+      recordType: 'gmail_mail_event:7',
+    });
+  });
+
+  it('rejects a gmail query without a bounded window', async () => {
+    const c = new GoogleReportsConnector({
+      tokenProvider: new StaticTokenProvider(TOKEN),
+      googleApiBaseUrl: `${server.url}/google`,
+      applications: ['gmail'],
+      sleepImpl: () => Promise.resolve(),
+    });
+    await expect(c.fetchAuditPage('gmail', {})).rejects.toThrow(/require both since and until/);
+    await expect(
+      c.fetchAuditPage('gmail', {
+        since: '2026-01-01T00:00:00.000Z',
+        until: '2026-07-01T00:00:00.000Z',
+      }),
+    ).rejects.toThrow(/30-day window/);
+  });
+
   it('never leaks the bearer token in error messages', async () => {
     const bad = new GoogleReportsConnector({
       tokenProvider: new StaticTokenProvider(TOKEN),

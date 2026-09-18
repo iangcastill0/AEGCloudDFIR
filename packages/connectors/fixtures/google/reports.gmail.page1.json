@@ -1,0 +1,73 @@
+{
+  "kind": "admin#reports#activities",
+  "items": [
+    {
+      "kind": "admin#reports#activity",
+      "id": {
+        "time": "2026-07-01T12:00:00.000Z",
+        "uniqueQualifier": "9000000000000000001",
+        "applicationName": "gmail",
+        "customerId": "C01example"
+      },
+      "actor": { "email": "avery.chen@example.com", "profileId": "1122334455" },
+      "ipAddress": "203.0.113.7",
+      "events": [
+        {
+          "type": "message_event",
+          "name": "delivery",
+          "parameters": [
+            {
+              "name": "event_info",
+              "messageValue": {
+                "parameter": [{ "name": "mail_event_type", "intValue": "31" }]
+              }
+            },
+            {
+              "name": "message_info",
+              "messageValue": {
+                "parameter": [
+                  { "name": "rfc2822_message_id", "value": "<q3-contract@mail.example.com>" },
+                  { "name": "subject", "value": "Q3 vendor contract - revised terms" }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "admin#reports#activity",
+      "id": {
+        "time": "2026-07-01T12:05:00.000Z",
+        "uniqueQualifier": "9000000000000000002",
+        "applicationName": "gmail",
+        "customerId": "C01example"
+      },
+      "actor": { "email": "jordan.lee@example.com", "profileId": "5566778899" },
+      "ipAddress": "203.0.113.9",
+      "events": [
+        {
+          "type": "message_event",
+          "name": "delivery",
+          "parameters": [
+            {
+              "name": "event_info",
+              "messageValue": {
+                "parameter": [{ "name": "mail_event_type", "intValue": "7" }]
+              }
+            },
+            {
+              "name": "message_info",
+              "messageValue": {
+                "parameter": [
+                  { "name": "rfc2822_message_id", "value": "<deposition-prep@mail.example.com>" },
+                  { "name": "subject", "value": "Deposition prep" }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

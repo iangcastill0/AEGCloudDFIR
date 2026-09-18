@@ -111,6 +111,18 @@ export async function processAuditFetchPage(
       });
       return;
     }
+    // Other per-scope client errors (400 unknown/unavailable applicationName,
+    // 404 resource absent): the log type is not enabled or not valid for this
+    // tenant. The expanded Google catalog offers ~35 applications and not every
+    // tenant licenses all of them, so a single unavailable one must be an
+    // exception on that scope, not a failure of the whole collection.
+    if (err instanceof ProviderApiError && err.status >= 400 && err.status < 500) {
+      await exhaustWithException(ctx, payload, checkpoint.id, checkpoint.version, {
+        kind: 'unsupported_item',
+        message: `audit scope '${kind}/${rawScopeKey}' unavailable (${err.status}): ${sanitizeError(err)}`,
+      });
+      return;
+    }
     // A required audit setup value is missing/invalid (e.g. one-sided window,
     // subscription not enabled): record and skip the scope, do not hard-fail.
     if (err instanceof AuditConfigError) {

@@ -343,8 +343,11 @@ describe('audit source', () => {
   });
 
   it('requires an audit scope before advancing past scope', () => {
-    const s = auditGoogleWizard();
-    // Nothing configured yet.
+    // Clear the pre-checked core so nothing is configured.
+    const s = wizardReducer(auditGoogleWizard(), {
+      type: 'patchAudit',
+      patch: { googleReportApplications: [] },
+    });
     expect(validateStep(s, STEP_SCOPE).length).toBeGreaterThan(0);
     const configured = wizardReducer(s, {
       type: 'patchAudit',

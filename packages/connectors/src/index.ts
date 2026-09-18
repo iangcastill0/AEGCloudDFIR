@@ -38,6 +38,10 @@ export {
 export {
   GoogleReportsConnector,
   GOOGLE_REPORTS_APPLICATIONS,
+  GOOGLE_REPORTS_DEFAULT_APPLICATIONS,
+  GOOGLE_REPORTS_GMAIL_APPLICATION,
+  GMAIL_MAX_RANGE_DAYS,
+  GMAIL_MAIL_EVENT_TYPES,
   type GoogleReportsOptions,
 } from './google/reports.js';
 export { GoogleVaultConnector, type GoogleVaultOptions } from './google/vault.js';
