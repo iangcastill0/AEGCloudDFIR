@@ -259,6 +259,8 @@ export async function processOcr(
   const input = await readAllCapped(stream, MAX_INPUT_BYTES);
 
   let pages: OcrPageResult[];
+  /** Set when the document had more pages than the cap allowed us to read. */
+  let stoppedAtPage: number | null = null;
   try {
     let toRasterize = input;
     if (decision.convertFirst) {
@@ -269,9 +271,14 @@ export async function processOcr(
       toRasterize = converted;
     }
     if (isPdf) {
-      const images = await runner.pdfToImages(toRasterize, ctx.config.CDFIR_MAX_OCR_PAGES);
+      const maxPages = ctx.config.CDFIR_MAX_OCR_PAGES;
+      // Rasterise ONE page past the cap, purely to learn whether a page past
+      // the cap exists. The extra page is cheap. Telling a reviewer a 900-page
+      // report was read in full when 400 pages were never looked at is not.
+      const rasterised = await runner.pdfToImages(toRasterize, maxPages + 1);
+      if (rasterised.length > maxPages) stoppedAtPage = maxPages;
       pages = [];
-      for (const image of images) {
+      for (const image of rasterised.slice(0, maxPages)) {
         pages.push(await runner.ocrImage(image, ctx.config.CDFIR_OCR_LANGS));
       }
     } else {
@@ -338,10 +345,28 @@ export async function processOcr(
       },
       update: { objectKey: put.objectKey, sha256: put.sha256, charCount: fullText.length },
     });
+    // An OCR that read only part of a document must say so. Silence here
+    // reads exactly like a document that was read in full, which is the one
+    // outcome this product must never produce.
+    const truncationNote =
+      stoppedAtPage === null
+        ? ''
+        : `ocr read the first ${String(stoppedAtPage)} page(s); the document has more, ` +
+          `so text beyond that page is NOT in this record or in search`;
     await tx.evidenceItem.update({
       where: { id: evidenceItemId },
-      data: { processingStatus: 'ocr_complete' },
+      data: { processingStatus: 'ocr_complete', processingDetail: truncationNote },
     });
+    if (stoppedAtPage !== null && item.collectionId !== null) {
+      await recordException(tx, {
+        tenantId,
+        collectionId: item.collectionId,
+        custodianId: item.custodianId ?? undefined,
+        providerItemId: item.providerItemId,
+        kind: 'other',
+        message: truncationNote,
+      });
+    }
     if (item.collectionId !== null && item.custodianId !== null) {
       await incrementProgress(tx, item.collectionId, item.custodianId, 'drive', {
         ocrExtracted: 1,
@@ -353,7 +378,7 @@ export async function processOcr(
       targetType: 'evidence_item',
       targetId: evidenceItemId,
       actorDisplay: 'worker',
-      summary: { pages: pages.length, engineVersion },
+      summary: { pages: pages.length, engineVersion, truncatedAtPage: stoppedAtPage },
     });
     await enqueueIndex(tx, tenantId, evidenceItemId, version);
   });

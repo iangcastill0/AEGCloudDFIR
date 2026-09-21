@@ -131,7 +131,19 @@ export const configSchema = z.object({
   CDFIR_MAX_ARCHIVE_DEPTH: z.coerce.number().int().min(1).max(10).default(3),
   CDFIR_MAX_ARCHIVE_EXPANSION_RATIO: z.coerce.number().int().min(2).max(1000).default(100),
   CDFIR_MAX_ARCHIVE_TOTAL_BYTES: z.coerce.number().int().positive().default(2_147_483_648),
-  CDFIR_MAX_OCR_PAGES: z.coerce.number().int().min(1).default(2000),
+  /**
+   * Pages rasterised and OCRed per document.
+   *
+   * 500, not 2000, and the number is not arbitrary: `MAX_OCR_PAGES_INDEXED` in
+   * search-index.ts is 500, so pages past that were OCRed and then discarded
+   * before they reached the index. The old cap let one document own an OCR
+   * slot for over half an hour — a 2.7 MB `Aging Report.pdf` measured at 33
+   * minutes and still running — while ~90,000 other jobs waited behind it.
+   *
+   * Hitting the cap is reported, never silent: `process-ocr.ts` records an
+   * exception and writes `processingDetail` saying where it stopped.
+   */
+  CDFIR_MAX_OCR_PAGES: z.coerce.number().int().min(1).default(500),
   CDFIR_PREVIEW_TIMEOUT_MS: z.coerce.number().int().min(1000).default(120_000),
 
   /**

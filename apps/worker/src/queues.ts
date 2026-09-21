@@ -13,6 +13,19 @@ export const QUEUES = {
   processParse: 'process.parse',
   processExtract: 'process.extract',
   processOcr: 'process.ocr',
+  /**
+   * Image OCR, kept apart from PDF and document OCR on purpose.
+   *
+   * One FIFO queue mixed two cost classes with wildly different value. A
+   * 2.7 MB `Aging Report.pdf` held a slot for 33 minutes while ~90,000
+   * sub-second image jobs queued behind it: measured throughput was 2.26
+   * jobs/min even though individual image jobs finish in 0.3-0.9s. Splitting
+   * the queue is what stops either class from blocking the other, because
+   * per-queue concurrency is the only thing here that CAPS a class's share.
+   * BullMQ priority only reorders what is waiting; it cannot preempt the
+   * 33-minute job already running.
+   */
+  processOcrImage: 'process.ocr.image',
   processPreview: 'process.preview',
   processScan: 'process.scan',
   searchIndex: 'search.index',
