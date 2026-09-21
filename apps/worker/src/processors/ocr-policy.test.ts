@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LOW_TEXT_THRESHOLD, ocrDecision } from './ocr-policy';
+import { LOW_TEXT_THRESHOLD, isImageOcr, ocrDecision } from './ocr-policy';
 
 describe('ocrDecision', () => {
   it('always OCRs an image, whatever the extractor produced', () => {
@@ -76,5 +76,32 @@ describe('ocrDecision', () => {
       true,
     );
     expect(ocrDecision({ mimeType: 'APPLICATION/PDF', extractedChars: 0 }).run).toBe(true);
+  });
+});
+
+describe('isImageOcr', () => {
+  /**
+   * The split exists because these two classes behave nothing alike. Measured
+   * on the production corpus: 96.0% of 7,496 image OCRs returned under 40
+   * characters, best result 468; 98.7% of 479 PDF OCRs cleared the bar, best
+   * result 828,986. Images are cheap per job and arrive in the tens of
+   * thousands; PDFs are slow and are where the evidence is.
+   */
+  it('separates images from everything else that gets OCRed', () => {
+    const of = (mimeType: string, extractedChars = 0): boolean =>
+      isImageOcr(ocrDecision({ mimeType, extractedChars }));
+
+    expect(of('image/png')).toBe(true);
+    expect(of('image/jpeg')).toBe(true);
+    expect(of('image/tiff')).toBe(true);
+
+    expect(of('application/pdf')).toBe(false);
+    // A converted document becomes a PDF and takes the PDF path, so it belongs
+    // in the document lane however it started life.
+    expect(of('application/msword', 2)).toBe(false);
+  });
+
+  it('does not put non-OCR work in the image lane', () => {
+    expect(isImageOcr(ocrDecision({ mimeType: 'text/csv', extractedChars: 0 }))).toBe(false);
   });
 });

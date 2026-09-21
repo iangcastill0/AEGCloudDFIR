@@ -3,7 +3,7 @@ import { sanitizeError, type WorkerContext } from '../context.js';
 import { recordException } from '../progress.js';
 import { convertToPlainText, isConvertible } from './soffice.js';
 import { QUEUES, dedupKeys } from '../queues.js';
-import { ocrDecision } from './ocr-policy.js';
+import { isImageOcr, ocrDecision } from './ocr-policy.js';
 import { PayloadTooLargeError, readAllCapped } from '../streams.js';
 import type { EvidenceStagePayload } from './payloads.js';
 
@@ -27,6 +27,33 @@ export interface ExtractDeps {
  */
 export function needsOcr(mimeType: string, extractedChars = 0): boolean {
   return ocrDecision({ mimeType, extractedChars }).run;
+}
+
+/**
+ * The outbox row(s) that queue OCR for this item, on the queue its cost class
+ * belongs to. Empty when the item needs no OCR at all.
+ *
+ * The dedup key stays `ocr:<id>:v<n>` across BOTH queues. It has to: an item
+ * is one piece of work whichever lane runs it, and a key that encoded the lane
+ * would let the same item be OCRed twice if the routing rule ever changed.
+ */
+export function ocrOutboxRows(
+  tenantId: string,
+  evidenceItemId: string,
+  version: number,
+  mimeType: string,
+  extractedChars: number,
+): { tenantId: string; topic: string; dedupKey: string; payload: object }[] {
+  const decision = ocrDecision({ mimeType, extractedChars });
+  if (!decision.run) return [];
+  return [
+    {
+      tenantId,
+      topic: isImageOcr(decision) ? QUEUES.processOcrImage : QUEUES.processOcr,
+      dedupKey: dedupKeys.processStage('ocr', evidenceItemId, version),
+      payload: { tenantId, evidenceItemId, version },
+    },
+  ];
 }
 
 /**
@@ -231,16 +258,11 @@ async function persistExtractedText(
       data: [
         // The character count matters now: a document that extracted to nothing
         // is very likely a photograph of a page, and is otherwise unsearchable.
-        ...(needsOcr(item.mimeType, trimmed.length)
-          ? [
-              {
-                tenantId,
-                topic: QUEUES.processOcr,
-                dedupKey: dedupKeys.processStage('ocr', evidenceItemId, version),
-                payload: { tenantId, evidenceItemId, version },
-              },
-            ]
-          : []),
+        //
+        // Routed by cost class. Images go to their own queue so that tens of
+        // thousands of them cannot sit in front of a PDF, and so that one long
+        // PDF cannot sit in front of them. Same processor either side.
+        ...ocrOutboxRows(tenantId, evidenceItemId, version, item.mimeType, trimmed.length),
         {
           tenantId,
           topic: QUEUES.searchIndex,

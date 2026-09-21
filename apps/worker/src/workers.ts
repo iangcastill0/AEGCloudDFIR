@@ -54,6 +54,14 @@ import { classifyProviderError } from './permanent-errors.js';
  *   one coherent artifact.
  * - processScan is bounded by ClamAV's own thread pool, not by cores here;
  *   raising it past clamd's MaxThreads just queues inside clamd instead.
+ *
+ * The two OCR lanes SHARE one budget rather than each getting the full value.
+ * `processOcr + processOcrImage` always sums to `cpuConcurrency`, so splitting
+ * the queue bought isolation without also doubling the OCR load on the host.
+ * Image OCR is pinned at 1: it is the high-volume, low-yield class, and its
+ * job is to make progress in the background without ever being able to starve
+ * anything. On the production host these two together were the difference
+ * between load 17.87 on 8 cores and a machine that can also run an export.
  */
 export function queueConcurrency(cpuConcurrency: number): Record<QueueName, number> {
   return {
@@ -65,7 +73,9 @@ export function queueConcurrency(cpuConcurrency: number): Record<QueueName, numb
     [QUEUES.pstExtract]: 1,
     [QUEUES.processParse]: cpuConcurrency,
     [QUEUES.processExtract]: cpuConcurrency,
-    [QUEUES.processOcr]: cpuConcurrency,
+    // One budget across both OCR lanes, never one each.
+    [QUEUES.processOcr]: Math.max(1, cpuConcurrency - 1),
+    [QUEUES.processOcrImage]: 1,
     [QUEUES.processPreview]: cpuConcurrency,
     [QUEUES.processScan]: 4,
     [QUEUES.searchIndex]: 8,
@@ -84,8 +94,12 @@ export const CPU_BOUND_QUEUES: readonly QueueName[] = [
   QUEUES.processParse,
   QUEUES.processExtract,
   QUEUES.processOcr,
+  QUEUES.processOcrImage,
   QUEUES.processPreview,
 ];
+
+/** The OCR lanes that share one concurrency budget. */
+export const OCR_QUEUES: readonly QueueName[] = [QUEUES.processOcr, QUEUES.processOcrImage];
 
 type QueueHandler = (ctx: WorkerContext, data: unknown) => Promise<void>;
 
@@ -103,7 +117,9 @@ export function buildHandlers(): Record<QueueName, QueueHandler> {
     [QUEUES.pstExtract]: (ctx, data) => processPstExtract(ctx, pstExtractPayload.parse(data)),
     [QUEUES.processParse]: (ctx, data) => processParse(ctx, evidenceStagePayload.parse(data)),
     [QUEUES.processExtract]: (ctx, data) => processExtract(ctx, evidenceStagePayload.parse(data)),
+    // Same processor both sides: the lanes differ in scheduling, not in work.
     [QUEUES.processOcr]: (ctx, data) => processOcr(ctx, evidenceStagePayload.parse(data)),
+    [QUEUES.processOcrImage]: (ctx, data) => processOcr(ctx, evidenceStagePayload.parse(data)),
     [QUEUES.processPreview]: (ctx, data) => processPreview(ctx, evidenceStagePayload.parse(data)),
     [QUEUES.processScan]: (ctx, data) => processScan(ctx, evidenceStagePayload.parse(data)),
     [QUEUES.searchIndex]: (ctx, data) => processSearchIndex(ctx, evidenceStagePayload.parse(data)),

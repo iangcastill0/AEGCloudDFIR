@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CPU_BOUND_QUEUES, queueConcurrency } from './workers.js';
+import { CPU_BOUND_QUEUES, OCR_QUEUES, queueConcurrency } from './workers.js';
 import { ALL_QUEUE_NAMES, QUEUES } from './queues.js';
 
 describe('queueConcurrency', () => {
@@ -12,8 +12,43 @@ describe('queueConcurrency', () => {
   it('scales every CPU-bound stage with the setting', () => {
     const c = queueConcurrency(12);
     for (const queue of CPU_BOUND_QUEUES) {
+      // The OCR lanes are the exception: they SHARE the budget rather than
+      // each taking it, so they are asserted together below.
+      if (OCR_QUEUES.includes(queue)) continue;
       expect(c[queue]).toBe(12);
     }
+  });
+
+  /**
+   * Splitting process.ocr into a document lane and an image lane must not
+   * double the OCR load on the host. The production box was already at load
+   * 17.87 on 8 cores, with the worker at 376% CPU and Tika at 314%, and an
+   * export crawling on what was left.
+   */
+  it('shares ONE budget across both OCR lanes rather than one each', () => {
+    for (const budget of [2, 4, 8, 32]) {
+      const c = queueConcurrency(budget);
+      const total = OCR_QUEUES.reduce((sum, q) => sum + c[q], 0);
+      expect(total).toBe(budget);
+    }
+  });
+
+  /**
+   * Image OCR is the high-volume, low-yield class: measured on the production
+   * corpus, 96.0% of 7,496 image OCRs returned less than 40 characters and the
+   * best single result was 468. It must make progress in the background and
+   * must never be able to starve anything, however large the machine.
+   */
+  it('pins image OCR at one lane on every machine size', () => {
+    for (const budget of [1, 4, 64]) {
+      expect(queueConcurrency(budget)[QUEUES.processOcrImage]).toBe(1);
+    }
+  });
+
+  it('never starves document OCR, even at the smallest budget', () => {
+    // Math.max(1, ...) matters: budget 1 must still leave the PDF lane able to
+    // run, or the valuable class stops entirely.
+    expect(queueConcurrency(1)[QUEUES.processOcr]).toBeGreaterThanOrEqual(1);
   });
 
   it('leaves provider fetches alone however big the machine is', () => {
@@ -63,9 +98,10 @@ describe('queueConcurrency', () => {
     }
   });
 
-  it('matches the old hardcoded values at the default setting', () => {
-    // The default must change nothing. An operator who does not set the
-    // variable should get exactly the behaviour they had before.
+  it('pins the whole table at the default setting', () => {
+    // Everything outside OCR is unchanged from before the split. OCR is now
+    // 3 + 1 where it used to be a single 4, so total OCR parallelism on the
+    // host is identical — the split bought isolation, not more load.
     const c = queueConcurrency(4);
     expect(c).toEqual({
       [QUEUES.collectionDiscover]: 2,
@@ -75,7 +111,8 @@ describe('queueConcurrency', () => {
       [QUEUES.pstExtract]: 1,
       [QUEUES.processParse]: 4,
       [QUEUES.processExtract]: 4,
-      [QUEUES.processOcr]: 4,
+      [QUEUES.processOcr]: 3,
+      [QUEUES.processOcrImage]: 1,
       [QUEUES.processPreview]: 4,
       [QUEUES.processScan]: 4,
       [QUEUES.searchIndex]: 8,

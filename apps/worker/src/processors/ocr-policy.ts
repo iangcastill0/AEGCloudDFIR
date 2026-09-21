@@ -49,6 +49,22 @@ function baseType(mimeType: string): string {
   return (mimeType.split(';')[0] ?? '').trim().toLowerCase();
 }
 
+/**
+ * Which OCR lane this work belongs in.
+ *
+ * Measured on the production corpus (7,496 image OCRs and 479 PDF OCRs):
+ * 96.0% of image results came back under LOW_TEXT_THRESHOLD and the best
+ * single result in the whole set was 468 characters, while 98.7% of PDF
+ * results cleared the bar and the best was 828,986. Images are the cheap,
+ * high-volume, low-yield class; PDFs are the slow, low-volume, high-yield one.
+ *
+ * Note that SIZE does not predict yield and must not be used to gate this:
+ * images over 500 KB were the WORST bucket at 98.7% below the threshold.
+ */
+export function isImageOcr(decision: OcrDecision): boolean {
+  return decision.reason === 'image';
+}
+
 export function ocrDecision(input: { mimeType: string; extractedChars: number }): OcrDecision {
   const mime = baseType(input.mimeType);
 
