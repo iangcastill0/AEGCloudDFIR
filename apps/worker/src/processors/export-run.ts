@@ -18,7 +18,7 @@ import {
   type QueryNode,
 } from '@aeg-clouddfir/search';
 import { sanitizeError, type WorkerContext } from '../context.js';
-import { QUERY_ID_CHUNK, queryInChunks } from '../chunked.js';
+import { QUERY_ID_CHUNK, chunkIds, queryInChunks } from '../chunked.js';
 import type { ExportRunPayload } from './payloads.js';
 
 /**
@@ -51,6 +51,13 @@ type ExportParameters = z.infer<typeof exportParameters>;
  */
 const SAVED_SEARCH_RESULT_CAP = 1_000_000;
 const FAMILY_KINDS = FAMILY_RELATIONSHIP_KINDS;
+
+/**
+ * The kinds that put a child in its parent's directory. Deliberately narrower
+ * than FAMILY_KINDS: family expansion decides what gets EXPORTED, this decides
+ * where a file LANDS in the archive, and they are not the same question.
+ */
+const ATTACHMENT_KINDS = ['attachment', 'inline_attachment'] as const;
 
 /**
  * Splitter decision, factored out for unit testing: start a new archive part
@@ -223,6 +230,101 @@ type LoadedExportItem = Prisma.EvidenceItemGetPayload<{
   };
 }>;
 
+/**
+ * The only two family facts the archive layout needs.
+ *
+ * `archivePathFor` asked the loaded item list exactly two questions: "does
+ * anything here call me its parent?" and "what is my parent called?". It
+ * answered the first by scanning the WHOLE list, once per item. That is
+ * quadratic: at 434,910 items it is roughly 1.9e11 comparisons, so the export
+ * stops making progress rather than failing outright. It never showed before
+ * because the largest export that got this far was 43,379 items — a hundred
+ * times smaller, and this cost grows with the square, so ten thousand times
+ * cheaper.
+ *
+ * Both answers are precomputed once, so naming one item's path no longer
+ * depends on how many items the export has.
+ */
+export interface FamilyIndex {
+  /** Ids that an exported attachment points at. */
+  parents: Set<string>;
+  /** Parent id -> its name, for parents inside this export only. */
+  nameById: Map<string, string>;
+}
+
+export async function buildFamilyIndex(
+  ctx: WorkerContext,
+  tenantId: string,
+  ids: string[],
+): Promise<FamilyIndex> {
+  if (ids.length === 0) return { parents: new Set(), nameById: new Map() };
+
+  // Chunked, one transaction per batch, for the same reasons as expandFamilies.
+  const relations = await queryInChunks(ids, (batch) =>
+    withTenantContext(ctx.prisma, tenantId, (tx) =>
+      tx.evidenceRelationship.findMany({
+        where: { kind: { in: [...ATTACHMENT_KINDS] }, childId: { in: batch } },
+        select: { parentId: true },
+      }),
+    ),
+  );
+  const parents = new Set(relations.map((r) => r.parentId));
+
+  // Names, and only for parents that are themselves in the export. A parent
+  // outside the selection was never in the old map either, so it keeps the
+  // same 'family' fallback and is not worth a query.
+  const inExport = new Set(ids);
+  const named = await queryInChunks(
+    [...parents].filter((id) => inExport.has(id)),
+    (batch) =>
+      withTenantContext(ctx.prisma, tenantId, (tx) =>
+        tx.evidenceItem.findMany({
+          where: { id: { in: batch } },
+          select: { id: true, name: true },
+        }),
+      ),
+  );
+  return { parents, nameById: new Map(named.map((i) => [i.id, i.name])) };
+}
+
+/**
+ * Yield the export's items one batch at a time, in id order.
+ *
+ * The whole list used to be materialised before a byte was written: 434,910
+ * items, each with seven nested includes, in one array — plus a Map holding
+ * every one of them a second time. Streaming keeps a single batch alive.
+ *
+ * Sorting the ids up front is what makes that safe. Every id in batch N sorts
+ * below every id in batch N+1 and each batch is asked for `orderBy: id`, so
+ * the batches arrive in the stable global order the writers rely on. That also
+ * retires the full in-memory sort that used to follow the load.
+ */
+export async function* loadItemsInBatches(
+  ctx: WorkerContext,
+  tenantId: string,
+  ids: string[],
+): AsyncGenerator<LoadedExportItem[]> {
+  for (const batch of chunkIds([...ids].sort())) {
+    yield await withTenantContext(ctx.prisma, tenantId, (tx) =>
+      tx.evidenceItem.findMany({
+        where: { id: { in: batch } },
+        include: {
+          blob: true,
+          custodian: { select: { email: true } },
+          emailMetadata: true,
+          participants: true,
+          tagAssignments: { include: { tag: { select: { name: true } } } },
+          childRelationships: { select: { parentId: true, kind: true } },
+          // Ordered so the CSV reads as a timeline rather than in whatever
+          // order the rows happen to come back.
+          auditRecords: { orderBy: [{ occurredAt: 'asc' }, { providerRecordId: 'asc' }] },
+        },
+        orderBy: { id: 'asc' },
+      }),
+    );
+  }
+}
+
 function participantList(item: LoadedExportItem, role: string): string {
   return item.participants
     .filter((p) => p.role === role)
@@ -308,40 +410,34 @@ export async function processExportRun(
     if (params.includeFamilies) {
       ids = await expandFamilies(ctx, tenantId, ids);
     }
-    // Chunked: `ids` is a whole case or collection and has no upper bound.
-    // Unchunked, exporting the 43,379-item collection this was reported on
-    // failed before writing a single byte.
-    // A transaction PER BATCH, for the same reason as expandFamilies above,
-    // and this is the heavier of the two: seven nested includes per item,
-    // 87 batches at 434,910 ids. Reading across separate snapshots is safe
-    // here because evidence is write-once — the rows an export reads do
-    // not change under it.
-    const items = await queryInChunks(ids, (batch) =>
-      withTenantContext(ctx.prisma, tenantId, (tx) =>
-        tx.evidenceItem.findMany({
-          where: { id: { in: batch } },
-          include: {
-            blob: true,
-            custodian: { select: { email: true } },
-            emailMetadata: true,
-            participants: true,
-            tagAssignments: { include: { tag: { select: { name: true } } } },
-            childRelationships: { select: { parentId: true, kind: true } },
-            // Ordered so the CSV reads as a timeline rather than in whatever
-            // order the rows happen to come back.
-            auditRecords: { orderBy: [{ occurredAt: 'asc' }, { providerRecordId: 'asc' }] },
-          },
-          orderBy: { id: 'asc' },
-        }),
-      ),
-    );
-    // Batches come back in batch order; the writers rely on a stable ordering.
-    items.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-
-    const result =
-      exportRow.kind === 'csv'
-        ? await runCsvExport(ctx, tenantId, exportId, params, items)
-        : await runNativeExport(ctx, tenantId, exportId, params, items, createArchive);
+    // Streamed, a batch at a time, chunked and with one transaction per batch:
+    // `ids` is a whole case or collection and has no upper bound. Holding all
+    // of them is what made a 434,910-item export a memory problem as well as a
+    // timeout. Reading across separate snapshots is safe because evidence is
+    // write-once — the rows an export reads do not change under it.
+    let result: ExportResult;
+    if (exportRow.kind === 'csv') {
+      result = await runCsvExport(
+        ctx,
+        tenantId,
+        exportId,
+        params,
+        loadItemsInBatches(ctx, tenantId, ids),
+      );
+    } else {
+      // Built before the stream starts, so the archive layout is decided from
+      // the whole selection rather than from whichever batch is in hand.
+      const family = await buildFamilyIndex(ctx, tenantId, ids);
+      result = await runNativeExport(
+        ctx,
+        tenantId,
+        exportId,
+        params,
+        loadItemsInBatches(ctx, tenantId, ids),
+        family,
+        createArchive,
+      );
+    }
 
     await withTenantContext(ctx.prisma, tenantId, async (tx) => {
       await tx.export.update({
@@ -410,7 +506,7 @@ async function runCsvExport(
   tenantId: string,
   exportId: string,
   params: ExportParameters,
-  items: LoadedExportItem[],
+  batches: AsyncIterable<LoadedExportItem[]>,
 ): Promise<ExportResult> {
   const requested = params.csv?.columns ?? [...EXPORT_CSV_COLUMNS];
   const delimiter = params.csv?.delimiter ?? ',';
@@ -421,19 +517,23 @@ async function runCsvExport(
 
   const lines: string[] = [];
   lines.push(columns.map((c) => csvEscape(c, { delimiter })).join(delimiter));
-  for (const item of items) {
-    // An audit batch is a page of up to 1,000 events. One row for the page
-    // would answer none of the questions a reviewer asks of an audit log, so it
-    // expands; everything else stays one row per item.
-    const rows =
-      item.kind === 'audit_batch'
-        ? auditRowsFor(
-            { id: item.id, kind: item.kind, sha256: item.sha256, name: item.name },
-            item.auditRecords ?? [],
-          ).map((auditRow) => ({ ...csvRowFor(item), ...auditRow }))
-        : [csvRowFor(item)];
-    for (const row of rows) {
-      lines.push(columns.map((c) => csvEscape(row[c] ?? '', { delimiter })).join(delimiter));
+  let itemCount = 0;
+  for await (const batch of batches) {
+    for (const item of batch) {
+      itemCount += 1;
+      // An audit batch is a page of up to 1,000 events. One row for the page
+      // would answer none of the questions a reviewer asks of an audit log, so
+      // it expands; everything else stays one row per item.
+      const rows =
+        item.kind === 'audit_batch'
+          ? auditRowsFor(
+              { id: item.id, kind: item.kind, sha256: item.sha256, name: item.name },
+              item.auditRecords ?? [],
+            ).map((auditRow) => ({ ...csvRowFor(item), ...auditRow }))
+          : [csvRowFor(item)];
+      for (const row of rows) {
+        lines.push(columns.map((c) => csvEscape(row[c] ?? '', { delimiter })).join(delimiter));
+      }
     }
   }
   const csv = Buffer.from(lines.join('\r\n') + '\r\n', 'utf8');
@@ -447,7 +547,7 @@ async function runCsvExport(
     'text/csv; charset=utf-8',
   );
   return {
-    itemCount: items.length,
+    itemCount,
     failedCount: 0,
     totalBytes: csv.byteLength,
     outputPrefix: put.objectKey,
@@ -478,7 +578,8 @@ async function runNativeExport(
   tenantId: string,
   exportId: string,
   params: ExportParameters,
-  items: LoadedExportItem[],
+  batches: AsyncIterable<LoadedExportItem[]>,
+  family: FamilyIndex,
   createArchive: (output: Writable) => ArchiveWriterLike,
 ): Promise<ExportResult> {
   const splitBytes = params.archiveSplitMb * 1024 * 1024;
@@ -486,7 +587,8 @@ async function runNativeExport(
   const usedPaths = new Set<string>();
 
   // Family directory naming: children live under their parent's directory.
-  const parentById = new Map(items.map((i) => [i.id, i]));
+  // Both lookups are O(1) against the prebuilt index. They used to scan the
+  // full item list, which is why a large export stopped making progress.
   const archivePathFor = (item: LoadedExportItem): string => {
     const custodianDir = sanitizeFilename(item.custodian?.email ?? 'unassigned');
     const rel = item.childRelationships.find(
@@ -494,16 +596,9 @@ async function runNativeExport(
     );
     let familyDir = '';
     if (rel !== undefined) {
-      const parent = parentById.get(rel.parentId);
-      familyDir = `${sanitizeFilename(parent?.name ?? 'family')}-${rel.parentId.slice(0, 8)}`;
-    } else if (
-      items.some((other) =>
-        other.childRelationships.some(
-          (r) =>
-            (r.kind === 'attachment' || r.kind === 'inline_attachment') && r.parentId === item.id,
-        ),
-      )
-    ) {
+      const parentName = family.nameById.get(rel.parentId) ?? 'family';
+      familyDir = `${sanitizeFilename(parentName)}-${rel.parentId.slice(0, 8)}`;
+    } else if (family.parents.has(item.id)) {
       familyDir = `${sanitizeFilename(item.name)}-${item.id.slice(0, 8)}`;
     }
     const fileName = sanitizeFilename(
@@ -557,65 +652,69 @@ async function runNativeExport(
     writer = createArchive(output);
   };
 
-  for (const item of items) {
-    const size = Number(item.size);
-    const entryPath = archivePathFor(item);
-    const entry: ManifestEntry = {
-      evidenceItemId: item.id,
-      archivePath: entryPath,
-      archivePart: partNumber,
-      sha256: item.sha256,
-      size,
-      custodianEmail: item.custodian?.email ?? '',
-      custodianId: item.custodianId ?? '',
-      collectionId: item.collectionId ?? '',
-      verified: false,
-      error: '',
-    };
+  let seen = 0;
+  for await (const batch of batches) {
+    for (const item of batch) {
+      seen += 1;
+      const size = Number(item.size);
+      const entryPath = archivePathFor(item);
+      const entry: ManifestEntry = {
+        evidenceItemId: item.id,
+        archivePath: entryPath,
+        archivePart: partNumber,
+        sha256: item.sha256,
+        size,
+        custodianEmail: item.custodian?.email ?? '',
+        custodianId: item.custodianId ?? '',
+        collectionId: item.collectionId ?? '',
+        verified: false,
+        error: '',
+      };
 
-    if (item.blob === null || item.sha256 === '') {
-      entry.error = 'no preserved native bytes';
-      failedCount += 1;
-      manifestEntries.push(entry);
-      await upsertExportItem(ctx, tenantId, exportId, item.id, entry, 'failed');
-      continue;
-    }
-
-    if (shouldStartNewArchive(bytesInPart, size, splitBytes)) {
-      await rotatePart();
-      entry.archivePart = partNumber;
-    }
-
-    try {
-      const source = await ctx.store.getStream(
-        item.blob.storageClass === 'quarantine' ? 'quarantine' : 'evidence',
-        item.blob.objectKey,
-      );
-      const hasher = new Sha256Stream();
-      const pass = new PassThrough();
-      writer.append(entryPath, pass);
-      await pipeline(source, hasher, pass);
-      const actual = hasher.digestHex();
-      if (actual !== item.sha256) {
-        // The bytes are already in the archive; record the mismatch honestly
-        // and continue — the manifest and ExportItem mark it failed.
-        entry.error = `sha256 mismatch: expected ${item.sha256}, streamed ${actual}`;
+      if (item.blob === null || item.sha256 === '') {
+        entry.error = 'no preserved native bytes';
         failedCount += 1;
         manifestEntries.push(entry);
         await upsertExportItem(ctx, tenantId, exportId, item.id, entry, 'failed');
         continue;
       }
-      entry.verified = true;
-      bytesInPart += size;
-      totalBytes += size;
-      written += 1;
-      manifestEntries.push(entry);
-      await upsertExportItem(ctx, tenantId, exportId, item.id, entry, 'verified');
-    } catch (err) {
-      entry.error = sanitizeError(err);
-      failedCount += 1;
-      manifestEntries.push(entry);
-      await upsertExportItem(ctx, tenantId, exportId, item.id, entry, 'failed');
+
+      if (shouldStartNewArchive(bytesInPart, size, splitBytes)) {
+        await rotatePart();
+        entry.archivePart = partNumber;
+      }
+
+      try {
+        const source = await ctx.store.getStream(
+          item.blob.storageClass === 'quarantine' ? 'quarantine' : 'evidence',
+          item.blob.objectKey,
+        );
+        const hasher = new Sha256Stream();
+        const pass = new PassThrough();
+        writer.append(entryPath, pass);
+        await pipeline(source, hasher, pass);
+        const actual = hasher.digestHex();
+        if (actual !== item.sha256) {
+          // The bytes are already in the archive; record the mismatch honestly
+          // and continue — the manifest and ExportItem mark it failed.
+          entry.error = `sha256 mismatch: expected ${item.sha256}, streamed ${actual}`;
+          failedCount += 1;
+          manifestEntries.push(entry);
+          await upsertExportItem(ctx, tenantId, exportId, item.id, entry, 'failed');
+          continue;
+        }
+        entry.verified = true;
+        bytesInPart += size;
+        totalBytes += size;
+        written += 1;
+        manifestEntries.push(entry);
+        await upsertExportItem(ctx, tenantId, exportId, item.id, entry, 'verified');
+      } catch (err) {
+        entry.error = sanitizeError(err);
+        failedCount += 1;
+        manifestEntries.push(entry);
+        await upsertExportItem(ctx, tenantId, exportId, item.id, entry, 'failed');
+      }
     }
   }
 
@@ -624,7 +723,7 @@ async function runNativeExport(
     schema: 'cdfir.export.manifest.v1',
     exportId,
     generatedAt: new Date().toISOString(),
-    itemCount: items.length,
+    itemCount: seen,
     verifiedCount: written,
     failedCount,
     items: manifestEntries,

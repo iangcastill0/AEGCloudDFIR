@@ -3,8 +3,10 @@ import { Readable } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import { EVIDENCE, EXPORT_ID, TENANT, fakeCtx, type FakeCtx } from '../testing/fakes.js';
 import {
+  buildFamilyIndex,
   expandFamilies,
   exportStatusDetail,
+  loadItemsInBatches,
   processExportRun,
   shouldStartNewArchive,
   type ArchiveWriterLike,
@@ -229,5 +231,215 @@ describe('expandFamilies opens a transaction per batch', () => {
   it('returns the input unchanged when there is nothing to expand', async () => {
     const ctx = fakeCtx();
     await expect(expandFamilies(ctx, TENANT, [])).resolves.toEqual([]);
+  });
+});
+
+const uuid = (n: number): string => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+
+/**
+ * Arm a native export over `count` generated items.
+ *
+ * Every item has `blob: null`, so each one is recorded as "no preserved native
+ * bytes" and skipped before any streaming or hashing. That is deliberate: the
+ * path-naming work under test happens BEFORE the blob check, so this exercises
+ * it for every item without the cost of faking object storage.
+ *
+ * `childRelationships` is a counting getter. How many times the export reads
+ * it is the whole point — see the test below.
+ */
+function armGenerated(
+  f: FakeCtx,
+  count: number,
+  opts: { onRelRead?: () => void; onQuery?: () => void; relsFor?: (id: string) => unknown[] } = {},
+): string[] {
+  const ids = Array.from({ length: count }, (_, i) => uuid(i));
+  f.tx.export.findUnique.mockResolvedValue({
+    id: EXPORT_ID,
+    kind: 'native',
+    status: 'queued',
+    parameters: {
+      selection: { kind: 'items', evidenceItemIds: ids },
+      includeFamilies: false,
+      archiveSplitMb: 2048,
+    },
+  });
+  f.tx.evidenceRelationship.findMany.mockResolvedValue([]);
+  f.tx.evidenceItem.findMany.mockImplementation((args: Record<string, unknown>) => {
+    // buildFamilyIndex asks for { id, name }; the item stream asks with
+    // `include`. Only the stream should produce rows here.
+    if (args['select'] !== undefined) return Promise.resolve([]);
+    opts.onQuery?.();
+    const where = args['where'] as { id: { in: string[] } };
+    return Promise.resolve(
+      where.id.in.map((id) => {
+        const row = { ...evidenceRow(id, GOOD_SHA), blob: null };
+        Object.defineProperty(row, 'childRelationships', {
+          enumerable: true,
+          get: () => {
+            opts.onRelRead?.();
+            return opts.relsFor?.(id) ?? [];
+          },
+        });
+        return row;
+      }),
+    );
+  });
+  return ids;
+}
+
+function silentWriter(): ArchiveWriterLike {
+  return { append: vi.fn(), finalize: vi.fn().mockResolvedValue({ entryCount: 0 }) };
+}
+
+describe('native export does not scan the item list per item', () => {
+  /**
+   * The bug this guards against. `archivePathFor` asked "does anything here
+   * call me its parent?" by scanning the WHOLE loaded list, once per item.
+   * That is quadratic. At 434,910 items it is roughly 1.9e11 comparisons, so
+   * the export stops making progress rather than failing outright — and it
+   * only appeared at that size because the previous largest export was 43,379
+   * items, a hundred times smaller and ten thousand times cheaper.
+   *
+   * Counting reads of `childRelationships` is what tells the two shapes apart.
+   * Linear is one read per item (its own `.find()`); the old shape is one read
+   * per item PER ITEM. A correctness assertion cannot see the difference, and
+   * a timing assertion would be flaky, so this counts.
+   */
+  it('reads each item\u2019s relationships a constant number of times, not once per item', async () => {
+    const f = fakeCtx();
+    const count = 500;
+    let relReads = 0;
+    armGenerated(f, count, { onRelRead: () => (relReads += 1) });
+
+    await processExportRun(f.ctx, payload, { createArchive: () => silentWriter() });
+
+    // Lower bound first, or this passes for free if naming stops running at
+    // all: every item must have its own relationships read.
+    expect(relReads).toBeGreaterThanOrEqual(count);
+    // Linear: one read per item. The old shape would be ~250,000 here.
+    expect(relReads).toBeLessThanOrEqual(count * 2);
+    expect(f.tx.exportItem.upsert).toHaveBeenCalledTimes(count);
+  });
+});
+
+describe('native export streams items instead of holding them all', () => {
+  /**
+   * Every item used to be materialised before a byte was written — 434,910 of
+   * them, each with seven nested includes, plus a Map holding every one again.
+   *
+   * Proving it streams means proving work happens BETWEEN batch queries. If
+   * the loader still gathered everything first, every query would land before
+   * the first item was processed.
+   */
+  it('processes items from the first batch before it fetches the last', async () => {
+    const f = fakeCtx();
+    const events: string[] = [];
+    // QUERY_ID_CHUNK is 5,000, so this is two batches.
+    const count = 6_000;
+    armGenerated(f, count, { onQuery: () => events.push('query') });
+    f.tx.exportItem.upsert.mockImplementation(() => {
+      events.push('item');
+      return Promise.resolve({});
+    });
+
+    await processExportRun(f.ctx, payload, { createArchive: () => silentWriter() });
+
+    expect(events.filter((e) => e === 'query')).toHaveLength(2);
+    // Not vacuous: items really were processed, and the first of them landed
+    // before the second batch was ever fetched.
+    expect(events.filter((e) => e === 'item')).toHaveLength(count);
+    expect(events.indexOf('item')).toBeGreaterThanOrEqual(0);
+    expect(events.indexOf('item')).toBeLessThan(events.lastIndexOf('query'));
+  });
+
+  it('asks for ids in sorted order, so concatenated batches are globally ordered', async () => {
+    const f = fakeCtx();
+    const seen: string[][] = [];
+    f.tx.evidenceItem.findMany.mockImplementation((args: Record<string, unknown>) => {
+      seen.push((args['where'] as { id: { in: string[] } }).id.in);
+      return Promise.resolve([]);
+    });
+    const shuffled = [uuid(9), uuid(3), uuid(7), uuid(1)];
+
+    for await (const _ of loadItemsInBatches(f.ctx, TENANT, shuffled)) {
+      // draining the generator is the point
+    }
+
+    expect(seen[0]).toEqual([uuid(1), uuid(3), uuid(7), uuid(9)]);
+  });
+});
+
+describe('buildFamilyIndex', () => {
+  it('collects attachment parents and names only those inside the export', async () => {
+    const f = fakeCtx();
+    const parent = uuid(1);
+    const child = uuid(2);
+    const outsider = uuid(99);
+    f.tx.evidenceRelationship.findMany.mockResolvedValue([
+      { parentId: parent },
+      { parentId: outsider },
+    ]);
+    f.tx.evidenceItem.findMany.mockResolvedValue([{ id: parent, name: 'Message.eml' }]);
+
+    const index = await buildFamilyIndex(f.ctx, TENANT, [parent, child]);
+
+    expect(index.parents.has(parent)).toBe(true);
+    expect(index.nameById.get(parent)).toBe('Message.eml');
+    // A parent outside the selection was never in the old map either, so it is
+    // not queried and keeps the 'family' fallback.
+    const asked = f.tx.evidenceItem.findMany.mock.calls[0]?.[0] as {
+      where: { id: { in: string[] } };
+    };
+    expect(asked.where.id.in).toEqual([parent]);
+  });
+
+  it('does no work at all for an empty selection', async () => {
+    const f = fakeCtx();
+    const index = await buildFamilyIndex(f.ctx, TENANT, []);
+    expect(index.parents.size).toBe(0);
+    expect(f.tx.evidenceRelationship.findMany).not.toHaveBeenCalled();
+  });
+
+  it('puts a child under its parent\u2019s directory and gives the parent one too', async () => {
+    const f = fakeCtx();
+    const parent = uuid(1);
+    const child = uuid(2);
+    const append = vi.fn();
+    f.tx.export.findUnique.mockResolvedValue({
+      id: EXPORT_ID,
+      kind: 'native',
+      status: 'queued',
+      parameters: {
+        selection: { kind: 'items', evidenceItemIds: [parent, child] },
+        includeFamilies: false,
+        archiveSplitMb: 2048,
+      },
+    });
+    f.tx.evidenceRelationship.findMany.mockResolvedValue([{ parentId: parent }]);
+    f.tx.evidenceItem.findMany.mockImplementation((args: Record<string, unknown>) => {
+      if (args['select'] !== undefined) {
+        return Promise.resolve([{ id: parent, name: 'Msg.eml' }]);
+      }
+      return Promise.resolve([
+        { ...evidenceRow(parent, GOOD_SHA), name: 'Msg.eml', blob: null },
+        {
+          ...evidenceRow(child, GOOD_SHA),
+          name: 'att.pdf',
+          blob: null,
+          childRelationships: [{ parentId: parent, kind: 'attachment' }],
+        },
+      ]);
+    });
+
+    await processExportRun(f.ctx, payload, {
+      createArchive: () => ({ append, finalize: vi.fn().mockResolvedValue({ entryCount: 0 }) }),
+    });
+
+    const paths = f.tx.exportItem.upsert.mock.calls.map(
+      (c) => (c[0] as { create: { archivePath: string } }).create.archivePath,
+    );
+    const dir = `Msg.eml-${parent.slice(0, 8)}`;
+    expect(paths).toContain(`custodian/user@example.com/${dir}/att.pdf`);
+    expect(paths).toContain(`custodian/user@example.com/${dir}/Msg.eml`);
   });
 });
