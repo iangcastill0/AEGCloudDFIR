@@ -3,6 +3,7 @@ import { Readable } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import { EVIDENCE, EXPORT_ID, TENANT, fakeCtx, type FakeCtx } from '../testing/fakes.js';
 import {
+  expandFamilies,
   exportStatusDetail,
   processExportRun,
   shouldStartNewArchive,
@@ -184,5 +185,49 @@ describe('exportStatusDetail', () => {
   it('prefers the empty message when there is nothing AND nothing failed', () => {
     // failedCount 0 with itemCount 0 is the exact shape the real bug had.
     expect(exportStatusDetail(0, 0)).not.toBe('');
+  });
+});
+
+describe('expandFamilies opens a transaction per batch', () => {
+  /**
+   * The bug this guards against. Chunking alone fixed the bind-variable
+   * ceiling and left the transaction timeout in place: the whole chunked loop
+   * ran inside ONE interactive transaction, capped at 30 seconds. A 434,910-item
+   * export is 174 round trips, giving each 172 ms, and it failed at 30,244 ms
+   * with `Transaction already closed` before writing a byte.
+   *
+   * Counting $transaction calls is what tells the two apart — one call means the
+   * old shape is back, however well the query itself is chunked.
+   */
+  it('uses one short transaction per batch, not one around the whole loop', async () => {
+    const ctx = fakeCtx();
+    let transactions = 0;
+    const tx = {
+      evidenceRelationship: { findMany: vi.fn().mockResolvedValue([]) },
+      $executeRaw: vi.fn().mockResolvedValue(0),
+    };
+    (ctx as { prisma: unknown }).prisma = {
+      $transaction: async (fn: (t: unknown) => Promise<unknown>) => {
+        transactions += 1;
+        return fn(tx);
+      },
+    };
+
+    // 3 batches of relationships (chunk is QUERY_ID_CHUNK / 2 = 2,500).
+    const ids = Array.from(
+      { length: 6_000 },
+      (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`,
+    );
+    await expandFamilies(ctx as unknown as FakeCtx, TENANT, ids);
+
+    // 3 for the relationship batches; the sibling pass adds none because the
+    // fake returns no relationships, so there are no parents to follow.
+    expect(transactions).toBeGreaterThan(1);
+    expect(tx.evidenceRelationship.findMany).toHaveBeenCalledTimes(3);
+  });
+
+  it('returns the input unchanged when there is nothing to expand', async () => {
+    const ctx = fakeCtx();
+    await expect(expandFamilies(ctx, TENANT, [])).resolves.toEqual([]);
   });
 });

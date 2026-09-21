@@ -8,7 +8,7 @@
 set -u
 
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CACHE_DIR="${CDFIR_LIVE_STATE_DIR:-$HOME/.claude/projects/-Users-ic-Documents-CloudDiscovery}"
+CACHE_DIR="${CDFIR_LIVE_STATE_DIR:-$HOME/.claude/projects/-Users-ic-Desktop-AEGCloudDFIR}"
 CACHE="$CACHE_DIR/live-state.cache"
 TTL="${CDFIR_LIVE_STATE_TTL:-90}"   # seconds before the snapshot counts as stale
 
