@@ -424,3 +424,247 @@ mark {
   gap: var(--space-3);
   font-variant-numeric: tabular-nums;
 }
+
+/* Throughput charts. Hand-rolled SVG plus one flexbox bar: apps/web has six
+   runtime dependencies and three small pictures are not worth a seventh.
+   Every colour below is also carried by a word or a line style in the markup,
+   because colour on its own is not a signal. */
+.cdfir-chart {
+  margin: 0 0 var(--space-5);
+}
+
+.cdfir-chart__caption {
+  font-weight: 600;
+  margin: 0 0 var(--space-1);
+}
+
+/* Headline figures. These are the answer; the chart only adds the shape, so
+   they must read correctly with stylesheets off. */
+.cdfir-chart__headline {
+  margin: 0 0 var(--space-2);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text);
+}
+
+.cdfir-chart__svg {
+  display: block;
+  width: 100%;
+  height: 160px;
+  background: var(--color-bg-subtle);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.cdfir-chart__svg--area {
+  height: 120px;
+}
+
+/* This run's own p10-p90. Pale on purpose: it is context behind the data, not
+   data. */
+.cdfir-chart__band {
+  fill: var(--color-info-bg);
+}
+
+/* A minute that acquired nothing. Drawn, because closing the gap up would make
+   a stall look like steady work. */
+.cdfir-chart__idle {
+  fill: var(--color-border);
+  opacity: 0.45;
+}
+
+.cdfir-chart__line {
+  fill: none;
+  stroke: var(--color-accent);
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+
+/* Bytes per minute. Dashed, so the two series are distinguishable without
+   colour vision. */
+.cdfir-chart__line--bytes {
+  stroke: var(--color-text-muted);
+  stroke-dasharray: 5 3;
+}
+
+.cdfir-chart__area {
+  fill: var(--color-info-bg);
+  stroke: none;
+}
+
+.cdfir-chart__legend {
+  list-style: none;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+.cdfir-chart__legend > li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.cdfir-chart__swatch {
+  display: inline-block;
+  width: 1.25rem;
+  height: 0;
+  flex: none;
+  border-top: 2px solid var(--color-accent);
+}
+
+.cdfir-chart__swatch--bytes {
+  border-top-style: dashed;
+  border-top-color: var(--color-text-muted);
+}
+
+.cdfir-chart__swatch--band {
+  height: 0.75rem;
+  border: 1px solid var(--color-info-border);
+  background: var(--color-info-bg);
+}
+
+.cdfir-chart__swatch--idle {
+  height: 0.75rem;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-border);
+}
+
+/* Stacked item-state bar. Flexbox, not SVG: the browser then handles text zoom,
+   wrapping and forced-colours mode, and the counts are real text. */
+.cdfir-phasebar {
+  margin: 0 0 var(--space-5);
+}
+
+.cdfir-phasebar__track {
+  display: flex;
+  width: 100%;
+  min-height: 1.75rem;
+  overflow: hidden;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+}
+
+.cdfir-phasebar__segment {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  flex-grow: 0;
+  flex-shrink: 1;
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.cdfir-phasebar__segment-count {
+  padding-inline: 2px;
+}
+
+.cdfir-phasebar__segment--discovered {
+  background: var(--color-bg-subtle);
+  color: var(--color-text);
+}
+.cdfir-phasebar__segment--fetching {
+  background: var(--color-info-bg);
+  color: var(--color-info-text);
+}
+.cdfir-phasebar__segment--preserved {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
+}
+.cdfir-phasebar__segment--done {
+  background: var(--color-success-bg);
+  color: var(--color-success-text);
+}
+.cdfir-phasebar__segment--failed {
+  background: var(--color-danger);
+  color: var(--color-on-danger);
+}
+.cdfir-phasebar__segment--skipped {
+  background: var(--color-border);
+  color: var(--color-text);
+}
+
+.cdfir-phasebar__key {
+  list-style: none;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+.cdfir-phasebar__key > li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.cdfir-phasebar__swatch {
+  display: inline-block;
+  width: 0.75rem;
+  height: 0.75rem;
+  flex: none;
+  border: 1px solid var(--color-border-strong);
+}
+
+.cdfir-phasebar__swatch--discovered {
+  background: var(--color-bg-subtle);
+}
+.cdfir-phasebar__swatch--fetching {
+  background: var(--color-info-bg);
+}
+.cdfir-phasebar__swatch--preserved {
+  background: var(--color-warning-bg);
+}
+.cdfir-phasebar__swatch--done {
+  background: var(--color-success-bg);
+}
+.cdfir-phasebar__swatch--failed {
+  background: var(--color-danger);
+}
+.cdfir-phasebar__swatch--skipped {
+  background: var(--color-border);
+}
+
+/* State chip. The word and the icon carry the meaning; the colour only
+   reinforces it. */
+.cdfir-throughput-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  border: 1px solid;
+  border-radius: var(--radius-full);
+  padding: 2px var(--space-3);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.cdfir-throughput-state--healthy {
+  background: var(--color-success-bg);
+  color: var(--color-success-text);
+  border-color: var(--color-success-border);
+}
+.cdfir-throughput-state--attention {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
+  border-color: var(--color-warning-border);
+}
+.cdfir-throughput-state--problem {
+  background: var(--color-danger);
+  color: var(--color-on-danger);
+  border-color: var(--color-danger);
+}
+
+.cdfir-throughput-phases {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+  margin-block: var(--space-3);
+}

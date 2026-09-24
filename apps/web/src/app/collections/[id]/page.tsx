@@ -1,8 +1,20 @@
 'use client';
-import { use, useState } from 'react';
+import { use, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { Button, Notice, ProgressBar, StatusLive, Table } from '@aeg-clouddfir/ui';
-import type { CollectionStatusResponse } from '@aeg-clouddfir/contracts';
+import {
+  AreaChart,
+  Button,
+  Notice,
+  PhaseBar,
+  ProgressBar,
+  Sparkline,
+  StatusLive,
+  Table,
+} from '@aeg-clouddfir/ui';
+import type {
+  CollectionStatusResponse,
+  CollectionThroughputResponse,
+} from '@aeg-clouddfir/contracts';
 import { ConfirmDialog, QueryBoundary, StatusPill, TruthNotice } from '@/components/shared';
 import {
   useCollectionManifest,
@@ -10,9 +22,16 @@ import {
   useCollectionAction,
   useCollectionExceptions,
   useCollectionStatus,
+  useCollectionThroughput,
 } from '@/lib/hooks';
 import { errorMessage } from '@/lib/errors';
-import { formatBytes, formatDateTime, humanizeToken } from '@/lib/format';
+import {
+  formatBytes,
+  formatDateTime,
+  formatDuration,
+  formatRate,
+  humanizeToken,
+} from '@/lib/format';
 
 /** Statuses after which the case holds everything the collection got. */
 const FINISHED_STATUSES = new Set(['completed', 'failed', 'cancelled']);
@@ -160,10 +179,13 @@ export default function CollectionDetailPage({ params }: { params: Promise<{ id:
 
               <StatusLive politeness="polite">{statusText}</StatusLive>
 
+              <h2>Throughput</h2>
+              <ThroughputSection collectionId={data.id} />
+
               <h2>Per-custodian progress</h2>
               <ProgressTable data={data} />
 
-              <h2>Exceptions ledger</h2>
+              <h2 id="exceptions-ledger">Exceptions ledger</h2>
               <TruthNotice kind="exceptions" variant="warning" />
               <ExceptionsLedger collectionId={data.id} exceptionCounts={data.exceptionCounts} />
 
@@ -222,6 +244,214 @@ function CompletenessBanner({ data }: { data: CollectionStatusResponse }) {
       {data.completenessNarrative ??
         'See the exception ledger and manifest for the full account of what was and was not acquired.'}
     </Notice>
+  );
+}
+
+/** States whose transition is worth interrupting a screen-reader user for. */
+const ANNOUNCED_STATES = new Set(['stalled', 'rate_limited', 'processing', 'finished']);
+
+/**
+ * What a state means, in a sentence. The word and the icon carry the meaning;
+ * the colour only reinforces it, because colour is never the only signal here.
+ */
+const STATE_ICON: Record<string, string> = {
+  measuring: '\u25cc',
+  discovering: '\u25cc',
+  fetching: '\u25b6',
+  processing: '\u27f3',
+  slow: '\u25bc',
+  rate_limited: '\u23f8',
+  stalled: '\u26a0',
+  finished: '\u2713',
+};
+
+const STATE_EXPLANATION: Record<string, string> = {
+  measuring: 'Too little has happened yet to state a pace. Counts are exact.',
+  discovering:
+    'Still listing what exists at the provider, so the total can still grow. No percentage is shown, because a fraction of an unknown total would be wrong.',
+  fetching: 'Acquiring from the provider at a normal pace for this run.',
+  processing:
+    'Every byte has arrived. The remaining work is reading the items \u2014 parse, text extraction, OCR and indexing. On the largest collection so far this phase was 27 of 93 hours.',
+  slow: 'Still moving, but slower than this run\u2019s own typical minute.',
+  rate_limited: 'The provider asked us to wait. Nothing is wrong; acquisition resumes on its own.',
+  stalled:
+    'Nothing has been acquired for 15 minutes while work is still in flight. The worker\u2019s recovery sweep re-drives items at this same threshold.',
+  finished: 'This collection has stopped. See completeness and the exception ledger.',
+};
+
+/**
+ * Measured throughput, in two phases.
+ *
+ * Deliberately shows no finish time, no countdown and no "about N hours left".
+ * Replaying the biggest real run, a 5-minute window predicted the remainder
+ * between -16% and +33% of the truth and a 30-minute window between -25% and
+ * +68%; a low/high band still missed at 4 of 9 checkpoints. So: elapsed time,
+ * measured pace, counts and size.
+ *
+ * The live region announces PHASE changes and a stall, and nothing else. Pace
+ * numbers refresh every 5 seconds, and a polite live region firing that often
+ * makes the whole page unusable with a screen reader.
+ */
+function ThroughputSection({ collectionId }: { collectionId: string }) {
+  // Named `range`, not `window`: shadowing the global would be a trap for the
+  // next person reading this file.
+  const [range, setRange] = useState<'live' | 'history'>('live');
+  const throughput = useCollectionThroughput(collectionId, range);
+  const [announcement, setAnnouncement] = useState('');
+  const lastState = useRef<string | null>(null);
+
+  const state = throughput.data?.state;
+  const stateLabel = throughput.data?.stateLabel;
+  useEffect(() => {
+    if (state === undefined || stateLabel === undefined) return;
+    if (lastState.current === state) return;
+    const previous = lastState.current;
+    lastState.current = state;
+    // Only the transitions that change what someone should do. Never the pace.
+    if (previous !== null && ANNOUNCED_STATES.has(state)) {
+      setAnnouncement(`${stateLabel}. ${STATE_EXPLANATION[state] ?? ''}`);
+    }
+  }, [state, stateLabel]);
+
+  return (
+    <>
+      <div className="button-row" role="group" aria-label="Throughput window">
+        <button
+          type="button"
+          className="cdfir-button cdfir-button--secondary"
+          aria-pressed={range === 'live'}
+          onClick={() => setRange('live')}
+        >
+          Last 60 minutes
+        </button>
+        <button
+          type="button"
+          className="cdfir-button cdfir-button--secondary"
+          aria-pressed={range === 'history'}
+          onClick={() => setRange('history')}
+        >
+          Whole run
+        </button>
+      </div>
+      {/* Phase and stall transitions only. Pace must never reach this region. */}
+      <StatusLive politeness="polite">{announcement}</StatusLive>
+      <QueryBoundary
+        isPending={throughput.isPending}
+        error={throughput.error}
+        data={throughput.data}
+        onRetry={() => void throughput.refetch()}
+      >
+        {(t) => (
+          <>
+            <p>
+              <span
+                className={`cdfir-throughput-state cdfir-throughput-state--${t.health}`}
+                // The icon is decorative; the word beside it is the signal.
+                aria-label={`State: ${t.stateLabel}`}
+              >
+                <span aria-hidden="true">{STATE_ICON[t.state] ?? '\u25cf'}</span>
+                {t.stateLabel}
+              </span>{' '}
+              {STATE_EXPLANATION[t.state] ?? ''}
+            </p>
+            {t.exceptionCount > 0 ? (
+              <Notice variant="warning" title="This collection has exceptions">
+                {t.exceptionCount} item(s) could not be acquired or read. A collection with
+                exceptions is never reported as clean &mdash; see the{' '}
+                <a href="#exceptions-ledger">exception ledger</a> below for what is missing.
+              </Notice>
+            ) : null}
+
+            {/* Headline figures as text, above every chart. No estimate anywhere. */}
+            <div className="cdfir-throughput-phases">
+              <PhaseFigures
+                title="Acquisition"
+                detail="Bytes arriving from the provider."
+                phase={t.acquisition}
+              />
+              <PhaseFigures
+                title="Processing tail"
+                detail="Parse, text extraction, OCR and indexing, after the last byte arrived."
+                phase={t.processing}
+              />
+            </div>
+
+            <PhaseBar
+              counts={t.itemStates}
+              caption={`Where all ${t.totals.items} items are right now`}
+            />
+
+            <Sparkline
+              windowName={t.windowName}
+              bucketMinutes={t.bucketMinutes}
+              buckets={t.buckets}
+              pace={t.acquisition.pace}
+              totals={{
+                items: t.totals.items,
+                bytes: t.totals.bytes,
+                idleBuckets: t.totals.idleBuckets,
+              }}
+            />
+
+            <AreaChart windowName={t.windowName} buckets={t.buckets} />
+
+            <p className="cdfir-field__hint">
+              Provider wait so far: {formatDuration(t.rateLimitWaitMs)}. Measured from{' '}
+              {formatDateTime(t.totals.firstAcquiredAt)} to{' '}
+              {formatDateTime(t.totals.lastAcquiredAt)}. No finish time is shown: on the largest
+              collection so far, predicting one from a 5-minute window was wrong by -16% to +33%.
+            </p>
+          </>
+        )}
+      </QueryBoundary>
+    </>
+  );
+}
+
+/** One phase's figures, as plain text. Readable with stylesheets switched off. */
+function PhaseFigures({
+  title,
+  detail,
+  phase,
+}: {
+  title: string;
+  detail: string;
+  phase: CollectionThroughputResponse['acquisition'];
+}) {
+  return (
+    <div>
+      <h3>{title}</h3>
+      <p className="cdfir-field__hint">{detail}</p>
+      <ul className="cdfir-count-list">
+        <li>
+          <span>Items settled</span>
+          <span>
+            {phase.done}
+            {phase.total === null ? ' of a total still being discovered' : ` of ${phase.total}`}
+          </span>
+        </li>
+        <li>
+          <span>Share done</span>
+          {/* No percentage while the denominator moves: this run's own total went
+              from 185,379 provider items to 434,910 evidence items. */}
+          <span>
+            {phase.percent === null ? 'not yet knowable' : `${phase.percent.toFixed(1)}%`}
+          </span>
+        </li>
+        <li>
+          <span>Still working</span>
+          <span>{phase.inFlight}</span>
+        </li>
+        <li>
+          <span>Elapsed</span>
+          <span>{formatDuration(phase.elapsedMs)}</span>
+        </li>
+        <li>
+          <span>Measured pace</span>
+          <span>{formatRate(phase.pace.itemsPerMinute, 'items')}</span>
+        </li>
+      </ul>
+    </div>
   );
 }
 
