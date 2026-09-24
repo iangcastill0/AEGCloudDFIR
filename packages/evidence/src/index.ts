@@ -1,8 +1,11 @@
-export { IntegrityError, KeyValidationError } from './errors.js';
+export { IntegrityError, KeyValidationError, isObjectNotFoundError } from './errors.js';
 export { Sha256Stream, hashBuffer, hashStreamToNull } from './hash.js';
 export {
+  archiveExtensionFor,
+  archivePartFilename,
   assertKeyInTenant,
   derivativeKey,
+  derivativeTypeFor,
   exportKey,
   keyClass,
   manifestKey,

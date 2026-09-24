@@ -18,7 +18,7 @@ import {
 } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { IntegrityError, KeyValidationError } from './errors.js';
+import { IntegrityError, KeyValidationError, isObjectNotFoundError } from './errors.js';
 import { Sha256Stream, hashBuffer, hashStreamToNull } from './hash.js';
 import {
   assertKeyInTenant,
@@ -87,18 +87,23 @@ export interface BucketProtection {
 
 const SHA256_HEX_RE = /^[0-9a-f]{64}$/;
 
+/**
+ * "Not there" for objects AND for the two bucket-level configurations this
+ * store probes. Object absence is the exported `isObjectNotFoundError`, because
+ * callers outside this file need exactly that and must not accidentally treat a
+ * bucket with no Object Lock rule as a deleted object.
+ */
 function isNotFoundError(err: unknown): boolean {
-  if (typeof err !== 'object' || err === null) return false;
-  const e = err as { name?: unknown; $metadata?: { httpStatusCode?: unknown } };
-  if (
-    e.name === 'NotFound' ||
-    e.name === 'NoSuchKey' ||
-    e.name === 'ObjectLockConfigurationNotFoundError' ||
-    e.name === 'NoSuchObjectLockConfiguration'
-  ) {
-    return true;
+  if (typeof err === 'object' && err !== null) {
+    const name = (err as { name?: unknown }).name;
+    if (
+      name === 'ObjectLockConfigurationNotFoundError' ||
+      name === 'NoSuchObjectLockConfiguration'
+    ) {
+      return true;
+    }
   }
-  return e.$metadata?.httpStatusCode === 404;
+  return isObjectNotFoundError(err);
 }
 
 /**
@@ -333,6 +338,19 @@ export class EvidenceObjectStore {
       throw new IntegrityError('GetObject returned no readable body', { key });
     }
     return body;
+  }
+
+  /**
+   * HEAD an object: its size when it is there, `null` when the key is absent.
+   *
+   * Absence is a normal answer here, not an error, which is the whole point —
+   * a sweep over half a million keys needs "gone" to be a value it can count,
+   * not an exception it has to parse. Anything else (AccessDenied, a timeout,
+   * a 500) still throws, so a broken credential can never be miscounted as
+   * missing evidence.
+   */
+  async headObject(bucketClass: BucketClass, key: string): Promise<{ size: number } | null> {
+    return this.headOrNull(this.bucketFor(bucketClass), key);
   }
 
   /**

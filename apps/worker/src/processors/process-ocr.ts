@@ -7,6 +7,7 @@ import { sanitizeError, type WorkerContext } from '../context.js';
 import { incrementProgress, recordException } from '../progress.js';
 import { QUEUES, dedupKeys } from '../queues.js';
 import { readAllCapped } from '../streams.js';
+import { isObjectNotFoundError, recordMissingObject } from './missing-object.js';
 import { ocrDecision } from './ocr-policy.js';
 import type { EvidenceStagePayload } from './payloads.js';
 
@@ -252,11 +253,29 @@ export async function processOcr(
     return;
   }
 
-  const stream = await ctx.store.getStream(
-    item.blob.storageClass === 'quarantine' ? 'quarantine' : 'evidence',
-    item.blob.objectKey,
-  );
-  const input = await readAllCapped(stream, MAX_INPUT_BYTES);
+  const bucket =
+    item.blob.storageClass === 'quarantine' ? ('quarantine' as const) : ('evidence' as const);
+
+  let input: Buffer;
+  try {
+    const stream = await ctx.store.getStream(bucket, item.blob.objectKey);
+    input = await readAllCapped(stream, MAX_INPUT_BYTES);
+  } catch (err) {
+    // This read was not guarded at all, so a missing object threw out of the
+    // processor and became a retried job failure — the same absent bytes
+    // reported as an OCR problem. Name it and stop; everything else still
+    // throws, because a timeout really is worth retrying.
+    if (!isObjectNotFoundError(err)) throw err;
+    await recordMissingObject(ctx, {
+      tenantId,
+      item,
+      version,
+      stage: 'ocr',
+      bucket,
+      objectKey: item.blob.objectKey,
+    });
+    return;
+  }
 
   let pages: OcrPageResult[];
   /** Set when the document had more pages than the cap allowed us to read. */

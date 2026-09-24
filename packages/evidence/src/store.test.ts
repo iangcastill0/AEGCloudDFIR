@@ -276,6 +276,44 @@ describe('getStream and verifyObjectHash', () => {
   });
 });
 
+describe('headObject', () => {
+  const key = originalKey(TENANT, ABC_SHA);
+
+  it('returns the size when the object is there', async () => {
+    s3Mock.on(HeadObjectCommand, { Bucket: EVIDENCE_BUCKET, Key: key }).resolves({
+      ContentLength: 3,
+    });
+    const store = makeStore();
+    expect(await store.headObject('evidence', key)).toEqual({ size: 3 });
+  });
+
+  it('returns null — not a throw — when the key is absent', async () => {
+    // The sweep counts absences over half a million keys. "Gone" has to be a
+    // value it can add up, not an exception it has to interpret.
+    s3Mock.on(HeadObjectCommand).rejects(notFound('NotFound'));
+    const store = makeStore();
+    expect(await store.headObject('evidence', key)).toBeNull();
+  });
+
+  it('still throws on AccessDenied, so a lost grant cannot be counted as lost evidence', async () => {
+    const denied = new Error('Access Denied') as Error & { $metadata: { httpStatusCode: number } };
+    denied.name = 'AccessDenied';
+    denied.$metadata = { httpStatusCode: 403 };
+    s3Mock.on(HeadObjectCommand).rejects(denied);
+    const store = makeStore();
+    await expect(store.headObject('evidence', key)).rejects.toThrow('Access Denied');
+  });
+
+  it('heads the quarantine bucket for quarantine class', async () => {
+    s3Mock.on(HeadObjectCommand, { Bucket: QUARANTINE_BUCKET }).resolves({ ContentLength: 9 });
+    s3Mock.on(HeadObjectCommand, { Bucket: EVIDENCE_BUCKET }).rejects(notFound('NotFound'));
+    const store = makeStore();
+    expect(await store.headObject('quarantine', quarantineKey(TENANT, ABC_SHA))).toEqual({
+      size: 9,
+    });
+  });
+});
+
 describe('presignGet', () => {
   const validKey = originalKey(TENANT, ABC_SHA);
 

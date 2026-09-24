@@ -145,6 +145,45 @@ describe('processPreview', () => {
     expect(arg.data.message).toContain('Preview generation failed');
   });
 
+  it('a missing evidence object is not filed as a preview problem', async () => {
+    // This stage wrote "The stored file could not be read" under kind 'other'
+    // for a slow network AND for evidence that no longer exists. One of those
+    // is a preview inconvenience; the other means the bytes are gone.
+    const f = fakeCtx();
+    arm(f);
+    const gone = new Error('The specified key does not exist.') as Error & {
+      $metadata: { httpStatusCode: number };
+    };
+    gone.name = 'NoSuchKey';
+    gone.$metadata = { httpStatusCode: 404 };
+    f.store.getStream.mockRejectedValue(gone);
+
+    await expect(processPreview(f.ctx, payload, { runner: runner() })).resolves.toBeUndefined();
+
+    const row = f.tx.collectionException.create.mock.calls[0]?.[0] as {
+      data: { kind: string; message: string };
+    };
+    expect(row.data.kind).toBe('object_missing');
+    expect(row.data.message).not.toContain('no preview');
+    expect(f.tx.evidenceItem.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ processingStatus: 'exception' }),
+      }),
+    );
+  });
+
+  it('a read failure that is NOT a missing key stays an ordinary preview note', async () => {
+    const f = fakeCtx();
+    arm(f);
+    f.store.getStream.mockRejectedValue(new Error('socket hang up'));
+    await processPreview(f.ctx, payload, { runner: runner() });
+    const row = f.tx.collectionException.create.mock.calls[0]?.[0] as {
+      data: { kind: string; message: string };
+    };
+    expect(row.data.kind).toBe('other');
+    expect(row.data.message).toContain('could not be read');
+  });
+
   it('says so when the page renderer is missing rather than silently skipping', async () => {
     const f = fakeCtx();
     arm(f, { mimeType: 'application/pdf', name: 'x.pdf' });
