@@ -10,9 +10,11 @@ from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
 from .engine import AnalysisLimits, LimitExceeded, analyze_to_bundle, limits_from_env
-from .protocol import clean_filename, parse_positive_header
+from .protocol import clean_filename, configure_tempdir, parse_positive_header
 
 app = FastAPI(title="CloudDFIR Crush Parser", version="1")
+scratch_root = Path(os.environ.get("CRUSH_SCRATCH_DIR", "/scratch"))
+configure_tempdir(scratch_root)
 
 
 @app.get("/healthz")
@@ -34,8 +36,6 @@ async def analyze(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    scratch_root = Path(os.environ.get("CRUSH_SCRATCH_DIR", "/scratch"))
-    scratch_root.mkdir(parents=True, exist_ok=True)
     work = Path(tempfile.mkdtemp(prefix="request-", dir=scratch_root))
     source = work / clean_filename(x_source_filename)
     bundle = work / "result.tar"

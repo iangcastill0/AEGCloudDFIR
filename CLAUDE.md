@@ -280,6 +280,24 @@ an alert**. Prometheus + Grafana + node-exporter are in the `monitoring` compose
 profile, bound to localhost. Details, thresholds and the SSH tunnel:
 `docs/runbooks/monitoring.md`.
 
+**The checker must run on the host, never in a container.** Three of its six
+checks are host facts (`df -h /`, `docker ps`, `docker system df`). In a container
+`df -h /` measures the container's own empty filesystem, so the alert reads "4%
+used" while the real disk fills — a monitor that reports healthy is worse than
+none. And letting a container run `docker ps` means mounting
+`/var/run/docker.sock`, which gives that container root-equivalent control of the
+host, evidence volumes included; `:ro` protects the file, not the API behind it.
+So: the host needs `node` installed (nothing else does), the checker is built into
+the **api image** and `scripts/deploy.sh` lifts it out with `docker cp`, and cron
+calls `scripts/monitor.sh`. Tests in `packages/monitoring/src/host.test.ts` fail if
+a `docker run` ever appears in the wrapper or the cron file.
+
+Two cron traps, both of which make cron **ignore the file in silence**: a file in
+`/etc/cron.d` must have no dot in its name, and must end with a newline. Install
+`infra/cron/cdfir-monitor` with `install -m 0644`, not by pasting into
+`crontab -e`. The 2026-09-15 move to the Linode carried the code across and left
+the schedule behind, which is how this went unnoticed for nine days.
+
 **A deploy deletes old image tags after it proves healthy.** Three images per
 deploy on a 98 GB disk shared by staging and prod. Ten deploys in a day filled
 it, PostgreSQL crashed, and it could not restart because replaying its log also
@@ -293,8 +311,13 @@ code on purpose: if reading it fails, the alert still fires.
 
 Backups run 03:15 UTC (`scripts/backup-postgres.sh`). They dump as superuser and
 verify by re-reading. `.last-backup` is written only after that check, because the
-monitor treats a stale stamp as a failed backup. Restore procedure:
-`docs/runbooks/backup-restore.md`.
+monitor treats a stale stamp as a failed backup. Its **path must be absolute**:
+a bare relative `.last-backup` landed wherever cron happened to be, so the writer
+wrote `/root/.last-backup` while the monitor read `/var/www/…` and reported "no
+backup found" forever — a false alarm every five minutes gets muted, and then the
+real missed backup is muted too. The backup cron line must also `cd` into the
+repo, because the compose file and `.env` are read by relative path. Restore
+procedure: `docs/runbooks/backup-restore.md`.
 
 ## Working style in this repo
 

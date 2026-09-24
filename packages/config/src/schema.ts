@@ -240,6 +240,24 @@ export const configSchema = z.object({
   CDFIR_OTEL_EXPORTER_OTLP_ENDPOINT: z.string().default(''),
   CDFIR_METRICS_PORT: port.default(9464),
   CDFIR_WORKER_HEALTH_PORT: port.default(5100),
+
+  /**
+   * Dead-man's-switch ping URL for the host health checker (healthchecks.io).
+   *
+   * No service reads this. It is here so the key is a known, documented,
+   * REDACTED setting rather than an undeclared string in .env — it is a
+   * capability, and anyone holding it can post a fake "ok" and mute the alarm.
+   * That is why it is in SECRET_KEYS below.
+   *
+   * Deliberately NOT .url(): the api and worker validate this whole schema at
+   * startup and refuse to boot on a bad value. A monitoring typo must not be
+   * able to take the product down. The checker itself fails loudly on a URL it
+   * cannot reach, which is the right place for that error.
+   *
+   * Empty means not configured, and the checker then exits non-zero instead of
+   * looking fine. See packages/monitoring/src/report.ts.
+   */
+  CDFIR_HEALTHCHECK_PING_URL: z.string().default(''),
 });
 
 export type AppConfig = z.infer<typeof configSchema>;
@@ -259,6 +277,8 @@ const SECRET_KEYS: ReadonlySet<string> = new Set([
   'CDFIR_GOOGLE_CLIENT_SECRET',
   'CDFIR_DROPBOX_CLIENT_SECRET',
   'CDFIR_SLACK_CLIENT_SECRET',
+  // Holding this URL is enough to silence every alert by pinging "ok".
+  'CDFIR_HEALTHCHECK_PING_URL',
 ]);
 
 export class ConfigValidationError extends Error {

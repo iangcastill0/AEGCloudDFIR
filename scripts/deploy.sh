@@ -16,18 +16,34 @@
 #    container whose storage credentials had never worked.
 # 4. Failure rolls back to the tag that was running, because a deploy that
 #    leaves the site down is worse than one that does not happen.
+# 5. MIGRATIONS RUN BEFORE ANY NEW CODE SERVES TRAFFIC, and a migration that
+#    fails stops the deploy dead — see the migrate block below. Nothing in this
+#    application migrates itself; a deploy that skipped this answered 403 on
+#    every route for twenty minutes on 2026-09-24. Read scripts/migrate.sh for
+#    the rollback hazard that comes with it, because point 4 cannot fix it.
 set -euo pipefail
 
 usage() {
-  echo "usage: $0 <image-tag> [--dry-run]" >&2
+  echo "usage: $0 <image-tag> [--dry-run] [--skip-backup-check]" >&2
   echo "  e.g. $0 sha-1a2b3c4" >&2
   exit 64
 }
 
 TAG="${1:-}"
 [ -n "$TAG" ] || usage
+case "$TAG" in -*) usage ;; esac
+shift
+
 DRY_RUN=false
-[ "${2:-}" = "--dry-run" ] && DRY_RUN=true
+SKIP_BACKUP_CHECK=false
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dry-run) DRY_RUN=true ;;
+    --skip-backup-check) SKIP_BACKUP_CHECK=true ;;
+    *) echo "error: unknown option $1" >&2; usage ;;
+  esac
+  shift
+done
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_DIR="$REPO_ROOT/infra/compose"
@@ -65,16 +81,90 @@ WEB_PORT="$(env_value CDFIR_WEB_HOST_PORT)"; WEB_PORT="${WEB_PORT:-3000}"
 PREVIOUS_TAG="$(env_value CDFIR_IMAGE_TAG)"
 
 echo "==> deploying $TAG (previous: ${PREVIOUS_TAG:-none recorded})"
-if [ "$DRY_RUN" = true ]; then
-  echo "    dry run: would pull ${SERVICES[*]} at $TAG and restart them"
-  exit 0
-fi
+
+# Settings for the migrate step. Production's are the script's own defaults, but
+# they are spelled out so a reader of this file can see which database is about
+# to be changed without opening another one.
+MIGRATE_ARGS=(
+  --env-file "$ENV_FILE"
+  --compose-file "$COMPOSE_DIR/docker-compose.yml"
+  --project cdfir
+  --api-service api
+  --db-service postgres
+)
+[ "$SKIP_BACKUP_CHECK" = true ] && MIGRATE_ARGS+=(--skip-backup-check)
 
 cd "$COMPOSE_DIR"
+
+if [ "$DRY_RUN" = true ]; then
+  echo "    dry run: would pull ${SERVICES[*]} at $TAG and restart them"
+  echo "    dry run: asking the database what the schema would need. It pulls the"
+  echo "             api image to read the new migration files; nothing that is"
+  echo "             running changes, and no file on this host is written."
+  # Exit code propagated on purpose. A dry run that discovers a blocker — a
+  # migration already recorded as failed, a stale backup — has to go red, or the
+  # green tick teaches the operator that the preview means nothing.
+  "$REPO_ROOT/scripts/migrate.sh" "$TAG" "${MIGRATE_ARGS[@]}" --status
+  exit 0
+fi
 
 # Free space before pulling. Registry images replaced the on-host build cache,
 # but superseded image layers still accumulate one deploy at a time.
 docker image prune -f >/dev/null 2>&1 || true
+
+# Put the health checker where host cron can run it.
+#
+# It HAS to run on the host. Three of its six checks are host facts — `df -h /`,
+# `docker ps`, `docker system df`. The same code inside a container measures the
+# container's own nearly-empty filesystem and reports "4% used" every five
+# minutes while the real disk fills. That is worse than no monitor, and it is the
+# outage this repo already had: 96% for five hours, then PostgreSQL crashed and
+# could not restart, because replaying its log also needed space.
+#
+# The host has no pnpm, so CI builds it into the api image (infra/docker/
+# api.Dockerfile) and this lifts it out. `docker create` makes a container
+# without starting one, purely so `docker cp` has something to copy from.
+#
+# Production only. Staging shares this checkout, so letting a staging deploy
+# write here would let an older commit quietly downgrade the checker that watches
+# production.
+#
+# A failure is reported and does NOT stop the deploy: a checker one version
+# behind is a smaller problem than refusing to ship a fix. It is not silent
+# either — the line below names the image it came from, and the checker keeps
+# pinging, so nothing turns off.
+ship_health_checker() {
+  local image cid dest copied
+  dest="$REPO_ROOT/packages/monitoring/dist"
+
+  # Match the api repository by NAME, never by position. `config --images api`
+  # also prints the dependency images, and the order is not stable: two runs
+  # against this compose file put redis:7-alpine first and then api first. A
+  # `head -1` here would copy the checker out of redis some of the time, which is
+  # worse than always — it would look like it worked.
+  image="$(compose config --images api 2>/dev/null | grep -m1 '/aegclouddfir/api:' || true)"
+  if [ -z "$image" ]; then
+    echo "!! could not resolve the api image — health checker NOT updated" >&2
+    return 1
+  fi
+
+  if ! cid="$(docker create "$image" 2>/dev/null)"; then
+    echo "!! docker create $image failed — health checker NOT updated" >&2
+    return 1
+  fi
+
+  mkdir -p "$dest"
+  copied=true
+  docker cp "$cid:/app/packages/monitoring/dist/." "$dest/" >/dev/null 2>&1 || copied=false
+  docker rm -v "$cid" >/dev/null 2>&1 || true
+
+  if [ "$copied" != true ] || [ ! -f "$dest/cli.js" ]; then
+    echo "!! could not copy the health checker out of $image — it is now STALE" >&2
+    echo "   cron keeps running the previous one; see docs/runbooks/monitoring.md" >&2
+    return 1
+  fi
+  echo "    health checker installed from $image"
+}
 
 roll_back() {
   if [ -z "$PREVIOUS_TAG" ]; then
@@ -95,6 +185,38 @@ if ! compose pull "${SERVICES[@]}"; then
   # Nothing has been replaced yet, so restore the tag and stop. The running
   # containers were never touched.
   echo "error: pull failed — nothing was changed" >&2
+  [ -n "$PREVIOUS_TAG" ] && set_env_value CDFIR_IMAGE_TAG "$PREVIOUS_TAG"
+  exit 1
+fi
+
+# After the pull, so the new image is local, and before anything is replaced, so
+# a problem here is reported while the running containers are still untouched.
+echo "==> installing the host health checker"
+ship_health_checker || true
+
+# SCHEMA BEFORE CODE. This is the whole lesson of 2026-09-24: new code that reads
+# a column the database does not have takes down every route, and the only thing
+# wrong is the order.
+#
+# A failure here exits WITHOUT restarting anything. Leaving the old code running
+# against the old schema is the safe direction; the alternative is a half-changed
+# schema with new code on top of it, which is the outage.
+#
+# roll_back() is deliberately NOT called. There is nothing to roll back — no
+# container was replaced — and calling it would pull and restart containers to
+# "recover" from a state where they were never touched.
+echo "==> database migrations (before any new code serves traffic)"
+if ! "$REPO_ROOT/scripts/migrate.sh" "$TAG" "${MIGRATE_ARGS[@]}"; then
+  echo "error: migrations did not apply — NOTHING was restarted." >&2
+  echo "   $PREVIOUS_TAG is still serving, against the schema it was written for." >&2
+  [ -n "$PREVIOUS_TAG" ] && set_env_value CDFIR_IMAGE_TAG "$PREVIOUS_TAG"
+  exit 1
+fi
+
+echo "==> applying database migrations as cdfir_migrator"
+if ! compose run --rm --no-deps api sh -lc \
+  'cd /app && node_modules/.bin/prisma migrate deploy --schema packages/database/prisma/schema.prisma'; then
+  echo "error: database migration failed — application containers were not changed" >&2
   [ -n "$PREVIOUS_TAG" ] && set_env_value CDFIR_IMAGE_TAG "$PREVIOUS_TAG"
   exit 1
 fi

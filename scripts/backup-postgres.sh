@@ -23,6 +23,7 @@ set -euo pipefail
 COMPOSE_FILE="${COMPOSE_FILE:-infra/compose/docker-compose.yml}"
 PG_CONTAINER="${PG_CONTAINER:-cdfir-postgres-1}"
 ENV_FILE="${ENV_FILE:-.env}"
+REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if [ ! -f "$ENV_FILE" ]; then
   echo "error: $ENV_FILE not found (run from the repo root)" >&2
@@ -87,6 +88,16 @@ docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T worker \
 # monitor treats a stale stamp as a failed backup, so writing it earlier (or
 # unconditionally) would turn the alarm off for exactly the failure it watches:
 # `set -e` means a failed upload never reaches this line.
-STAMP_FILE="${CDFIR_BACKUP_STAMP_FILE:-.last-backup}"
+#
+# The default is ABSOLUTE, and it is the same path the monitor's backup check
+# reads. It used to be a bare ".last-backup", which landed wherever the caller
+# happened to be: run from cron as
+# `/var/www/AEGCloudDFIR/scripts/backup-postgres.sh` the stamp goes to /root, the
+# monitor keeps reading /var/www/AEGCloudDFIR/.last-backup, and the alert sits on
+# "no backup found" forever while backups run perfectly. An alarm that cries wolf
+# every five minutes gets muted, and then the real missed backup goes unnoticed
+# too. Override with CDFIR_BACKUP_STAMP_FILE, and set the same value for the
+# monitor if you do.
+STAMP_FILE="${CDFIR_BACKUP_STAMP_FILE:-$REPO_ROOT/.last-backup}"
 date -u +%Y-%m-%dT%H:%M:%SZ > "$STAMP_FILE"
 echo "==> recorded success in $STAMP_FILE"

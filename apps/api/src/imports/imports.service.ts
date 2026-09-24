@@ -15,6 +15,8 @@ import {
 import {
   attachImportRequest,
   type ImportArtifact,
+  type ImportSearchHit,
+  type ImportSearchQuery,
   type ImportSummary,
 } from '@aeg-clouddfir/contracts';
 import type { EvidenceObjectStore } from '@aeg-clouddfir/evidence';
@@ -103,6 +105,36 @@ function toSummary(row: ImportRow): ImportSummary {
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
+}
+
+function boundedSnippet(value: string, query: string): string {
+  const content = value.replace(/\s+/g, ' ').trim();
+  const at = content.toLocaleLowerCase().indexOf(query.toLocaleLowerCase());
+  if (at < 0) return content.slice(0, 400);
+  const start = Math.max(0, at - 120);
+  const end = Math.min(content.length, start + 360);
+  return `${start > 0 ? '…' : ''}${content.slice(start, end)}${end < content.length ? '…' : ''}`.slice(
+    0,
+    400,
+  );
+}
+
+function matchSnippet(
+  row: { name: string; path: string; textIndex: string },
+  query: string,
+): { matchLocation: ImportSearchHit['matchLocation']; snippet: string } {
+  const needle = query.toLocaleLowerCase();
+  if (row.name.toLocaleLowerCase().includes(needle)) {
+    return { matchLocation: 'name', snippet: boundedSnippet(row.name, query) };
+  }
+  if (row.path.toLocaleLowerCase().includes(needle)) {
+    return { matchLocation: 'path', snippet: boundedSnippet(row.path, query) };
+  }
+  return { matchLocation: 'content', snippet: boundedSnippet(row.textIndex, query) };
+}
+
+function escapeLikeQuery(query: string): string {
+  return query.replace(/[\\%_]/g, '\\$&');
 }
 
 async function readJsonCapped(stream: Readable): Promise<unknown> {
@@ -319,6 +351,51 @@ export class ImportsService {
           textIndex: row.textIndex,
         })),
         nextCursor: rows.length > page.limit ? (visible.at(-1)?.id ?? null) : null,
+      };
+    });
+  }
+
+  async search(
+    auth: AuthContext,
+    id: string,
+    input: ImportSearchQuery,
+  ): Promise<{ items: ImportSearchHit[]; nextCursor: string | null }> {
+    return withTenantContext(this.prisma, auth.tenantId, async (tx) => {
+      await this.requireImport(tx, auth, id);
+      const literalQuery = escapeLikeQuery(input.q);
+      const rows = await tx.importArtifact.findMany({
+        where: {
+          tenantId: auth.tenantId,
+          importId: id,
+          OR: [
+            { name: { contains: literalQuery, mode: 'insensitive' } },
+            { path: { contains: literalQuery, mode: 'insensitive' } },
+            { textIndex: { contains: literalQuery, mode: 'insensitive' } },
+          ],
+        },
+        orderBy: { id: 'asc' },
+        take: input.limit + 1,
+        ...(input.cursor ? { cursor: { id: input.cursor }, skip: 1 } : {}),
+      });
+      const visible = rows.slice(0, input.limit);
+      return {
+        items: visible.map((row) => ({
+          artifact: {
+            id: row.id,
+            parentId: row.parentId,
+            evidenceItemId: row.evidenceItemId,
+            path: row.path,
+            name: row.name,
+            kind: row.kind as 'file' | 'directory',
+            mimeType: row.mimeType,
+            size: row.size.toString(),
+            sha256: row.sha256,
+            viewerType: row.viewerType,
+            metadata: row.metadata as Record<string, unknown>,
+          },
+          ...matchSnippet(row, input.q),
+        })),
+        nextCursor: rows.length > input.limit ? (visible.at(-1)?.id ?? null) : null,
       };
     });
   }

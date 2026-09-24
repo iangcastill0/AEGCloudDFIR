@@ -31,6 +31,7 @@ import {
   importArtifact,
   importUploadResponse,
   attachImportResponse,
+  importSearchResponse,
 } from '@aeg-clouddfir/contracts';
 import { z } from 'zod';
 import { apiFetch, apiUpload } from './api';
@@ -329,6 +330,22 @@ export function useImportArtifact(id: string, artifactId: string | null) {
     queryFn: () =>
       apiFetch(`/api/v1/imports/${id}/artifacts/${artifactId}`, { schema: importArtifact }),
     enabled: id.length > 0 && artifactId !== null,
+  });
+}
+
+export function useImportSearch(id: string, query: string) {
+  return useInfiniteQuery({
+    queryKey: ['import-search', id, query],
+    queryFn: ({ pageParam }) =>
+      apiFetch(
+        `/api/v1/imports/${id}/search?q=${encodeURIComponent(query)}&limit=100${
+          pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ''
+        }`,
+        { schema: importSearchResponse },
+      ),
+    initialPageParam: '',
+    getNextPageParam: (page) => page.nextCursor ?? undefined,
+    enabled: id.length > 0 && query.length > 0,
   });
 }
 
