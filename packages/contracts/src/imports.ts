@@ -48,6 +48,23 @@ export const importArtifactPageResponse = z.object({
   nextCursor: uuid.nullable(),
 });
 
+export const importSearchQuery = z.object({
+  q: z.string().trim().min(1).max(200),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  cursor: uuid.optional(),
+});
+
+export const importSearchHit = z.object({
+  artifact: importArtifact.omit({ preview: true, textIndex: true }),
+  matchLocation: z.enum(['name', 'path', 'content']),
+  snippet: z.string().max(400),
+});
+
+export const importSearchResponse = z.object({
+  items: z.array(importSearchHit),
+  nextCursor: uuid.nullable(),
+});
+
 export const importUploadResponse = importSummary;
 
 export const attachImportRequest = z.object({
@@ -63,4 +80,6 @@ export const attachImportResponse = z.object({
 export type ForensicImportStatus = z.infer<typeof forensicImportStatus>;
 export type ImportSummary = z.infer<typeof importSummary>;
 export type ImportArtifact = z.infer<typeof importArtifact>;
+export type ImportSearchQuery = z.infer<typeof importSearchQuery>;
+export type ImportSearchHit = z.infer<typeof importSearchHit>;
 export type AttachImportRequest = z.infer<typeof attachImportRequest>;

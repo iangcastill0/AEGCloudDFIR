@@ -11,7 +11,12 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { TenantRole } from '@aeg-clouddfir/database';
-import type { ImportArtifact, ImportSummary } from '@aeg-clouddfir/contracts';
+import {
+  importSearchQuery,
+  type ImportArtifact,
+  type ImportSearchHit,
+  type ImportSummary,
+} from '@aeg-clouddfir/contracts';
 import type { FastifyRequest } from 'fastify';
 import type { AuthContext } from '../common/http.js';
 import { parseCursorQuery } from '../common/pagination.js';
@@ -19,6 +24,7 @@ import { SessionGuard } from '../auth/guards/session.guard.js';
 import { TenantGuard } from '../auth/guards/tenant.guard.js';
 import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { RequireRoles } from '../auth/guards/require-roles.decorator.js';
+import { zodValidate } from '../common/zod-validate.js';
 import { ImportsService } from './imports.service.js';
 
 function requireAuth(request: FastifyRequest): AuthContext {
@@ -70,6 +76,16 @@ export class ImportsController {
     @Req() request: FastifyRequest,
   ): Promise<{ items: ImportArtifact[]; nextCursor: string | null }> {
     return this.imports.artifacts(requireAuth(request), id, parseCursorQuery(query));
+  }
+
+  @Get(':id/search')
+  @RequireRoles(...READ_ROLES)
+  async search(
+    @Param('id') id: string,
+    @Query() query: Record<string, unknown>,
+    @Req() request: FastifyRequest,
+  ): Promise<{ items: ImportSearchHit[]; nextCursor: string | null }> {
+    return this.imports.search(requireAuth(request), id, zodValidate(importSearchQuery, query));
   }
 
   @Get(':id/artifacts/:artifactId')

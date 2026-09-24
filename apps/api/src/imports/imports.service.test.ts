@@ -1,10 +1,12 @@
 import { Readable } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
+import { NotFoundException } from '@nestjs/common';
 import { TenantRole } from '@aeg-clouddfir/database';
 import { ImportsService } from './imports.service.js';
 import {
   CASE_ID,
   ITEM_A,
+  MEMBERSHIP_ID,
   TENANT_ID,
   USER_ID,
   fakeAudit,
@@ -165,5 +167,269 @@ describe('ImportsService', () => {
         }),
       }),
     );
+  });
+
+  it('searches only one authorized import and returns a bounded content snippet', async () => {
+    const importId = '99999999-9999-4999-8999-999999999999';
+    const importFindFirst = vi.fn().mockResolvedValue({
+      id: importId,
+      createdById: USER_ID,
+      cases: [],
+    });
+    const artifactFindMany = vi.fn().mockResolvedValue([
+      {
+        id: ITEM_A,
+        parentId: null,
+        evidenceItemId: ITEM_A,
+        path: 'logs/auth.log',
+        name: 'auth.log',
+        kind: 'file',
+        mimeType: 'text/plain',
+        size: 200n,
+        sha256: 'a'.repeat(64),
+        viewerType: 'log',
+        metadata: {},
+        textIndex: `prefix ${'x'.repeat(150)} user login succeeded ${'y'.repeat(200)}`,
+      },
+    ]);
+    const prisma = fakePrisma({
+      forensicImport: { findFirst: importFindFirst },
+      importArtifact: { findMany: artifactFindMany },
+    });
+    const service = new ImportsService(prisma, store() as never, fakeAudit().service);
+
+    const result = await service.search(makeAuth([TenantRole.case_manager]), importId, {
+      q: 'login',
+      limit: 50,
+    });
+
+    expect(artifactFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          tenantId: TENANT_ID,
+          importId,
+          OR: expect.arrayContaining([{ textIndex: { contains: 'login', mode: 'insensitive' } }]),
+        }),
+      }),
+    );
+    expect(result.items[0]?.matchLocation).toBe('content');
+    expect(result.items[0]?.snippet).toContain('login');
+    expect(result.items[0]?.snippet.length).toBeLessThanOrEqual(400);
+    expect(importFindFirst.mock.invocationCallOrder[0]).toBeLessThan(
+      artifactFindMany.mock.invocationCallOrder[0] ?? Infinity,
+    );
+  });
+
+  it('labels filename and path matches before content matches', async () => {
+    const importId = '99999999-9999-4999-8999-999999999999';
+    const base = {
+      parentId: null,
+      evidenceItemId: ITEM_A,
+      kind: 'file',
+      mimeType: 'application/json',
+      size: 10n,
+      sha256: 'a'.repeat(64),
+      viewerType: 'tree_text',
+      metadata: {},
+      textIndex: 'content does not contain either search',
+    };
+    const artifactFindMany = vi
+      .fn()
+      .mockResolvedValueOnce([{ ...base, id: ITEM_A, name: 'login.json', path: 'data/login.json' }])
+      .mockResolvedValueOnce([
+        {
+          ...base,
+          id: '66666666-6666-4666-8666-666666666666',
+          name: 'events.json',
+          path: 'archives/security/events.json',
+        },
+      ]);
+    const prisma = fakePrisma({
+      forensicImport: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: importId,
+          createdById: USER_ID,
+          cases: [],
+        }),
+      },
+      importArtifact: { findMany: artifactFindMany },
+    });
+    const service = new ImportsService(prisma, store() as never, fakeAudit().service);
+    const auth = makeAuth([TenantRole.case_manager]);
+
+    expect(
+      (await service.search(auth, importId, { q: 'login', limit: 50 })).items[0],
+    ).toMatchObject({ matchLocation: 'name', snippet: 'login.json' });
+    expect(
+      (await service.search(auth, importId, { q: 'security', limit: 50 })).items[0],
+    ).toMatchObject({
+      matchLocation: 'path',
+      snippet: 'archives/security/events.json',
+    });
+  });
+
+  it('treats SQL wildcard characters literally and centers long snippets on the match', async () => {
+    const importId = '99999999-9999-4999-8999-999999999999';
+    const artifactFindMany = vi.fn().mockResolvedValue([
+      {
+        id: ITEM_A,
+        parentId: null,
+        evidenceItemId: ITEM_A,
+        path: 'logs/long.log',
+        name: `${'x'.repeat(450)}100%_done.log`,
+        kind: 'file',
+        mimeType: 'text/plain',
+        size: 10n,
+        sha256: 'a'.repeat(64),
+        viewerType: 'log',
+        metadata: {},
+        textIndex: '',
+      },
+    ]);
+    const prisma = fakePrisma({
+      forensicImport: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: importId,
+          createdById: USER_ID,
+          cases: [],
+        }),
+      },
+      importArtifact: { findMany: artifactFindMany },
+    });
+    const service = new ImportsService(prisma, store() as never, fakeAudit().service);
+
+    const result = await service.search(makeAuth([TenantRole.case_manager]), importId, {
+      q: '100%_done',
+      limit: 50,
+    });
+
+    expect(artifactFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          OR: expect.arrayContaining([
+            { name: { contains: '100\\%\\_done', mode: 'insensitive' } },
+          ]),
+        }),
+      }),
+    );
+    expect(result.items[0]?.snippet).toContain('100%_done');
+    expect(result.items[0]?.snippet.length).toBeLessThanOrEqual(400);
+  });
+
+  it('uses an id cursor and returns the next cursor when more matches exist', async () => {
+    const importId = '99999999-9999-4999-8999-999999999999';
+    const cursor = '77777777-7777-4777-8777-777777777777';
+    const rows = [ITEM_A, '66666666-6666-4666-8666-666666666666'].map((id) => ({
+      id,
+      parentId: null,
+      evidenceItemId: id,
+      path: `${id}.log`,
+      name: `${id}.log`,
+      kind: 'file',
+      mimeType: 'text/plain',
+      size: 10n,
+      sha256: 'a'.repeat(64),
+      viewerType: 'log',
+      metadata: {},
+      textIndex: 'login',
+    }));
+    const artifactFindMany = vi.fn().mockResolvedValue(rows);
+    const prisma = fakePrisma({
+      forensicImport: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: importId,
+          createdById: USER_ID,
+          cases: [],
+        }),
+      },
+      importArtifact: { findMany: artifactFindMany },
+    });
+    const service = new ImportsService(prisma, store() as never, fakeAudit().service);
+
+    const result = await service.search(makeAuth([TenantRole.case_manager]), importId, {
+      q: 'login',
+      limit: 1,
+      cursor,
+    });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.nextCursor).toBe(ITEM_A);
+    expect(artifactFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ cursor: { id: cursor }, skip: 1, take: 2 }),
+    );
+  });
+
+  it('allows an org admin and an assigned case member to search', async () => {
+    const importId = '99999999-9999-4999-8999-999999999999';
+    const artifactFindMany = vi.fn().mockResolvedValue([]);
+    const orgAdminService = new ImportsService(
+      fakePrisma({
+        forensicImport: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: importId,
+            createdById: '88888888-8888-4888-8888-888888888888',
+            cases: [],
+          }),
+        },
+        importArtifact: { findMany: artifactFindMany },
+      }),
+      store() as never,
+      fakeAudit().service,
+    );
+    await expect(
+      orgAdminService.search(makeAuth([TenantRole.org_admin]), importId, {
+        q: 'login',
+        limit: 50,
+      }),
+    ).resolves.toBeTruthy();
+
+    const memberService = new ImportsService(
+      fakePrisma({
+        forensicImport: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: importId,
+            createdById: '88888888-8888-4888-8888-888888888888',
+            cases: [
+              {
+                caseId: CASE_ID,
+                case: { members: [{ membershipId: MEMBERSHIP_ID }] },
+              },
+            ],
+          }),
+        },
+        importArtifact: { findMany: vi.fn().mockResolvedValue([]) },
+      }),
+      store() as never,
+      fakeAudit().service,
+    );
+    await expect(
+      memberService.search(makeAuth([TenantRole.read_only]), importId, {
+        q: 'login',
+        limit: 50,
+      }),
+    ).resolves.toBeTruthy();
+  });
+
+  it('does not search an import the caller cannot read', async () => {
+    const artifactFindMany = vi.fn();
+    const prisma = fakePrisma({
+      forensicImport: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: '99999999-9999-4999-8999-999999999999',
+          createdById: '88888888-8888-4888-8888-888888888888',
+          cases: [],
+        }),
+      },
+      importArtifact: { findMany: artifactFindMany },
+    });
+    const service = new ImportsService(prisma, store() as never, fakeAudit().service);
+
+    await expect(
+      service.search(makeAuth([TenantRole.case_manager]), '99999999-9999-4999-8999-999999999999', {
+        q: 'login',
+        limit: 50,
+      }),
+    ).rejects.toThrow(NotFoundException);
+    expect(artifactFindMany).not.toHaveBeenCalled();
   });
 });

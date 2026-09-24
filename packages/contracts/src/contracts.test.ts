@@ -20,6 +20,8 @@ import {
   attachImportRequest,
   importArtifact,
   importDetailResponse,
+  importSearchQuery,
+  importSearchResponse,
 } from './index.js';
 
 const validScope = {
@@ -195,6 +197,41 @@ describe('forensic import contracts', () => {
     };
     expect(importDetailResponse.safeParse(base).success).toBe(true);
     expect(importDetailResponse.safeParse({ ...base, status: 'done' }).success).toBe(false);
+  });
+
+  it('bounds import content searches and returns a safe match snippet', () => {
+    expect(importSearchQuery.parse({ q: 'login', limit: '25' })).toEqual({
+      q: 'login',
+      limit: 25,
+    });
+    expect(importSearchQuery.safeParse({ q: '' }).success).toBe(false);
+    expect(importSearchQuery.safeParse({ q: 'x'.repeat(201) }).success).toBe(false);
+    expect(
+      importSearchResponse.parse({
+        items: [
+          {
+            artifact: {
+              id: '55555555-5555-4555-8555-555555555555',
+              parentId: null,
+              evidenceItemId: null,
+              path: 'folder/events.db',
+              name: 'events.db',
+              kind: 'file',
+              mimeType: 'application/vnd.sqlite3',
+              size: '2048',
+              sha256: 'a'.repeat(64),
+              viewerType: 'table',
+              metadata: {},
+              preview: null,
+              textIndex: '',
+            },
+            matchLocation: 'content',
+            snippet: 'user login succeeded',
+          },
+        ],
+        nextCursor: null,
+      }).items[0]?.snippet,
+    ).toBe('user login succeeded');
   });
 });
 

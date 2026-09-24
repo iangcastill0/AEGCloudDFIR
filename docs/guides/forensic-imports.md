@@ -20,6 +20,14 @@ Before case attachment, only the uploader and organization admins can see an
 import. After attachment, assigned case members can open it. Attaching an
 import adds references to the case; it does not copy evidence bytes.
 
+## Content search
+
+The detail page searches inside one import at a time. It matches file names,
+source paths, and the bounded text Crush parsed from supported structured files,
+databases, documents, and logs. Results carry a short excerpt around the match
+and open in the same safe viewer. The import access check runs before the
+content query.
+
 ## Parser isolation
 
 `crush-parser` contains the pinned Crush Forensics code and a small headless
@@ -55,8 +63,10 @@ After the operator deploys staging:
 1. Import one small fixture from each supported family.
 2. Confirm the source SHA-256 shown by the API matches the Wasabi object.
 3. Open the parsed tree and a structured preview.
-4. Attach one import to a test case and confirm its items appear in Review.
-5. Sign in as another user and confirm the unattached import returns 404.
-6. Check the audit log for upload, analysis, case attachment, and native
+4. Search for a value inside JSON, SQLite, PDF text, and a log; open each hit.
+5. Clear the search and confirm the full tree returns.
+6. Attach one import to a test case and confirm its items appear in Review.
+7. Sign in as another user and confirm the unattached import returns 404.
+8. Check the audit log for upload, analysis, case attachment, and native
    download events.
-7. Inspect the running worker and parser containers, not only CI output.
+9. Inspect the running worker and parser containers, not only CI output.
