@@ -43,9 +43,10 @@ async function ensureCsrfToken(): Promise<string> {
   return csrfBootstrap;
 }
 
-export function loginUrl(): string {
+export function loginUrl(redirectTo?: string): string {
   const current =
-    typeof window !== 'undefined' ? window.location.pathname + window.location.search : '/';
+    redirectTo ??
+    (typeof window !== 'undefined' ? window.location.pathname + window.location.search : '/');
   return `${API_URL}/auth/login?redirectTo=${encodeURIComponent(current)}`;
 }
 

@@ -930,6 +930,7 @@ export class ProductionsService {
       [MalwareStatus.not_scanned]: 'unscanned',
       [MalwareStatus.scan_failed]: 'suspicious',
       [MalwareStatus.infected]: 'infected',
+      [MalwareStatus.object_missing]: 'unscanned',
     };
 
     return items.map((item) => {

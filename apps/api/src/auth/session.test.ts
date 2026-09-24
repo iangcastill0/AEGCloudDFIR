@@ -7,6 +7,7 @@ import {
   sealAuthFlow,
   sealSession,
   sessionCookieName,
+  writeSessionCookie,
   type AuthFlowPayload,
 } from './session.js';
 
@@ -126,5 +127,27 @@ describe('sessionCookieName', () => {
   it('uses the __Host- prefix only in production (requires Secure)', () => {
     expect(sessionCookieName(true)).toBe('__Host-cdfir_session');
     expect(sessionCookieName(false)).toBe('cdfir_session');
+  });
+});
+
+describe('writeSessionCookie', () => {
+  it('seals a cookie that openSession can read', () => {
+    const payload = createSessionPayload(USER_ID, TENANT_ID, 3600);
+    let name = '';
+    let value = '';
+    writeSessionCookie(
+      {
+        setCookie: (n, v, _options) => {
+          name = n;
+          value = v;
+          void _options;
+        },
+      },
+      KEY,
+      payload,
+      false,
+    );
+    expect(name).toBe('cdfir_session');
+    expect(openSession(KEY, value)).toEqual(payload);
   });
 });

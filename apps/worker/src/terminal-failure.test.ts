@@ -71,6 +71,19 @@ describe('failureTargetFor', () => {
     });
   });
 
+  it('locates the import behind an analysis job', () => {
+    expect(
+      failureTargetFor('import.analyze', {
+        tenantId: TENANT,
+        importId: '00000000-0000-4000-8000-0000000000ee',
+      }),
+    ).toEqual({
+      kind: 'forensic-import',
+      tenantId: TENANT,
+      importId: '00000000-0000-4000-8000-0000000000ee',
+    });
+  });
+
   it('returns null for a queue with nothing to mark', () => {
     expect(failureTargetFor('dead-letter', { tenantId: TENANT })).toBeNull();
   });

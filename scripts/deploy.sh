@@ -32,7 +32,7 @@ DRY_RUN=false
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_DIR="$REPO_ROOT/infra/compose"
 ENV_FILE="$REPO_ROOT/.env"
-SERVICES=(api worker web)
+SERVICES=(crush-parser api worker web)
 
 [ -f "$ENV_FILE" ] || { echo "error: $ENV_FILE not found" >&2; exit 1; }
 

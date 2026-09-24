@@ -1,0 +1,22 @@
+---
+description: Read and keep the operator's memory notes between chats.
+alwaysApply: true
+---
+
+# Memory between chats
+
+Notes that last between chats live in the operator's personal Cursor store:
+
+`/Users/ic/Library/Application Support/Cursor/AgentStores/cursor_agent_stores/u312431413/files/`
+
+If that folder is not there (for example, in a Cloud Agent), skip this rule.
+
+1. At the start of a task, read `MEMORY.md` in that folder. Open a note only
+   when its topic matches the task.
+2. A note is what was true on its date. Live code, CI and servers win. If a
+   note is wrong, fix the note.
+3. At the end of a task, save anything that will still matter next week: a
+   decision and why, a command that works, a trap. Follow the format in
+   `MEMORY.md`.
+4. Never save case data, anything from production, secrets, or chat logs. The
+   full list is in `MEMORY.md`.

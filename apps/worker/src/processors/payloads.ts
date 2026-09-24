@@ -89,6 +89,12 @@ export const pstExtractPayload = z.object({
 });
 export type PstExtractPayload = z.infer<typeof pstExtractPayload>;
 
+export const importAnalyzePayload = z.object({
+  tenantId: uuid,
+  importId: uuid,
+});
+export type ImportAnalyzePayload = z.infer<typeof importAnalyzePayload>;
+
 export const finalizePayload = z.object({
   tenantId: uuid,
   collectionId: uuid,
@@ -109,6 +115,13 @@ export const caseCollectionPayload = z.object({
   collectionId: uuid,
 });
 export type CaseCollectionPayload = z.infer<typeof caseCollectionPayload>;
+
+export const caseImportPayload = z.object({
+  tenantId: uuid,
+  caseId: uuid,
+  importId: uuid,
+});
+export type CaseImportPayload = z.infer<typeof caseImportPayload>;
 
 export const exportRunPayload = z.object({
   tenantId: uuid,

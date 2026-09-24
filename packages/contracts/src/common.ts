@@ -99,4 +99,18 @@ export const TRUTHFULNESS_NOTICES = {
     'Audit logs are constrained by the provider’s retention window (e.g. Purview Audit Standard ~180 days, Google Workspace reports ~180 days) and the enabled audit configuration at the time events occurred. Events outside the retained window, or not captured because auditing was disabled, cannot be collected and are reported as scope limitations.',
   pstExtraction:
     'Uploaded container files (e.g. PST/OST mailboxes) are preserved byte-for-byte as immutable originals. Messages extracted from a container are reconstructions built from the container’s stored properties (true transport headers are used when the container retains them) and are not provider-native RFC 822 messages; the uploaded container remains the authoritative source.',
+  /**
+   * The opposite direction to `pstExtraction`, and it must be stated just as
+   * plainly.
+   *
+   * A PST export re-encodes each collected message into Outlook’s own storage
+   * format. Those bytes have never been hashed by anyone, and hashing them
+   * proves nothing: this writer is not deterministic, so the same messages
+   * exported twice produce two different PST files, and saving a message back
+   * out of Outlook produces different bytes again. The recorded SHA-256 of the
+   * native `.eml` is the only digest that means anything, which is why a PST
+   * export always ships those digests alongside it.
+   */
+  pstExport:
+    'A PST export is a RECONSTRUCTION, not a set of native files. Each collected message is re-encoded into Outlook’s PST format, so the bytes inside the PST are not the bytes that were acquired and their hashes were never recorded. The PST file’s own SHA-256 verifies only that the download arrived intact — it cannot verify message content, and this writer is not byte-reproducible, so re-exporting the same messages yields a different PST. Some MAPI properties are DERIVED rather than collected: folder placement, delivery and submit times where the source had none, message flags, the display-name fields, and one marker named property (PS_COMMON 0x8580) that the format requires in order to be readable at all. Verify message content against the native `.eml` digests shipped with the export, never against the PST.',
 } as const;

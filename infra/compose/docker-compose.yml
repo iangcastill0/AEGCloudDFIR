@@ -170,6 +170,36 @@ services:
       timeout: 5s
       retries: 20
 
+  crush-parser:
+    image: ghcr.io/iangcastill0/aegclouddfir/crush-parser:${CDFIR_IMAGE_TAG:-dev}
+    build:
+      context: ../..
+      dockerfile: infra/docker/crush-parser.Dockerfile
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 4g
+    cpus: 2
+    environment:
+      CRUSH_SCRATCH_DIR: /scratch
+      CRUSH_MAX_INPUT_BYTES: ${CDFIR_UPLOAD_MAX_BYTES:-10737418240}
+      CRUSH_MAX_ENTRIES: ${CDFIR_IMPORT_MAX_ENTRIES:-25000}
+      CRUSH_MAX_TOTAL_BYTES: ${CDFIR_MAX_ARCHIVE_TOTAL_BYTES:-2147483648}
+      CRUSH_MAX_EXPANSION_RATIO: ${CDFIR_MAX_ARCHIVE_EXPANSION_RATIO:-100}
+      CRUSH_MAX_DEPTH: ${CDFIR_MAX_ARCHIVE_DEPTH:-3}
+      CRUSH_MAX_PREVIEW_ROWS: ${CDFIR_IMPORT_PREVIEW_ROWS:-200}
+    volumes:
+      - crush-parser-scratch:/scratch
+    tmpfs:
+      - /tmp:size=256m,mode=1770
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:5200/healthz >/dev/null']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    profiles: ['app']
+
   authentik-postgres:
     image: postgres:16-alpine
     # Authentik carries sign-in for the whole product, so it must come back on
@@ -231,6 +261,11 @@ services:
       CDFIR_STAGING_OIDC_LAUNCH_URL: ${CDFIR_STAGING_API_PUBLIC_URL:-https://api-staging.aegclouddfir.com}/auth/login?redirectTo=%2F
     volumes:
       - ../authentik/blueprints:/blueprints/custom:ro
+    # Enrollment does not send mail (TOTP is the second check). SMTP is
+    # optional for Authentik password recovery: AUTHENTIK_EMAIL__HOST / PORT /
+    # USERNAME / PASSWORD / USE_TLS / FROM on both this service and
+    # authentik-worker. Set them in the host .env; do not list empty values
+    # here. See docs/guides/authentik-setup.md.
     ports:
       - '127.0.0.1:${CDFIR_AUTHENTIK_HOST_PORT:-9443}:9000'
     depends_on:
@@ -347,16 +382,27 @@ services:
       CDFIR_S3_ENDPOINT: ${CDFIR_S3_ENDPOINT:-http://minio:9000}
       CDFIR_CLAMAV_HOST: clamav
       CDFIR_TIKA_URL: http://tika:9998
+      CDFIR_CRUSH_PARSER_URL: http://crush-parser:5200
       # OCR/parse/extract/preview each run this many CPU-bound jobs at once.
       # Defaulted to 2 here rather than the code default of 4: this host is 8
       # cores shared with staging, Authentik and ClamAV, and across four CPU
       # stages a value of 4 oversubscribed the box (load ~32) and made
       # extraction time out under a large backlog. Still overridable from .env.
       CDFIR_WORKER_CPU_CONCURRENCY: ${CDFIR_WORKER_CPU_CONCURRENCY:-2}
+      CDFIR_EXPORT_SCRATCH_DIR: /var/lib/cdfir/export-scratch
+    volumes:
+      # A real named volume for PST assembly, NOT /tmp and NOT the container's
+      # writable layer. A PST export holds the staged natives and the finished
+      # PSTs at the same time, so peak use is about twice the export size — 95
+      # GiB for the 47.4 GiB mail set. On the writable layer that fills the
+      # shared 98 GB Docker disk, which is how PostgreSQL got crashed before.
+      - worker-export-scratch:/var/lib/cdfir/export-scratch
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      crush-parser:
         condition: service_healthy
     healthcheck:
       # /readyz, not /healthz: liveness only reports uptime, so a worker whose
@@ -468,3 +514,5 @@ volumes:
   minio-data:
   clamav-data:
   authentik-pg-data:
+  crush-parser-scratch:
+  worker-export-scratch:

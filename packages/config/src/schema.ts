@@ -61,6 +61,24 @@ export const configSchema = z.object({
   CDFIR_S3_FORCE_PATH_STYLE: booleanString('true'),
   CDFIR_S3_PRESIGN_TTL_SECONDS: z.coerce.number().int().min(30).max(3600).default(300),
 
+  /**
+   * How long a download script may keep asking for fresh presigned URLs.
+   *
+   * Presigned URLs themselves stay at 300s, deliberately: they are the thing
+   * that actually reaches the bytes, and a leaked one should die quickly. This
+   * governs the scoped token a script carries so it can RE-SIGN as it goes.
+   *
+   * A 130 GiB export is 65 parts. At 50 Mbit/s that is most of a day, so the
+   * default is 24 hours. It cannot be revoked before it expires (see
+   * download-token.ts), so raising this widens a real window.
+   */
+  CDFIR_EXPORT_DOWNLOAD_TOKEN_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .min(300)
+    .max(7 * 24 * 3600)
+    .default(24 * 3600),
+
   // --- Authentik OIDC (login) ---
   CDFIR_OIDC_ISSUER: z.string().url(),
   CDFIR_OIDC_CLIENT_ID: z.string().min(1),
@@ -69,6 +87,12 @@ export const configSchema = z.object({
   CDFIR_OIDC_GROUP_ROLE_MAP: z.string().default(''), // e.g. "cdfir-admins:org_admin,cdfir-reviewers:reviewer"
   CDFIR_SESSION_SECRET: z.string().min(32),
   CDFIR_SESSION_TTL_SECONDS: z.coerce.number().int().min(300).default(28_800),
+  /**
+   * Public create-organization in the app (after Authentik sign-up / sign-in).
+   * Off by default so production can stay operator-provisioned while staging
+   * tries the SaaS door.
+   */
+  CDFIR_SELF_SERVE_SIGNUP: booleanString('false'),
 
   // --- Envelope encryption ---
   CDFIR_KEK_PROVIDER: z.enum(['local-aes256gcm']).default('local-aes256gcm'),
@@ -124,6 +148,43 @@ export const configSchema = z.object({
   CDFIR_UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(10_737_418_240),
   /** Cap on messages extracted from a single container before an honest stop. */
   CDFIR_PST_MAX_MESSAGES: z.coerce.number().int().min(1).default(250_000),
+  // --- PST export (services/pst-builder) ---
+  /** Path to the vendored PST writer inside the worker image. */
+  CDFIR_PSTB_BIN: z.string().default('/usr/local/bin/pstb'),
+  /**
+   * Where a PST export is assembled before it is uploaded.
+   *
+   * MUST be a real named volume, NEVER `/tmp`. The worker's `/tmp` is a tmpfs
+   * capped at a few hundred MB, so a multi-gigabyte PST either fills RAM or —
+   * with the cap removed — lands on the container's writable layer and eats the
+   * Docker disk. That disk filling once crashed PostgreSQL, and it could not
+   * restart because replaying its log also needed space.
+   */
+  CDFIR_EXPORT_SCRATCH_DIR: z.string().default('/var/lib/cdfir/export-scratch'),
+  /**
+   * How long the PST writer gets. A 47 GiB mail set is hours, not minutes, so
+   * this is deliberately generous; it exists to stop a wedged process holding
+   * the single export lane forever, not to bound normal work.
+   */
+  CDFIR_PSTB_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .min(60_000)
+    .default(12 * 60 * 60_000),
+  /**
+   * Attachments this size or larger are decoded to a spool file and streamed
+   * into the PST rather than held in memory. See `services/pst-builder/cli`:
+   * the buffered path cost about 3.6x the message size, and the real corpus has
+   * a 672 MB item.
+   */
+  CDFIR_PSTB_SPOOL_THRESHOLD_BYTES: z.coerce.number().int().min(0).default(1_048_576),
+  CDFIR_CRUSH_PARSER_URL: z.string().url().default('http://crush-parser:5200'),
+  CDFIR_CRUSH_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .min(10_000)
+    .default(30 * 60_000),
+  CDFIR_IMPORT_PREVIEW_ROWS: z.coerce.number().int().min(1).max(10_000).default(200),
 
   // --- Extraction / Tika ---
   CDFIR_TIKA_URL: z.string().url().default('http://tika:9998'),

@@ -14,12 +14,15 @@ import { processParse } from './processors/process-parse.js';
 import { processPreview } from './processors/process-preview.js';
 import { processScan } from './processors/process-scan.js';
 import { processPstExtract } from './processors/pst-extract.js';
+import { processImportAnalyze } from './processors/import-analyze.js';
 import { processProductionRun } from './processors/production-run.js';
 import { deletionRun, deletionRunPayload } from './processors/deletion-run.js';
 import { processSearchCaseCollection } from './processors/search-case-collection.js';
+import { processSearchCaseImport } from './processors/search-case-import.js';
 import { processSearchIndex } from './processors/search-index.js';
 import {
   caseCollectionPayload,
+  caseImportPayload,
   discoverPayload,
   evidenceStagePayload,
   exportRunPayload,
@@ -28,6 +31,7 @@ import {
   finalizePayload,
   productionRunPayload,
   pstExtractPayload,
+  importAnalyzePayload,
   tenantOnlyPayload,
 } from './processors/payloads.js';
 import { BACKOFF_STRATEGIES, DEFAULT_JOB_OPTIONS, QUEUES, type QueueName } from './queues.js';
@@ -71,6 +75,7 @@ export function queueConcurrency(cpuConcurrency: number): Record<QueueName, numb
     [QUEUES.collectionFinalize]: 2,
     // Container extraction is memory/disk heavy (temp copy of the whole PST).
     [QUEUES.pstExtract]: 1,
+    [QUEUES.importAnalyze]: 1,
     [QUEUES.processParse]: cpuConcurrency,
     [QUEUES.processExtract]: cpuConcurrency,
     // One budget across both OCR lanes, never one each.
@@ -82,6 +87,13 @@ export function queueConcurrency(cpuConcurrency: number): Record<QueueName, numb
     // One long engine-side request per job, not something to fan out. Two so a
     // second case add is not stuck behind a large one.
     [QUEUES.searchCaseCollection]: 2,
+    [QUEUES.searchCaseImport]: 2,
+    // Stays 1, and `pst-export.ts` depends on it staying 1. A PST export holds
+    // a multi-hundred-megabyte writer working set AND writes the staged natives
+    // plus the finished PSTs to the scratch volume at the same time — about
+    // twice the export size, 95 GiB for the real 47.4 GiB mail set. Two at once
+    // doubles both on a host with 31 GB of RAM and a shared disk.
+    // `workers-concurrency.test.ts` fails if this is raised.
     [QUEUES.exportRun]: 1,
     [QUEUES.productionRun]: 1,
     [QUEUES.deletionRun]: 1,
@@ -115,6 +127,8 @@ export function buildHandlers(): Record<QueueName, QueueHandler> {
     [QUEUES.collectionFinalize]: (ctx, data) =>
       processCollectionFinalize(ctx, finalizePayload.parse(data)),
     [QUEUES.pstExtract]: (ctx, data) => processPstExtract(ctx, pstExtractPayload.parse(data)),
+    [QUEUES.importAnalyze]: (ctx, data) =>
+      processImportAnalyze(ctx, importAnalyzePayload.parse(data)),
     [QUEUES.processParse]: (ctx, data) => processParse(ctx, evidenceStagePayload.parse(data)),
     [QUEUES.processExtract]: (ctx, data) => processExtract(ctx, evidenceStagePayload.parse(data)),
     // Same processor both sides: the lanes differ in scheduling, not in work.
@@ -125,6 +139,8 @@ export function buildHandlers(): Record<QueueName, QueueHandler> {
     [QUEUES.searchIndex]: (ctx, data) => processSearchIndex(ctx, evidenceStagePayload.parse(data)),
     [QUEUES.searchCaseCollection]: (ctx, data) =>
       processSearchCaseCollection(ctx, caseCollectionPayload.parse(data)),
+    [QUEUES.searchCaseImport]: (ctx, data) =>
+      processSearchCaseImport(ctx, caseImportPayload.parse(data)),
     [QUEUES.exportRun]: (ctx, data) => processExportRun(ctx, exportRunPayload.parse(data)),
     [QUEUES.productionRun]: (ctx, data) =>
       processProductionRun(ctx, productionRunPayload.parse(data)),

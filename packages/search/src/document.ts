@@ -101,6 +101,8 @@ export interface EvidenceSearchDoc {
   provider?: string;
   connectorAccountId?: string;
   collectionId?: string;
+  importId?: string;
+  importOwnerId?: string;
   sourcePath?: string;
   sourceLabels?: string[];
   folder?: string;

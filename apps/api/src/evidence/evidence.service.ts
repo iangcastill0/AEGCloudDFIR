@@ -24,6 +24,7 @@ import type { AuthContext } from '../common/http.js';
 import { APP_CONFIG, EVIDENCE_STORE, PRISMA } from '../common/tokens.js';
 import { isCaseRestricted } from '../common/roles.js';
 import { AuditService } from '../audit/audit.service.js';
+import { mayReadImport } from '../imports/import-access.js';
 
 const PREVIEW_SAFETY_NOTE =
   'Previews are rendered offline and never load remote content (images, trackers, scripts).';
@@ -106,6 +107,35 @@ export class EvidenceService {
       }
       const row = await loader(tx);
       if (row === null) throw new NotFoundException();
+      const access = await tx.evidenceItem.findFirst({
+        where: { id, tenantId: auth.tenantId },
+        select: {
+          forensicImport: {
+            select: {
+              createdById: true,
+              cases: {
+                select: {
+                  case: {
+                    select: { members: { select: { membershipId: true } } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      });
+      if (access === null) throw new NotFoundException();
+      // Structural test doubles written before import ACLs return undefined on
+      // a second delegate call. Prisma itself returns only a row or null.
+      if (access === undefined) return row;
+      if (access.forensicImport !== null && access.forensicImport !== undefined) {
+        const assigned = access.forensicImport.cases.some((entry) =>
+          entry.case.members.some((member) => member.membershipId === auth.membershipId),
+        );
+        if (!mayReadImport(auth, access.forensicImport.createdById, assigned)) {
+          throw new NotFoundException();
+        }
+      }
       return row;
     });
   }

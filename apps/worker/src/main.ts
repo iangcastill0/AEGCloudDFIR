@@ -81,6 +81,14 @@ async function main(): Promise<void> {
       }
       checks.redis = redis.status === 'ready';
       checks.dispatcher = dispatcher.isRunning;
+      try {
+        const response = await fetch(`${config.CDFIR_CRUSH_PARSER_URL}/healthz`, {
+          signal: AbortSignal.timeout(3_000),
+        });
+        checks.crushParser = response.ok;
+      } catch {
+        checks.crushParser = false;
+      }
       return checks;
     },
   });

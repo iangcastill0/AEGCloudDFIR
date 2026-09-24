@@ -3,11 +3,16 @@
 A freshly migrated deployment has no tenants, users, or roles. Nobody can do
 anything until an operator grants the first administrator.
 
-There is deliberately **no** "first user to sign in becomes admin" rule. On a
-platform that holds other people's evidence, that would mean whoever reaches a
-newly deployed instance first owns it. Granting the first administrator requires
-database credentials, and the grant is written into the tenant's audit chain as
-`tenant.bootstrap_admin`.
+There is deliberately **no** "first user to sign in becomes admin" rule **for
+the server**. On a platform that holds other people's evidence, that would mean
+whoever reaches a newly deployed instance first owns it. Granting the first
+**platform** administrator requires database credentials, and the grant is
+written into the tenant's audit chain as `tenant.bootstrap_admin`.
+
+This CLI is not how a SaaS customer gets their first admin. When
+`CDFIR_SELF_SERVE_SIGNUP=true`, a signed-in person can create their own
+organization in the app and becomes that tenant's `org_admin`. They are not a
+platform admin. See docs/adr/ADR-014-identity-vs-tenancy.md.
 
 ## Why this takes two passes
 
@@ -115,9 +120,9 @@ longer revoke their access.
 
 ## Adding administrators later
 
-Once someone holds `org_admin`, manage people in the application rather than
-here. This CLI exists for the first grant and for recovering an instance whose
-last administrator was lost.
+Once someone holds `org_admin`, share the standing join link on Members
+rather than here. This CLI exists for the first grant and for recovering an
+instance whose last administrator was lost.
 
 ## Troubleshooting
 

@@ -161,3 +161,34 @@ export function openAuthFlow(
   if (parsed.data.exp * 1000 <= nowMs) return null;
   return parsed.data;
 }
+
+/** Duck type so auth and tenants controllers can share cookie writes. */
+export interface SessionCookieReply {
+  setCookie(
+    name: string,
+    value: string,
+    options: {
+      path: string;
+      httpOnly: boolean;
+      sameSite: 'lax';
+      secure: boolean;
+      maxAge: number;
+    },
+  ): unknown;
+}
+
+export function writeSessionCookie(
+  reply: SessionCookieReply,
+  key: Buffer,
+  payload: SessionPayload,
+  isProd: boolean,
+): void {
+  const maxAge = Math.max(1, payload.exp - Math.floor(Date.now() / 1000));
+  reply.setCookie(sessionCookieName(isProd), sealSession(key, payload), {
+    path: '/',
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: isProd,
+    maxAge,
+  });
+}

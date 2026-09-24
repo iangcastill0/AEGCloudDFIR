@@ -15,6 +15,7 @@ import {
   caseSummary,
   caseTagListResponse,
   collectionStatusResponse,
+  type CollectionThroughputResponse,
   validateProductionResponse,
   createExportResponse,
   collectionActionResponse,
@@ -24,6 +25,12 @@ import {
   tagResponse,
   savedSearchResponse,
   caseResponse,
+  importListResponse,
+  importDetailResponse,
+  importArtifactPageResponse,
+  importArtifact,
+  importUploadResponse,
+  attachImportResponse,
 } from '@aeg-clouddfir/contracts';
 import { z } from 'zod';
 import { apiFetch, apiUpload } from './api';
@@ -37,6 +44,7 @@ import {
   caseMemberListResponse,
   caseNoteListResponse,
   collectionListResponse,
+  collectionThroughputResponse,
   connectorListResponse,
   connectorTestResponse,
   createConnectorResponse,
@@ -48,6 +56,10 @@ import {
   logoutResponse,
   meResponse,
   memberListResponse,
+  createTenantResponse,
+  createInviteResponse,
+  joinResponse,
+  joinLinkResponse,
   orgConnectorSetupResponse,
   previewResponse,
   productionDetail,
@@ -86,6 +98,55 @@ export function useSelectTenant() {
     mutationFn: (tenantId: string) =>
       apiFetch('/auth/select-tenant', { method: 'POST', body: { tenantId } }),
     onSuccess: () => qc.invalidateQueries(),
+  });
+}
+
+export function useCreateTenant() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { name: string; slug: string }) =>
+      apiFetch('/api/v1/tenants', { method: 'POST', body, schema: createTenantResponse }),
+    onSuccess: () => qc.invalidateQueries(),
+  });
+}
+
+export function useJoinTenant() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (token: string) =>
+      apiFetch('/auth/join', { method: 'POST', body: { token }, schema: joinResponse }),
+    onSuccess: () => qc.invalidateQueries(),
+  });
+}
+
+export function useCreateInvite(tenantId: string | undefined) {
+  return useMutation({
+    mutationFn: (body: { email: string; role: string }) =>
+      apiFetch(`/api/v1/tenants/${tenantId}/invites`, {
+        method: 'POST',
+        body,
+        schema: createInviteResponse,
+      }),
+  });
+}
+
+export function useJoinLink(tenantId: string | undefined) {
+  return useQuery({
+    queryKey: ['join-link', tenantId],
+    queryFn: () => apiFetch(`/api/v1/tenants/${tenantId}/join-link`, { schema: joinLinkResponse }),
+    enabled: Boolean(tenantId),
+  });
+}
+
+export function useRotateJoinLink(tenantId: string | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      apiFetch(`/api/v1/tenants/${tenantId}/join-link/rotate`, {
+        method: 'POST',
+        schema: joinLinkResponse,
+      }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['join-link', tenantId] }),
   });
 }
 
@@ -208,7 +269,109 @@ export function useUpload() {
   });
 }
 
+// --- Forensic imports ---
+
+export function useImportUpload() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ file, onProgress }: UploadFileInput) =>
+      apiUpload('/api/v1/imports', file, { schema: importUploadResponse, onProgress }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['imports'] }),
+  });
+}
+
+export function useImports() {
+  return useQuery({
+    queryKey: ['imports'],
+    queryFn: () => apiFetch('/api/v1/imports?limit=100', { schema: importListResponse }),
+    refetchInterval: (query) =>
+      query.state.data?.items.some(
+        (item) => item.status === 'uploaded' || item.status === 'analyzing',
+      )
+        ? 3000
+        : false,
+  });
+}
+
+export function useImportDetail(id: string) {
+  return useQuery({
+    queryKey: ['import', id],
+    queryFn: () => apiFetch(`/api/v1/imports/${id}`, { schema: importDetailResponse }),
+    enabled: id.length > 0,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === 'uploaded' || status === 'analyzing' ? 3000 : false;
+    },
+  });
+}
+
+export function useImportArtifacts(id: string) {
+  return useInfiniteQuery({
+    queryKey: ['import-artifacts', id],
+    queryFn: ({ pageParam }) =>
+      apiFetch(
+        `/api/v1/imports/${id}/artifacts?limit=100${
+          pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ''
+        }`,
+        {
+          schema: importArtifactPageResponse,
+        },
+      ),
+    initialPageParam: '',
+    getNextPageParam: (page) => page.nextCursor ?? undefined,
+    enabled: id.length > 0,
+  });
+}
+
+export function useImportArtifact(id: string, artifactId: string | null) {
+  return useQuery({
+    queryKey: ['import-artifact', id, artifactId],
+    queryFn: () =>
+      apiFetch(`/api/v1/imports/${id}/artifacts/${artifactId}`, { schema: importArtifact }),
+    enabled: id.length > 0 && artifactId !== null,
+  });
+}
+
+export function useRetryImport() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch(`/api/v1/imports/${id}/retry`, {
+        method: 'POST',
+        schema: importDetailResponse,
+      }),
+    onSuccess: (data) => {
+      void qc.invalidateQueries({ queryKey: ['imports'] });
+      void qc.invalidateQueries({ queryKey: ['import', data.id] });
+    },
+  });
+}
+
+export function useAttachImport() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ importId, caseId }: { importId: string; caseId: string }) =>
+      apiFetch(`/api/v1/imports/${importId}/cases`, {
+        method: 'POST',
+        body: { caseId },
+        schema: attachImportResponse,
+      }),
+    onSuccess: (data) => {
+      void qc.invalidateQueries({ queryKey: ['imports'] });
+      void qc.invalidateQueries({ queryKey: ['import', data.importId] });
+      void qc.invalidateQueries({ queryKey: ['cases'] });
+    },
+  });
+}
+
 // --- Collections ---
+
+/**
+ * Throughput poll interval. Five seconds, measured rather than chosen: the
+ * rollup runs 225 ms warm over 237 MB on the biggest real collection, so two
+ * seconds would be >10% database duty cycle from one open tab.
+ */
+const THROUGHPUT_POLL_MS = 5000;
 
 const ACTIVE_COLLECTION_STATUSES = new Set([
   'created',
@@ -236,6 +399,46 @@ export function useCollectionStatus(id: string) {
     queryKey: ['collection', id],
     queryFn: () => apiFetch(`/api/v1/collections/${id}`, { schema: collectionStatusResponse }),
     refetchInterval: (query) => (isCollectionActive(query.state.data?.status) ? 2000 : false),
+  });
+}
+
+/**
+ * Measured throughput for one collection.
+ *
+ * Polls every FIVE seconds, not two. The rollup query measured 225 ms warm and
+ * read 237 MB on the 434,910-item collection, so a 2-second poll would hold the
+ * database at over 10% duty cycle from a single browser tab — and a page left
+ * open on a wall display would do it all day.
+ *
+ * `refetchIntervalInBackground` defaults to FALSE in React Query, which is what
+ * we want and is stated here so nobody "fixes" it later: a hidden tab must not
+ * keep asking a 225 ms question.
+ *
+ * `sinceRateLimitWaitMs` echoes the previous response's value straight back. The
+ * SERVER decides whether throttling rose; the browser never re-derives the state,
+ * because two places computing "is this healthy" drift apart and then the page
+ * and the ledger disagree in front of a user.
+ */
+export function useCollectionThroughput(id: string, window: 'live' | 'history' = 'live') {
+  const qc = useQueryClient();
+  return useQuery({
+    queryKey: ['collection-throughput', id, window],
+    queryFn: () => {
+      const previous = qc.getQueryData<CollectionThroughputResponse>([
+        'collection-throughput',
+        id,
+        window,
+      ]);
+      const since =
+        previous === undefined ? '' : `&sinceRateLimitWaitMs=${String(previous.rateLimitWaitMs)}`;
+      return apiFetch(`/api/v1/collections/${id}/throughput?window=${window}${since}`, {
+        schema: collectionThroughputResponse,
+      });
+    },
+    refetchInterval: (query) =>
+      isCollectionActive(query.state.data?.status) ? THROUGHPUT_POLL_MS : false,
+    // Nothing moves after the run ends, so stop asking entirely.
+    staleTime: (query) => (isCollectionActive(query.state.data?.status) ? 0 : Infinity),
   });
 }
 

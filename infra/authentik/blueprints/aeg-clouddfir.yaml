@@ -26,6 +26,9 @@ entries:
       authorization_flow:
         !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
       invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+      # Own sign-in flow so the login page can show Sign up without changing
+      # Authentik's global default (the admin console keeps using that).
+      authentication_flow: !Find [authentik_flows.flow, [slug, cdfir-authentication]]
       redirect_uris:
         - matching_mode: strict
           # Must equal the API's public origin + /auth/callback. Authentik

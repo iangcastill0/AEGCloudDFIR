@@ -82,6 +82,16 @@ const base: SearchDocInput = {
 };
 
 describe('buildSearchDoc', () => {
+  it('carries import ownership fields used by the authorization wrapper', () => {
+    const doc = buildSearchDoc({
+      ...base,
+      importId: '11111111-1111-4111-8111-111111111111',
+      importOwnerId: '22222222-2222-4222-8222-222222222222',
+    });
+    expect(doc.importId).toBe('11111111-1111-4111-8111-111111111111');
+    expect(doc.importOwnerId).toBe('22222222-2222-4222-8222-222222222222');
+  });
+
   it('never emits bcc addresses unless bccPresent is genuinely true', () => {
     const withoutBcc = buildSearchDoc(base);
     expect(withoutBcc.email?.bcc).toBeUndefined();

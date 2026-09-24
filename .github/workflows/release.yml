@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   images:
-    name: Build and push api, web, worker
+    name: Build and push api, web, worker, crush-parser
     if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     permissions:
@@ -66,6 +66,18 @@ jobs:
             ghcr.io/iangcastill0/aegclouddfir/worker:main
           cache-from: type=gha,scope=worker
           cache-to: type=gha,scope=worker,mode=max
+
+      - name: crush-parser
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/crush-parser.Dockerfile
+          push: true
+          tags: |
+            ghcr.io/iangcastill0/aegclouddfir/crush-parser:sha-${{ steps.sha.outputs.short }}
+            ghcr.io/iangcastill0/aegclouddfir/crush-parser:main
+          cache-from: type=gha,scope=crush-parser
+          cache-to: type=gha,scope=crush-parser,mode=max
 
       - name: web
         uses: docker/build-push-action@v6

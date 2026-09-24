@@ -57,15 +57,22 @@ internal sealed class JobMessage
 }
 
 /// <summary>
-/// The one line of JSON this program prints, as an explicit type.
+/// The one line of JSON this program prints, as an explicit named type rather
+/// than an anonymous one.
 ///
-/// NOT an anonymous type. Serializing anonymous types by reflection out of a
-/// single-file self-contained publish produced garbage on Linux: `messagesAdded`
-/// and `spooledAttachments` came back as strings of nulls while every other
-/// field was correct, and the process still exited 0. That is the exact
-/// "reports success, silently broken" shape — a caller reading `messagesAdded`
-/// to check nothing was dropped would have been comparing against nonsense.
-/// An explicit, named type with real properties serializes predictably.
+/// This is the contract the worker parses, so it is worth being able to read it
+/// in one place. It is also cheap insurance: reflection-based serialization of
+/// anonymous types out of a single-file publish is the fragile corner of
+/// System.Text.Json, and there is no reason to sit in it.
+///
+/// A warning for anyone debugging this on an Apple Silicon Mac: running the
+/// linux-x64 build under QEMU emulation corrupts 32-bit integers in this output.
+/// `messagesAdded` and `spooledAttachments` come back as strings of nulls and
+/// `peakWorkingSetMiB` reads 1817 instead of 70, while the PST files themselves
+/// are byte-for-byte correct. That is an emulator artifact, not a bug here —
+/// the same source built for linux-arm64 and run natively reports every field
+/// correctly. Do not trust metrics measured under `--platform linux/amd64` on
+/// an arm64 host.
 /// </summary>
 internal sealed class Report
 {

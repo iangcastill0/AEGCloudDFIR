@@ -23,12 +23,18 @@ export type ObjectStorePort = Pick<
   | 'putDerivative'
   | 'putManifest'
   | 'getStream'
+  | 'headObject'
   | 'verifyObjectHash'
 >;
 
 export type SearchPort = Pick<
   SearchAdapter,
-  'indexBulk' | 'search' | 'ensureIndex' | 'addCaseToCollection' | 'setEmailFolder'
+  | 'indexBulk'
+  | 'search'
+  | 'ensureIndex'
+  | 'addCaseToCollection'
+  | 'addCaseToImport'
+  | 'setEmailFolder'
 >;
 
 export interface WorkerContext {

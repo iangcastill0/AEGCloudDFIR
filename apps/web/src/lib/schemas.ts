@@ -32,6 +32,17 @@ export {
   caseTagListResponse,
   exceptionEntry,
   exceptionListResponse,
+  createTenantRequest,
+  createTenantResponse,
+  createInviteRequest,
+  createInviteResponse,
+  joinRequest,
+  joinResponse,
+  joinLinkResponse,
+  authTenantsResponse,
+  // Measured throughput. The state enum comes from the same schema the API is
+  // tested against, so the browser cannot invent a state the server never sends.
+  collectionThroughputResponse,
 } from '@aeg-clouddfir/contracts';
 import {
   chainOfCustodyEntry,
@@ -54,18 +65,6 @@ export const meResponse = z.object({
   ),
 });
 export type MeResponse = z.infer<typeof meResponse>;
-
-export const authTenantsResponse = z.object({
-  tenants: z.array(
-    z.object({
-      tenantId: z.string(),
-      name: z.string(),
-      slug: z.string(),
-      status: z.string(),
-      roles: z.array(z.string()),
-    }),
-  ),
-});
 
 export const logoutResponse = z.object({ logoutUrl: z.string().nullable() });
 

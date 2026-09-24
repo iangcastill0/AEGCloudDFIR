@@ -75,6 +75,7 @@ const MODEL_NAMES = [
   'jobAttempt',
   'export',
   'exportItem',
+  'exportPart',
   'production',
   'productionRun',
   'productionItem',
@@ -82,6 +83,9 @@ const MODEL_NAMES = [
   'batesReservation',
   'auditEvent',
   'auditRecord',
+  'forensicImport',
+  'importArtifact',
+  'importCase',
 ] as const;
 
 export type FakeTx = Record<(typeof MODEL_NAMES)[number], FakeModel> & {
@@ -157,6 +161,7 @@ export interface FakeCtx {
     search: Mock;
     ensureIndex: Mock;
     addCaseToCollection: Mock;
+    addCaseToImport: Mock;
     setEmailFolder: Mock;
   };
   s3Send: Mock;
@@ -194,6 +199,7 @@ export function fakeCtx(options: FakeCtxOptions = {}): FakeCtx {
     search: vi.fn().mockResolvedValue({ total: 0, items: [] }),
     ensureIndex: vi.fn().mockResolvedValue({ created: false, indexName: 'test' }),
     addCaseToCollection: vi.fn().mockResolvedValue({ updated: 0, unchanged: 0, conflicts: 0 }),
+    addCaseToImport: vi.fn().mockResolvedValue({ updated: 0, unchanged: 0, conflicts: 0 }),
     setEmailFolder: vi.fn().mockResolvedValue({ updated: 0, unchanged: 0, conflicts: 0 }),
   };
   const s3Send = vi.fn().mockResolvedValue({});

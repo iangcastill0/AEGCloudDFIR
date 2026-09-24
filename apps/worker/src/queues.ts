@@ -10,6 +10,7 @@ export const QUEUES = {
   collectionFetchItem: 'collection.fetch-item',
   collectionFinalize: 'collection.finalize',
   pstExtract: 'pst.extract',
+  importAnalyze: 'import.analyze',
   processParse: 'process.parse',
   processExtract: 'process.extract',
   processOcr: 'process.ocr',
@@ -30,6 +31,7 @@ export const QUEUES = {
   processScan: 'process.scan',
   searchIndex: 'search.index',
   searchCaseCollection: 'search.case-collection',
+  searchCaseImport: 'search.case-import',
   exportRun: 'export.run',
   productionRun: 'production.run',
   deletionRun: 'deletion.run',
@@ -88,6 +90,8 @@ export const dedupKeys = {
   collectionFinalize: (collectionId: string) => `finalize:${collectionId}`,
   pstExtract: (collectionId: string, evidenceItemId: string) =>
     `pst:${collectionId}:${evidenceItemId}`,
+  importAnalyze: (importId: string, attemptToken = 'initial') =>
+    `import:${importId}:${attemptToken}`,
   processStage: (stage: string, evidenceItemId: string, version: number) =>
     `${stage}:${evidenceItemId}:v${version}`,
   /**
@@ -98,6 +102,7 @@ export const dedupKeys = {
    */
   searchIndex: (evidenceItemId: string, version: number, stage = 'final') =>
     `index:${evidenceItemId}:v${version}:${stage}`,
+  searchCaseImport: (importId: string, caseId: string) => `case-import:${importId}:${caseId}`,
   exportRun: (exportId: string) => `export:${exportId}`,
   productionRun: (productionRunId: string) => `production-run:${productionRunId}`,
   deletionRun: (deletionRequestId: string) => `deletion:${deletionRequestId}`,

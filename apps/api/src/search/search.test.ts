@@ -88,6 +88,27 @@ describe('SearchService.execute', () => {
     expect(caseFilter?.terms.caseIds).toEqual([]);
   });
 
+  it('limits imported evidence to the uploader or assigned cases for non-admins', async () => {
+    const adapter = makeAdapter();
+    const { service } = makeService(
+      { caseMember: { findMany: vi.fn(async () => [{ caseId: CASE_ID }]) } },
+      adapter,
+    );
+
+    await service.execute(makeAuth([TenantRole.case_manager]), { query: 'hello' }, fakeRequest());
+
+    expect(authFilters(adapter.lastBody)).toContainEqual({
+      bool: {
+        should: [
+          { bool: { must_not: [{ exists: { field: 'importId' } }] } },
+          { term: { importOwnerId: '22222222-2222-4222-8222-222222222222' } },
+          { terms: { caseIds: [CASE_ID] } },
+        ],
+        minimum_should_match: 1,
+      },
+    });
+  });
+
   it('read_only cannot search a case they are not assigned to (404, no leakage)', async () => {
     const adapter = makeAdapter();
     const { service } = makeService({ caseMember: { findMany: vi.fn(async () => []) } }, adapter);

@@ -1,0 +1,258 @@
+# Authentik enrollment + authentication flows for AEG-CloudDFIR.
+#
+# Filename sorts before aeg-clouddfir.yaml / aeg-clouddfir-staging.yaml so the
+# OIDC providers can !Find these flows on first apply.
+#
+# Identity (who you are) stays in Authentik. Organizations (which tenant you
+# work in) stay in the app. This file only creates IdP accounts: name, email,
+# password, then a TOTP app. It does not grant any tenant membership.
+#
+# There is no confirmation email. Second factor is the TOTP setup stage on
+# enrollment and the MFA check on every later sign-in. See
+# docs/guides/authentik-setup.md.
+version: 1
+metadata:
+  name: cdfir-auth-flows
+  labels:
+    blueprints.goauthentik.io/description: 'AEG-CloudDFIR public sign-up and sign-in flows'
+entries:
+  # --- Enrollment (sign up) -------------------------------------------------
+  - model: authentik_flows.flow
+    id: cdfir-enrollment
+    identifiers:
+      slug: cdfir-enrollment
+    attrs:
+      name: CloudDFIR enrollment
+      title: Create your AEG-CloudDFIR account
+      designation: enrollment
+      authentication: require_unauthenticated
+
+  - model: authentik_stages_prompt.prompt
+    id: cdfir-enrollment-field-username
+    identifiers:
+      name: cdfir-enrollment-field-username
+    attrs:
+      field_key: username
+      label: Username
+      type: username
+      required: true
+      placeholder: Username
+      placeholder_expression: false
+      order: 0
+
+  - model: authentik_stages_prompt.prompt
+    id: cdfir-enrollment-field-password
+    identifiers:
+      name: cdfir-enrollment-field-password
+    attrs:
+      field_key: password
+      label: Password
+      type: password
+      required: true
+      placeholder: Password
+      placeholder_expression: false
+      order: 1
+
+  - model: authentik_stages_prompt.prompt
+    id: cdfir-enrollment-field-password-repeat
+    identifiers:
+      name: cdfir-enrollment-field-password-repeat
+    attrs:
+      field_key: password_repeat
+      label: Password (repeat)
+      type: password
+      required: true
+      placeholder: Password (repeat)
+      placeholder_expression: false
+      order: 2
+
+  - model: authentik_stages_prompt.prompt
+    id: cdfir-enrollment-field-name
+    identifiers:
+      name: cdfir-enrollment-field-name
+    attrs:
+      field_key: name
+      label: Name
+      type: text
+      required: true
+      placeholder: Name
+      placeholder_expression: false
+      order: 0
+
+  - model: authentik_stages_prompt.prompt
+    id: cdfir-enrollment-field-email
+    identifiers:
+      name: cdfir-enrollment-field-email
+    attrs:
+      field_key: email
+      label: Email
+      type: email
+      required: true
+      placeholder: Email
+      placeholder_expression: false
+      order: 1
+
+  - model: authentik_stages_prompt.promptstage
+    id: cdfir-enrollment-prompt-credentials
+    identifiers:
+      name: cdfir-enrollment-prompt-credentials
+    attrs:
+      fields:
+        - !KeyOf cdfir-enrollment-field-username
+        - !KeyOf cdfir-enrollment-field-password
+        - !KeyOf cdfir-enrollment-field-password-repeat
+
+  - model: authentik_stages_prompt.promptstage
+    id: cdfir-enrollment-prompt-details
+    identifiers:
+      name: cdfir-enrollment-prompt-details
+    attrs:
+      fields:
+        - !KeyOf cdfir-enrollment-field-name
+        - !KeyOf cdfir-enrollment-field-email
+
+  - model: authentik_stages_user_write.userwritestage
+    id: cdfir-enrollment-user-write
+    identifiers:
+      name: cdfir-enrollment-user-write
+    attrs:
+      # Active at once. We do not wait on a confirmation mail; TOTP is the
+      # second check, on this flow and on every later sign-in.
+      create_users_as_inactive: false
+      user_creation_mode: always_create
+
+  - model: authentik_stages_authenticator_totp.authenticatortotpstage
+    id: cdfir-totp-setup
+    identifiers:
+      name: cdfir-totp-setup
+    attrs:
+      digits: 6
+      friendly_name: Authenticator app
+
+  - model: authentik_stages_user_login.userloginstage
+    id: cdfir-enrollment-user-login
+    identifiers:
+      name: cdfir-enrollment-user-login
+
+  - model: authentik_flows.flowstagebinding
+    identifiers:
+      target: !KeyOf cdfir-enrollment
+      stage: !KeyOf cdfir-enrollment-prompt-credentials
+      order: 10
+
+  - model: authentik_flows.flowstagebinding
+    identifiers:
+      target: !KeyOf cdfir-enrollment
+      stage: !KeyOf cdfir-enrollment-prompt-details
+      order: 11
+
+  - model: authentik_flows.flowstagebinding
+    identifiers:
+      target: !KeyOf cdfir-enrollment
+      stage: !KeyOf cdfir-enrollment-user-write
+      order: 20
+
+  - model: authentik_flows.flowstagebinding
+    identifiers:
+      target: !KeyOf cdfir-enrollment
+      stage: !KeyOf cdfir-totp-setup
+      order: 30
+
+  - model: authentik_flows.flowstagebinding
+    identifiers:
+      target: !KeyOf cdfir-enrollment
+      stage: !KeyOf cdfir-enrollment-user-login
+      order: 100
+
+  # --- Authentication (sign in) ---------------------------------------------
+  # Own flow so we can put a Sign up link on identification without mutating
+  # Authentik's global default identification stage (used by the admin console).
+  - model: authentik_flows.flow
+    id: cdfir-authentication
+    identifiers:
+      slug: cdfir-authentication
+    attrs:
+      name: CloudDFIR authentication
+      title: Sign in to AEG-CloudDFIR
+      designation: authentication
+      authentication: none
+
+  - model: authentik_stages_identification.identificationstage
+    id: cdfir-identification
+    identifiers:
+      name: cdfir-identification
+    attrs:
+      user_fields:
+        - email
+        - username
+      enrollment_flow: !KeyOf cdfir-enrollment
+      recovery_flow: !Find [authentik_flows.flow, [slug, default-recovery-flow]]
+
+  - model: authentik_flows.flowstagebinding
+    identifiers:
+      target: !KeyOf cdfir-authentication
+      stage: !KeyOf cdfir-identification
+      order: 10
+
+  - model: authentik_flows.flowstagebinding
+    id: cdfir-authentication-password-binding
+    identifiers:
+      target: !KeyOf cdfir-authentication
+      stage:
+        !Find [authentik_stages_password.passwordstage, [name, default-authentication-password]]
+      order: 20
+    attrs:
+      re_evaluate_policies: true
+
+  - model: authentik_stages_authenticator_validate.authenticatorvalidatestage
+    id: cdfir-authentication-mfa
+    identifiers:
+      name: cdfir-authentication-mfa
+    attrs:
+      # Require an authenticator app. If they have none (an older account),
+      # send them through the same TOTP setup used at enrollment.
+      not_configured_action: configure
+      device_classes:
+        - totp
+      configuration_stages:
+        - !KeyOf cdfir-totp-setup
+
+  - model: authentik_flows.flowstagebinding
+    id: cdfir-authentication-mfa-binding
+    identifiers:
+      target: !KeyOf cdfir-authentication
+      stage: !KeyOf cdfir-authentication-mfa
+      order: 30
+    attrs:
+      re_evaluate_policies: true
+
+  - model: authentik_flows.flowstagebinding
+    identifiers:
+      target: !KeyOf cdfir-authentication
+      stage:
+        !Find [authentik_stages_user_login.userloginstage, [name, default-authentication-login]]
+      order: 100
+
+  - model: authentik_policies.policybinding
+    identifiers:
+      target: !KeyOf cdfir-authentication-password-binding
+      policy:
+        !Find [
+          authentik_policies_expression.expressionpolicy,
+          [name, default-authentication-flow-password-stage],
+        ]
+      order: 10
+    attrs:
+      failure_result: true
+
+  - model: authentik_policies.policybinding
+    identifiers:
+      target: !KeyOf cdfir-authentication-mfa-binding
+      policy:
+        !Find [
+          authentik_policies_expression.expressionpolicy,
+          [name, default-authentication-flow-authenticator-validate-stage],
+        ]
+      order: 10
+    attrs:
+      failure_result: true

@@ -135,6 +135,33 @@ services:
       timeout: 5s
       retries: 30
 
+  crush-parser-staging:
+    container_name: cdfir-staging-crush-parser
+    image: ghcr.io/iangcastill0/aegclouddfir/crush-parser:${CDFIR_IMAGE_TAG:-main}
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 4g
+    cpus: 2
+    environment:
+      CRUSH_SCRATCH_DIR: /scratch
+      CRUSH_MAX_INPUT_BYTES: ${CDFIR_UPLOAD_MAX_BYTES:-10737418240}
+      CRUSH_MAX_ENTRIES: ${CDFIR_IMPORT_MAX_ENTRIES:-25000}
+      CRUSH_MAX_TOTAL_BYTES: ${CDFIR_MAX_ARCHIVE_TOTAL_BYTES:-2147483648}
+      CRUSH_MAX_EXPANSION_RATIO: ${CDFIR_MAX_ARCHIVE_EXPANSION_RATIO:-100}
+      CRUSH_MAX_DEPTH: ${CDFIR_MAX_ARCHIVE_DEPTH:-3}
+      CRUSH_MAX_PREVIEW_ROWS: ${CDFIR_IMPORT_PREVIEW_ROWS:-200}
+    volumes:
+      - staging-crush-parser-scratch:/scratch
+    tmpfs:
+      - /tmp:size=256m,mode=1770
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:5200/healthz >/dev/null']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   api-staging:
     container_name: cdfir-staging-api
     logging:
@@ -188,12 +215,22 @@ services:
       CDFIR_OPENSEARCH_URL: http://opensearch-staging:9200
       CDFIR_TIKA_URL: ${CDFIR_TIKA_URL:-http://tika:9998}
       CDFIR_CLAMAV_HOST: clamav
+      CDFIR_CRUSH_PARSER_URL: http://crush-parser-staging:5200
+      CDFIR_EXPORT_SCRATCH_DIR: /var/lib/cdfir/export-scratch
+    volumes:
+      # Its OWN volume, not production's. Both stacks share one 630 GB disk, and
+      # a staging PST export must not be able to fill the space production's
+      # exports need. See the production compose file for why this is a named
+      # volume and never /tmp.
+      - staging-worker-export-scratch:/var/lib/cdfir/export-scratch
     depends_on:
       postgres-staging:
         condition: service_healthy
       redis-staging:
         condition: service_healthy
       opensearch-staging:
+        condition: service_healthy
+      crush-parser-staging:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
@@ -221,5 +258,7 @@ services:
 
 volumes:
   staging-opensearch-data:
+  staging-crush-parser-scratch:
+  staging-worker-export-scratch:
   staging-postgres-data:
   staging-redis-data:

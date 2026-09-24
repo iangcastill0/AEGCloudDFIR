@@ -27,6 +27,9 @@ entries:
       authorization_flow:
         !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
       invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+      # Shared with production: one Authentik, two OIDC apps. Sign up creates
+      # an IdP user; staging and prod still have separate (issuer, sub) pairs.
+      authentication_flow: !Find [authentik_flows.flow, [slug, cdfir-authentication]]
       redirect_uris:
         - matching_mode: strict
           url:
