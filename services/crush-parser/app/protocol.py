@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
 from pathlib import PurePath
 
 
@@ -19,3 +21,15 @@ def parse_positive_header(value: str | None, name: str, default: int) -> int:
     if parsed <= 0:
         raise ValueError(f"{name} must be a positive integer")
     return parsed
+
+
+def configure_tempdir(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    previous = tempfile.tempdir
+    tempfile.tempdir = str(path)
+    try:
+        with tempfile.TemporaryFile():
+            pass
+    except OSError as exc:
+        tempfile.tempdir = previous
+        raise RuntimeError(f"scratch directory is not writable: {path}") from exc

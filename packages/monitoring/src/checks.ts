@@ -29,6 +29,24 @@ export const BACKUP_MAX_AGE_HOURS = 30;
 export const CERT_WARN_DAYS = 21;
 export const CERT_FAIL_DAYS = 7;
 
+/**
+ * `df -h /` — the HOST root filesystem, on purpose, and deliberately NOT
+ * configurable.
+ *
+ * This checker only ever runs on the host, from cron. Run it inside a container
+ * and this same command measures the container's own filesystem, which is almost
+ * always nearly empty. The alert would then read "root filesystem 4% used" every
+ * five minutes while the real disk filled up — healthy-looking, and worse than
+ * no monitor at all. That is exactly the outage this package was written for: the
+ * disk sat at 96% for five hours, PostgreSQL crashed, and it could not restart
+ * because replaying its own log also needed space.
+ *
+ * So there is no env var to point this somewhere else. If someone ever needs to
+ * run the checker in a container, the honest fix is to mount the host root and
+ * change this line on purpose, not to leave a knob that quietly lies.
+ */
+export const HOST_DF_ARGV = ['-h', '/'] as const;
+
 /** Pull the "Use%" column out of `df -h /` output. */
 export function parseDfCapacity(dfOutput: string): number | null {
   for (const line of dfOutput.split('\n')) {
@@ -126,6 +144,20 @@ export function evaluateDisk(
   return { name: 'disk', status, detail };
 }
 
+/**
+ * Where scripts/backup-postgres.sh writes its "this backup was verified" stamp.
+ *
+ * ABSOLUTE on purpose, and the same path that script defaults to. The writer used
+ * to default to a bare relative `.last-backup`, so the stamp landed wherever the
+ * caller happened to be — /root, when cron invoked the script by its full path —
+ * while this reader kept looking in the repo. The result is the nastiest kind of
+ * false alarm: "no backup found" every five minutes forever, with backups running
+ * perfectly. Operators mute that, and then a genuinely missed backup is muted too.
+ *
+ * Override with CDFIR_BACKUP_STAMP_FILE, and set the SAME value on both sides.
+ */
+export const DEFAULT_BACKUP_STAMP_FILE = '/var/www/AEGCloudDFIR/.last-backup';
+
 export function evaluateBackupAge(lastBackupAt: Date | null, now: Date): CheckResult {
   if (lastBackupAt === null) {
     return { name: 'backup', status: 'fail', detail: 'no backup found' };
@@ -180,6 +212,21 @@ export function evaluateReadyz(httpStatus: number, body: string): CheckResult {
   }
   return { name: 'api', status: 'ok', detail: 'database and object storage ok' };
 }
+
+/**
+ * `docker ps` against the HOST's docker, one tab-separated row per container.
+ *
+ * The other half of the host rule above. Asking a container's own docker would
+ * need the docker socket mounted in, and mounting that socket hands the
+ * container root-equivalent control of the whole host — including every evidence
+ * volume — even mounted `:ro`, because `:ro` protects the file, not the API
+ * behind it. This repo already refused that trade once, for cAdvisor
+ * (docs/runbooks/monitoring.md). Running on the host needs no such grant: root
+ * cron can already see everything, and this only reads.
+ *
+ * The format string is part of the contract with evaluateContainers below.
+ */
+export const HOST_DOCKER_PS_ARGV = ['ps', '--format', '{{.Names}}\t{{.Status}}'] as const;
 
 /**
  * Expects `docker ps --format '{{.Names}}\t{{.Status}}'`. A container that is

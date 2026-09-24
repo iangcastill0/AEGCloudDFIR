@@ -5,8 +5,19 @@ WORKDIR /app
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json .npmrc turbo.json tsconfig.base.json ./
 COPY apps/api ./apps/api
 COPY packages ./packages
-RUN pnpm install --frozen-lockfile --filter @aeg-clouddfir/api... \
- && pnpm --filter @aeg-clouddfir/api... build
+# The HOST health checker (packages/monitoring) is built here as a passenger, and
+# scripts/deploy.sh copies it out of this image onto the host.
+#
+# It rides along rather than getting its own image because it is two
+# dependency-free .js files, and because a second image would be a second thing
+# to build, publish, pull and keep in step with the code it watches.
+#
+# It cannot be built on the host: there is no pnpm there, and building there is
+# what filled the disk once already. It cannot RUN in a container either — three
+# of its six checks are host facts. See HOST_DF_ARGV in packages/monitoring.
+RUN pnpm install --frozen-lockfile --filter @aeg-clouddfir/api... --filter @aeg-clouddfir/monitoring \
+ && pnpm --filter @aeg-clouddfir/api... --filter @aeg-clouddfir/monitoring build \
+ && test -f packages/monitoring/dist/cli.js
 
 FROM node:22-alpine
 RUN apk add --no-cache wget tini && addgroup -S ev && adduser -S ev -G ev

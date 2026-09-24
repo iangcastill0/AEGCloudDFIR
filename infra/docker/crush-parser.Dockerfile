@@ -26,6 +26,8 @@ COPY services/crush-parser/THIRD_PARTY_NOTICES.md /licenses/THIRD_PARTY_NOTICES.
 COPY LICENSE /licenses/Apache-2.0.txt
 
 RUN mkdir /scratch && chown crush:crush /scratch
+ENV CRUSH_SCRATCH_DIR=/scratch \
+    TMPDIR=/scratch
 USER crush
 EXPOSE 5200
 

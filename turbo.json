@@ -1,5 +1,10 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "globalDependencies": [
+    "scripts/monitor.sh",
+    "scripts/backup-postgres.sh",
+    "infra/cron/cdfir-monitor"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],

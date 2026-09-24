@@ -1,8 +1,13 @@
 /**
  * Runs every check and reports the result to a dead-man's-switch service.
  *
- * Run from cron on the server:
- *   cd /var/www/AEGCloudDFIR && node --env-file=.env packages/monitoring/dist/cli.js
+ * Runs ON THE HOST, from cron, every 5 minutes. Do not run it in a container:
+ * three of the six checks are host facts, and see HOST_DF_ARGV in checks.ts for
+ * what happens when they are not.
+ *
+ * Do not invoke it directly from cron either — use scripts/monitor.sh, which
+ * takes the lock, applies a timeout, hands over only the few settings this needs
+ * out of .env, and writes the log. Setup: docs/runbooks/monitoring.md.
  *
  * Two layers of protection, deliberately:
  *  - This process reports FAILURES it can see (site down, storage unreachable,
@@ -19,21 +24,25 @@ import {
   evaluateBackupAge,
   evaluateCertExpiry,
   evaluateContainers,
+  DEFAULT_BACKUP_STAMP_FILE,
   DISK_WARN_PERCENT,
   evaluateDisk,
+  HOST_DF_ARGV,
+  HOST_DOCKER_PS_ARGV,
   parseReclaimable,
   evaluateReadyz,
   parseDfCapacity,
   summarize,
   type CheckResult,
 } from './checks.js';
+import { report } from './report.js';
 
 const run = promisify(execFile);
 
 const API_PORT = process.env.CDFIR_API_HOST_PORT ?? '4000';
 const SITE_URL = process.env.CDFIR_WEB_PUBLIC_URL ?? 'https://app.aegclouddfir.com';
 const PING_URL = process.env.CDFIR_HEALTHCHECK_PING_URL ?? '';
-const BACKUP_STAMP = process.env.CDFIR_BACKUP_STAMP_FILE ?? '/var/www/AEGCloudDFIR/.last-backup';
+const BACKUP_STAMP = process.env.CDFIR_BACKUP_STAMP_FILE ?? DEFAULT_BACKUP_STAMP_FILE;
 const CONTAINERS = (
   process.env.CDFIR_EXPECTED_CONTAINERS ??
   'cdfir-api-1,cdfir-web-1,cdfir-worker-1,cdfir-postgres-1,cdfir-redis-1,cdfir-opensearch-1'
@@ -85,7 +94,7 @@ async function reclaimableDockerBytes(): Promise<number | undefined> {
 }
 
 async function checkDisk(): Promise<CheckResult> {
-  const { stdout } = await run('df', ['-h', '/']);
+  const { stdout } = await run('df', [...HOST_DF_ARGV]);
   const usedPercent = parseDfCapacity(stdout);
   // Only worth gathering when there is something to report.
   if (usedPercent === null || usedPercent < DISK_WARN_PERCENT) {
@@ -95,7 +104,7 @@ async function checkDisk(): Promise<CheckResult> {
 }
 
 async function checkContainers(): Promise<CheckResult> {
-  const { stdout } = await run('docker', ['ps', '--format', '{{.Names}}\t{{.Status}}']);
+  const { stdout } = await run('docker', [...HOST_DOCKER_PS_ARGV]);
   return evaluateContainers(stdout, CONTAINERS);
 }
 
@@ -149,28 +158,9 @@ const results = await Promise.all([
   attempt('tls', checkCert),
 ]);
 
-const summary = summarize(results);
-process.stdout.write(`${new Date().toISOString()} ${summary.status.toUpperCase()}\n`);
-process.stdout.write(`${summary.text}\n`);
-
-if (PING_URL === '') {
-  process.stdout.write('CDFIR_HEALTHCHECK_PING_URL is not set — nothing was notified\n');
-} else {
-  const target = summary.shouldAlert ? `${PING_URL.replace(/\/$/, '')}/fail` : PING_URL;
-  try {
-    const res = await fetch(target, {
-      method: 'POST',
-      body: summary.text,
-      signal: AbortSignal.timeout(15_000),
-    });
-    process.stdout.write(
-      `ping ${summary.shouldAlert ? 'FAIL' : 'ok'} -> HTTP ${String(res.status)}\n`,
-    );
-  } catch (err) {
-    // Losing the ping is itself detected: the service alerts on silence.
-    console.error(`ping failed: ${err instanceof Error ? err.message : String(err)}`);
-  }
-}
-
-// Non-zero so a human reading cron output or the log can see it at a glance.
-process.exitCode = summary.shouldAlert ? 1 : 0;
+// Non-zero so a human reading the log, or cron's mail, sees it at a glance.
+// report() decides which code and why — see the constants in report.ts.
+process.exitCode = await report(summarize(results), {
+  pingUrl: PING_URL,
+  write: (text) => process.stdout.write(text),
+});

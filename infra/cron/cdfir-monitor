@@ -1,0 +1,30 @@
+# CloudDFIR health checker — runs every 5 minutes and pings a dead-man's switch.
+#
+# Install on the host as /etc/cron.d/cdfir-monitor. The exact command is in
+# docs/runbooks/monitoring.md; it is a single non-interactive `install`, so
+# nothing has to be typed into an editor.
+#
+# Why /etc/cron.d and not `crontab -e`:
+#  - it is a plain file, so installing it is one command that can be repeated
+#    safely, and `cat` shows what is scheduled
+#  - it survives a lost root crontab, which is how this monitoring went missing
+#    in the first place: the 2026-09-15 server move carried the code across and
+#    left the schedule behind
+#
+# Two rules this file has to obey, both of which make cron IGNORE it silently:
+#  - the filename must not contain a dot (so: cdfir-monitor, not cdfir-monitor.cron)
+#  - the file must end with a newline
+# A test in packages/monitoring pins both, because "silently ignored" is the one
+# failure mode a dead-man's switch cannot distinguish from a dead host.
+#
+# Changing the schedule? Change the Period in healthchecks.io to match, or the
+# switch either alerts on a gap that is normal or stops noticing a real one.
+
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# The wrapper writes everything to /var/log/cdfir-monitor.log and prints only when
+# a run went wrong. There is no mail transport on this host, so mail would be a
+# quiet dead end; the log and healthchecks.io are the record.
+MAILTO=""
+
+*/5 * * * * root /var/www/AEGCloudDFIR/scripts/monitor.sh
