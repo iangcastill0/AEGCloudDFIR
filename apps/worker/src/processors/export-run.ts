@@ -19,11 +19,34 @@ import {
 } from '@aeg-clouddfir/search';
 import { sanitizeError, type WorkerContext } from '../context.js';
 import { QUERY_ID_CHUNK, chunkIds, queryInChunks } from '../chunked.js';
+import { pstStoreDisplayName, runPstExport, type PstExportItem } from './pst-export.js';
 import type { ExportRunPayload } from './payloads.js';
 
 /**
+ * Where an email's attachments end up in a native export.
+ *
+ * `inline` — the default. An `.eml` is RFC822 and already carries its
+ * attachments inside it, so writing them out again as separate files puts a
+ * second copy of the same bytes in the archive and adds one directory per
+ * email. A copy our parser made is a processed artefact, not a native, and a
+ * native export is supposed to hand over natives.
+ *
+ * `extracted` — the old layout, kept rather than deleted. "Give me the loose
+ * files" is a real request: some review platforms ingest loose attachments,
+ * and anyone re-producing an export they already certified needs the layout
+ * they certified. It costs one branch to keep.
+ */
+const attachmentLayout = z.enum(['inline', 'extracted']);
+type AttachmentLayout = z.infer<typeof attachmentLayout>;
+
+/**
  * Frozen Export.parameters shape (written by apps/api from
- * createExportRequest): selection + includeFamilies + csv + archiveSplitMb.
+ * createExportRequest): selection + includeFamilies + attachments + csv +
+ * archiveSplitMb.
+ *
+ * `attachments` defaults to `inline`, so an export row frozen before this
+ * existed reads as inline. That only matters for a row still queued or
+ * running, because `processExportRun` returns early on one already `ready`.
  */
 const exportParameters = z.object({
   selection: z.discriminatedUnion('kind', [
@@ -33,6 +56,7 @@ const exportParameters = z.object({
     z.object({ kind: z.literal('case'), caseId: z.string().uuid() }),
   ]),
   includeFamilies: z.boolean().default(true),
+  attachments: attachmentLayout.default('inline'),
   csv: z
     .object({
       columns: z.array(z.string()).min(1),
@@ -40,6 +64,12 @@ const exportParameters = z.object({
     })
     .optional(),
   archiveSplitMb: z.number().int().min(64).max(10_240).default(2048),
+  /**
+   * Part size for a `pst` export. Capped at 3 GiB because the writer's own hard
+   * ceiling is about 3.19 GiB and it SILENTLY clamps anything larger — see the
+   * contract for the full reason.
+   */
+  pstPartMb: z.number().int().min(64).max(3072).default(3072),
 });
 type ExportParameters = z.infer<typeof exportParameters>;
 
@@ -53,11 +83,19 @@ const SAVED_SEARCH_RESULT_CAP = 1_000_000;
 const FAMILY_KINDS = FAMILY_RELATIONSHIP_KINDS;
 
 /**
- * The kinds that put a child in its parent's directory. Deliberately narrower
- * than FAMILY_KINDS: family expansion decides what gets EXPORTED, this decides
- * where a file LANDS in the archive, and they are not the same question.
+ * The kinds whose bytes are already inside the parent's native.
+ *
+ * Deliberately narrower than FAMILY_KINDS: family expansion decides what gets
+ * EXPORTED, this decides whether a child needs its own archive entry at all,
+ * and they are not the same question. A `family` relationship links items that
+ * belong together; it does NOT mean one contains the other, so those children
+ * are always written as their own files.
  */
 const ATTACHMENT_KINDS = ['attachment', 'inline_attachment'] as const;
+
+function isAttachmentKind(kind: string): boolean {
+  return (ATTACHMENT_KINDS as readonly string[]).includes(kind);
+}
 
 /**
  * Splitter decision, factored out for unit testing: start a new archive part
@@ -250,14 +288,43 @@ export interface FamilyIndex {
   parents: Set<string>;
   /** Parent id -> its name, for parents inside this export only. */
   nameById: Map<string, string>;
+  /**
+   * Parent id -> the archive path that parent's native will occupy.
+   *
+   * Filled for the `inline` layout only, and only for parents inside this
+   * export. It exists because items stream in id order, so an attachment is
+   * often reached BEFORE the email it came out of. The child has to record
+   * which file it is inside, and it cannot wait for that file to be written.
+   * Precomputing the parent's path is what makes the two agree.
+   */
+  pathById: Map<string, string>;
+}
+
+/** The filename a native gets in the archive. Emails gain `.eml` if missing. */
+function archiveFileName(item: { kind: string; name: string }): string {
+  return sanitizeFilename(
+    item.kind === 'email' && !item.name.endsWith('.eml') ? `${item.name}.eml` : item.name,
+  );
+}
+
+function custodianDir(email: string | null | undefined): string {
+  return sanitizeFilename(email ?? 'unassigned');
+}
+
+/** Append the id stem before the extension, which is how collisions are broken. */
+function withIdSuffix(path: string, id: string): string {
+  return path.replace(/(\.[^./]+)?$/, `_${id.slice(0, 8)}$1`);
 }
 
 export async function buildFamilyIndex(
   ctx: WorkerContext,
   tenantId: string,
   ids: string[],
+  layout: AttachmentLayout,
 ): Promise<FamilyIndex> {
-  if (ids.length === 0) return { parents: new Set(), nameById: new Map() };
+  if (ids.length === 0) {
+    return { parents: new Set(), nameById: new Map(), pathById: new Map() };
+  }
 
   // Chunked, one transaction per batch, for the same reasons as expandFamilies.
   const relations = await queryInChunks(ids, (batch) =>
@@ -280,11 +347,26 @@ export async function buildFamilyIndex(
       withTenantContext(ctx.prisma, tenantId, (tx) =>
         tx.evidenceItem.findMany({
           where: { id: { in: batch } },
-          select: { id: true, name: true },
+          select: { id: true, name: true, kind: true, custodian: { select: { email: true } } },
         }),
       ),
   );
-  return { parents, nameById: new Map(named.map((i) => [i.id, i.name])) };
+
+  const pathById = new Map<string, string>();
+  if (layout === 'inline') {
+    // Sorted by id, so the path a parent gets does not depend on the order the
+    // database happened to return rows in. A child writes this path into the
+    // manifest before the parent is written, so the two must agree every run.
+    const taken = new Set<string>();
+    for (const parent of [...named].sort((a, b) => (a.id < b.id ? -1 : 1))) {
+      const base = `custodian/${custodianDir(parent.custodian?.email)}/${archiveFileName(parent)}`;
+      const path = taken.has(base) ? withIdSuffix(base, parent.id) : base;
+      taken.add(path);
+      pathById.set(parent.id, path);
+    }
+  }
+
+  return { parents, nameById: new Map(named.map((i) => [i.id, i.name])), pathById };
 }
 
 /**
@@ -365,7 +447,19 @@ function csvRowFor(item: LoadedExportItem): ExportRow {
 
 interface ManifestEntry {
   evidenceItemId: string;
+  /**
+   * `file` — its own entry in the zip, at `archivePath`.
+   * `inline` — its bytes are inside `containerPath`, which IS in the zip. It
+   * has no `archivePath`, because listing a path the reader cannot extract
+   * would be worse than saying plainly that there is not one.
+   */
+  placement: 'file' | 'inline';
   archivePath: string;
+  /** The archive entry that contains this item's bytes. Empty for a file. */
+  containerPath: string;
+  /** The evidence item whose native contains this one. Empty for a file. */
+  containerItemId: string;
+  /** For an inline entry, the part its container landed in. */
   archivePart: number;
   sha256: string;
   size: number;
@@ -373,6 +467,8 @@ interface ManifestEntry {
   custodianId: string;
   collectionId: string;
   verified: boolean;
+  /** Why this item is laid out the way it is, when that is not the default. */
+  note: string;
   error: string;
 }
 
@@ -407,6 +503,16 @@ export async function processExportRun(
   try {
     const params = exportParameters.parse(exportRow.parameters);
     let ids = await resolveSelectionIds(ctx, tenantId, params);
+    // `includeFamilies` still decides WHAT is exported; `attachments` decides
+    // HOW it is laid out. They are separate questions and both still matter.
+    //
+    // What changed for email: with attachments inline, turning this on adds
+    // the parent `.eml` (and therefore every sibling attachment, which is
+    // inside it) as ONE extra file, where it used to add N loose files. So it
+    // is not a no-op — select one attachment with it off and you get that
+    // attachment alone; turn it on and you get the whole message it came from.
+    // For non-email families (`family` relationships link items that belong
+    // together without one containing the other) nothing at all changed.
     if (params.includeFamilies) {
       ids = await expandFamilies(ctx, tenantId, ids);
     }
@@ -424,10 +530,19 @@ export async function processExportRun(
         params,
         loadItemsInBatches(ctx, tenantId, ids),
       );
+    } else if (exportRow.kind === 'pst') {
+      result = await runPstExportKind(
+        ctx,
+        tenantId,
+        exportId,
+        exportRow.name,
+        params,
+        loadItemsInBatches(ctx, tenantId, ids),
+      );
     } else {
       // Built before the stream starts, so the archive layout is decided from
       // the whole selection rather than from whichever batch is in hand.
-      const family = await buildFamilyIndex(ctx, tenantId, ids);
+      const family = await buildFamilyIndex(ctx, tenantId, ids, params.attachments);
       result = await runNativeExport(
         ctx,
         tenantId,
@@ -444,6 +559,22 @@ export async function processExportRun(
         where: { id: exportId },
         data: { status: 'verifying' },
       });
+      // Written in the SAME transaction that marks the export ready. An export
+      // that says `ready` without part digests is one a recipient cannot check
+      // a download against, and there would be nothing to say so.
+      if (result.parts.length > 0) {
+        await tx.exportPart.createMany({
+          data: result.parts.map((part) => ({
+            tenantId,
+            exportId,
+            partNumber: part.partNumber,
+            objectKey: part.objectKey,
+            sha256: part.sha256,
+            sizeBytes: BigInt(part.sizeBytes),
+          })),
+          skipDuplicates: true,
+        });
+      }
       await tx.export.update({
         where: { id: exportId },
         data: {
@@ -453,7 +584,11 @@ export async function processExportRun(
           totalBytes: BigInt(result.totalBytes),
           outputPrefix: result.outputPrefix,
           manifestSha256: result.manifestSha256,
-          statusDetail: exportStatusDetail(result.itemCount, result.failedCount),
+          statusDetail: exportStatusDetail(
+            result.itemCount,
+            result.failedCount,
+            result.inlineCount,
+          ),
         },
       });
       await appendAuditEvent(tx, {
@@ -465,10 +600,18 @@ export async function processExportRun(
         summary: {
           kind: exportRow.kind,
           itemCount: result.itemCount,
+          inlineAttachmentCount: result.inlineCount,
           failedCount: result.failedCount,
           totalBytes: result.totalBytes,
           archiveParts: result.archiveParts,
           manifestSha256: result.manifestSha256,
+          // A PST export discloses a RECONSTRUCTION, not natives. The audit log
+          // is the record of what was disclosed, so it has to say which — a row
+          // that reads like a native export of the same items would be wrong
+          // about the one fact that matters later.
+          ...(exportRow.kind === 'pst'
+            ? { reconstruction: true, pstBytesAreHashVerifiable: false }
+            : {}),
         },
       });
     });
@@ -492,13 +635,114 @@ export async function processExportRun(
   }
 }
 
+/** One archive part and the digest of the part itself, not of its contents. */
+export interface ExportPartDigest {
+  partNumber: number;
+  objectKey: string;
+  sha256: string;
+  sizeBytes: number;
+}
+
 interface ExportResult {
   itemCount: number;
+  /** Attachments left inside a parent native rather than written as files. */
+  inlineCount: number;
   failedCount: number;
   totalBytes: number;
   outputPrefix: string;
   manifestSha256: string;
   archiveParts: number;
+  /** Empty for a CSV export, which produces no archive parts. */
+  parts: ExportPartDigest[];
+}
+
+/**
+ * `pst` export: hand the mail to the vendored PST writer, and only the mail.
+ *
+ * A PST is a mailbox file. A loose PDF has nowhere to go in one, so anything
+ * that is not an email is skipped and named in the export's exceptions, rather
+ * than silently dropped or wedged in as an orphan message. Selecting a mixed set
+ * and asking for a PST is a real thing a user will do, and the export has to say
+ * what it did with the rest.
+ *
+ * The interesting behaviour lives in `pst-export.ts`, including the rule that a
+ * PST cannot ship without the native `.eml` digests beside it.
+ */
+async function runPstExportKind(
+  ctx: WorkerContext,
+  tenantId: string,
+  exportId: string,
+  exportName: string,
+  params: ExportParameters,
+  batches: AsyncIterable<LoadedExportItem[]>,
+): Promise<ExportResult> {
+  const items: PstExportItem[] = [];
+  const skipped: string[] = [];
+  for await (const batch of batches) {
+    for (const item of batch) {
+      if (item.kind !== 'email') {
+        skipped.push(item.id);
+        continue;
+      }
+      items.push({
+        evidenceItemId: item.id,
+        sha256: item.sha256,
+        size: Number(item.size),
+        subject: item.emailMetadata?.subject ?? item.name,
+        // The real corpus has opaque Graph folder ids and messages with no
+        // folder at all; `sourcePath` is what the collector recorded, and the
+        // writer files anything blank under "Unfiled".
+        folderPath: item.sourcePath,
+        custodianEmail: item.custodian?.email ?? '',
+        collectionId: item.collectionId ?? '',
+        storageClass: item.blob?.storageClass === 'quarantine' ? 'quarantine' : 'evidence',
+        objectKey: item.blob?.objectKey ?? '',
+        receivedAt:
+          item.emailMetadata?.receivedAt?.toISOString() ??
+          item.emailMetadata?.sentAt?.toISOString() ??
+          item.primaryDate?.toISOString() ??
+          null,
+      });
+    }
+  }
+
+  if (items.length === 0) {
+    throw new Error(
+      skipped.length > 0
+        ? `this selection has no email items, so there is nothing to put in a PST ` +
+            `(${String(skipped.length)} non-email item(s) were selected)`
+        : 'this selection is empty, so there is nothing to put in a PST',
+    );
+  }
+  if (skipped.length > 0) {
+    ctx.log.warn(
+      { exportId, skipped: skipped.length },
+      'pst export: non-email items cannot go in a mailbox file; they are listed as exceptions',
+    );
+  }
+
+  const outcome = await runPstExport(ctx, tenantId, exportId, items, {
+    binPath: ctx.config.CDFIR_PSTB_BIN,
+    scratchRoot: ctx.config.CDFIR_EXPORT_SCRATCH_DIR,
+    timeoutMs: ctx.config.CDFIR_PSTB_TIMEOUT_MS,
+    spoolThresholdBytes: ctx.config.CDFIR_PSTB_SPOOL_THRESHOLD_BYTES,
+    partBytes: params.pstPartMb * 1024 * 1024,
+    storeDisplayName: pstStoreDisplayName(exportName),
+  });
+
+  return {
+    itemCount: outcome.itemCount,
+    // A PST has no "inline attachment" concept to report: attachments live
+    // inside their message in MAPI form, which is not the same question the zip
+    // path's inline count answers.
+    inlineCount: 0,
+    failedCount: outcome.failedCount + skipped.length,
+    totalBytes: outcome.totalBytes,
+    outputPrefix: outcome.outputPrefix,
+    manifestSha256: outcome.manifestSha256,
+    archiveParts: outcome.parts.length,
+    parts: outcome.parts,
+  };
 }
 
 async function runCsvExport(
@@ -548,11 +792,15 @@ async function runCsvExport(
   );
   return {
     itemCount,
+    // A CSV export has one row per item regardless of where the bytes live.
+    inlineCount: 0,
     failedCount: 0,
     totalBytes: csv.byteLength,
     outputPrefix: put.objectKey,
     manifestSha256: put.sha256,
     archiveParts: 0,
+    // A CSV export is one object, not a split archive.
+    parts: [],
   };
 }
 
@@ -564,13 +812,31 @@ async function runCsvExport(
  * items assigned did precisely that, and the only way to tell was to notice
  * the zero. In a product whose failure mode is "reports success, silently
  * broken", an empty archive must say so out loud.
+ *
+ * `inlineCount` exists for the same reason. With attachments left inside their
+ * parent emails, a 434,878-item export unzips to 185,091 files. A reviewer who
+ * counts them and is told nothing has every reason to think evidence went
+ * missing, so the difference is stated up front rather than left to be found.
  */
-export function exportStatusDetail(itemCount: number, failedCount: number): string {
+export function exportStatusDetail(
+  itemCount: number,
+  failedCount: number,
+  inlineCount = 0,
+): string {
   if (itemCount === 0) {
     return 'No items matched this selection, so the export is empty. Check that the tag, case or search you chose still contains items.';
   }
-  if (failedCount > 0) return `${String(failedCount)} item(s) failed verification`;
-  return '';
+  const said: string[] = [];
+  if (inlineCount > 0) {
+    const n = (v: number): string => v.toLocaleString('en-US');
+    said.push(
+      `${n(itemCount)} items: ${n(itemCount - inlineCount)} file(s) in the archive, plus ` +
+        `${n(inlineCount)} attachment(s) left inside the parent emails that already contain them. ` +
+        `Every one is listed in manifest.json; inline-attachments.csv names the file each is in.`,
+    );
+  }
+  if (failedCount > 0) said.push(`${String(failedCount)} item(s) failed verification`);
+  return said.join(' ');
 }
 
 async function runNativeExport(
@@ -583,35 +849,70 @@ async function runNativeExport(
   createArchive: (output: Writable) => ArchiveWriterLike,
 ): Promise<ExportResult> {
   const splitBytes = params.archiveSplitMb * 1024 * 1024;
+  const inline = params.attachments === 'inline';
   const manifestEntries: ManifestEntry[] = [];
-  const usedPaths = new Set<string>();
+  // Seeded with the parent paths decided up front, so nothing else can be
+  // named onto one of them before its parent is reached.
+  const usedPaths = new Set<string>(family.pathById.values());
 
-  // Family directory naming: children live under their parent's directory.
-  // Both lookups are O(1) against the prebuilt index. They used to scan the
-  // full item list, which is why a large export stopped making progress.
-  const archivePathFor = (item: LoadedExportItem): string => {
-    const custodianDir = sanitizeFilename(item.custodian?.email ?? 'unassigned');
-    const rel = item.childRelationships.find(
-      (r) => r.kind === 'attachment' || r.kind === 'inline_attachment',
-    );
+  /** Claim a path for an item that gets its own entry in the zip. */
+  const allocatePath = (item: LoadedExportItem): string => {
+    const dir = custodianDir(item.custodian?.email);
     let familyDir = '';
-    if (rel !== undefined) {
-      const parentName = family.nameById.get(rel.parentId) ?? 'family';
-      familyDir = `${sanitizeFilename(parentName)}-${rel.parentId.slice(0, 8)}`;
-    } else if (family.parents.has(item.id)) {
-      familyDir = `${sanitizeFilename(item.name)}-${item.id.slice(0, 8)}`;
+    // Family directories exist only to hold extracted attachments. With
+    // attachments left inline there is nothing to put in them, so they go.
+    if (!inline) {
+      const rel = item.childRelationships.find((r) => isAttachmentKind(r.kind));
+      if (rel !== undefined) {
+        const parentName = family.nameById.get(rel.parentId) ?? 'family';
+        familyDir = `${sanitizeFilename(parentName)}-${rel.parentId.slice(0, 8)}`;
+      } else if (family.parents.has(item.id)) {
+        familyDir = `${sanitizeFilename(item.name)}-${item.id.slice(0, 8)}`;
+      }
     }
-    const fileName = sanitizeFilename(
-      item.kind === 'email' && !item.name.endsWith('.eml') ? `${item.name}.eml` : item.name,
-    );
-    let candidate = ['custodian', custodianDir, familyDir, fileName]
+    let candidate = ['custodian', dir, familyDir, archiveFileName(item)]
       .filter((p) => p !== '')
       .join('/');
-    if (usedPaths.has(candidate)) {
-      candidate = candidate.replace(/(\.[^./]+)?$/, `_${item.id.slice(0, 8)}$1`);
-    }
+    if (usedPaths.has(candidate)) candidate = withIdSuffix(candidate, item.id);
     usedPaths.add(candidate);
     return candidate;
+  };
+
+  type Placement =
+    | { mode: 'file'; path: string; note: string }
+    | { mode: 'inline'; containerId: string; containerPath: string };
+
+  /**
+   * Whether this item needs its own entry in the zip, and where.
+   *
+   * The whole change lives here. An attachment whose parent email IS in this
+   * export needs no entry: those exact bytes are already in the archive,
+   * inside the `.eml`.
+   */
+  const placementFor = (item: LoadedExportItem): Placement => {
+    if (inline) {
+      const rel = item.childRelationships.find((r) => isAttachmentKind(r.kind));
+      if (rel !== undefined) {
+        const containerPath = family.pathById.get(rel.parentId);
+        if (containerPath !== undefined) {
+          return { mode: 'inline', containerId: rel.parentId, containerPath };
+        }
+        // The case that loses evidence if you get it wrong: someone tags ONE
+        // attachment and exports just that. Its parent is not in the
+        // selection, so there is no `.eml` here for it to be inside. It is
+        // written as its own file, and the manifest says why.
+        return {
+          mode: 'file',
+          path: allocatePath(item),
+          note: 'parent native is not in this export, so this attachment was written as its own file',
+        };
+      }
+      // A parent's own path was decided up front so its attachments could
+      // record it. Reuse it rather than allocating a second one.
+      const known = family.pathById.get(item.id);
+      if (known !== undefined) return { mode: 'file', path: known, note: '' };
+    }
+    return { mode: 'file', path: allocatePath(item), note: '' };
   };
 
   let partNumber = 1;
@@ -632,11 +933,28 @@ async function runNativeExport(
   );
   let writer = createArchive(output);
   let outputPrefix = '';
+  /**
+   * The digest of each archive part, which `putDerivative` has always returned
+   * and this function used to throw away.
+   *
+   * The manifest hashes every ITEM, which proves the contents once they are
+   * extracted. It says nothing about whether a 2 GiB part arrived intact, and
+   * a 130 GiB export is 65 of them. Without this, the only way to spot a
+   * truncated part was to unzip everything and hash 434,878 items.
+   */
+  const parts: ExportPartDigest[] = [];
 
   const rotatePart = async (): Promise<void> => {
     await writer.finalize();
     const done = await upload;
     outputPrefix = outputPrefix === '' ? done.objectKey : outputPrefix;
+    // Recorded BEFORE the increment: `done` is the part just finalised.
+    parts.push({
+      partNumber,
+      objectKey: done.objectKey,
+      sha256: done.sha256,
+      sizeBytes: done.size,
+    });
     partNumber += 1;
     bytesInPart = 0;
     output = new PassThrough();
@@ -652,79 +970,174 @@ async function runNativeExport(
     writer = createArchive(output);
   };
 
+  /**
+   * Stream one item's native bytes into the archive and hash them on the way.
+   *
+   * Mutates `entry` and returns what happened. Pulled out of the loop so the
+   * rescue pass below can write an item the same way the main pass does —
+   * two copies of this would be two chances to disagree about verification.
+   */
+  const writeNative = async (
+    item: LoadedExportItem,
+    entry: ManifestEntry,
+  ): Promise<'verified' | 'failed'> => {
+    const size = Number(item.size);
+    if (item.blob === null || item.sha256 === '') {
+      entry.error = 'no preserved native bytes';
+      return 'failed';
+    }
+    if (shouldStartNewArchive(bytesInPart, size, splitBytes)) {
+      await rotatePart();
+    }
+    entry.archivePart = partNumber;
+    try {
+      const source = await ctx.store.getStream(
+        item.blob.storageClass === 'quarantine' ? 'quarantine' : 'evidence',
+        item.blob.objectKey,
+      );
+      const hasher = new Sha256Stream();
+      const pass = new PassThrough();
+      writer.append(entry.archivePath, pass);
+      await pipeline(source, hasher, pass);
+      const actual = hasher.digestHex();
+      if (actual !== item.sha256) {
+        // The bytes are already in the archive; record the mismatch honestly
+        // and continue — the manifest and ExportItem mark it failed.
+        entry.error = `sha256 mismatch: expected ${item.sha256}, streamed ${actual}`;
+        return 'failed';
+      }
+      entry.verified = true;
+      bytesInPart += size;
+      totalBytes += size;
+      return 'verified';
+    } catch (err) {
+      entry.error = sanitizeError(err);
+      return 'failed';
+    }
+  };
+
+  let inlineCount = 0;
+  /** Container id -> the manifest rows filed as being inside it. */
+  const inlinedByParent = new Map<string, { itemId: string; entryIndex: number }[]>();
+  /** Container id -> the part it actually landed in. Absent means not written. */
+  const partByParentId = new Map<string, number>();
+
   let seen = 0;
   for await (const batch of batches) {
     for (const item of batch) {
       seen += 1;
-      const size = Number(item.size);
-      const entryPath = archivePathFor(item);
+      const placement = placementFor(item);
       const entry: ManifestEntry = {
         evidenceItemId: item.id,
-        archivePath: entryPath,
-        archivePart: partNumber,
+        placement: placement.mode,
+        archivePath: placement.mode === 'file' ? placement.path : '',
+        containerPath: placement.mode === 'inline' ? placement.containerPath : '',
+        containerItemId: placement.mode === 'inline' ? placement.containerId : '',
+        // Patched to the container's real part once that part is known.
+        archivePart: placement.mode === 'file' ? partNumber : 0,
         sha256: item.sha256,
-        size,
+        size: Number(item.size),
         custodianEmail: item.custodian?.email ?? '',
         custodianId: item.custodianId ?? '',
         collectionId: item.collectionId ?? '',
         verified: false,
+        note: placement.mode === 'file' ? placement.note : '',
         error: '',
       };
 
-      if (item.blob === null || item.sha256 === '') {
-        entry.error = 'no preserved native bytes';
-        failedCount += 1;
+      if (placement.mode === 'inline') {
+        // Nothing is written and nothing is hashed: these exact bytes are
+        // already in the archive inside the parent. The row still goes in the
+        // manifest, because an item that quietly vanished from the manifest is
+        // indistinguishable from evidence that was never collected.
+        //
+        // `verified` stays false on purpose. We did not hash these bytes
+        // independently, and saying we did would be the lie this product
+        // exists to avoid.
+        inlineCount += 1;
+        const filed = inlinedByParent.get(placement.containerId) ?? [];
+        filed.push({ itemId: item.id, entryIndex: manifestEntries.length });
+        inlinedByParent.set(placement.containerId, filed);
         manifestEntries.push(entry);
-        await upsertExportItem(ctx, tenantId, exportId, item.id, entry, 'failed');
+        await upsertExportItem(ctx, tenantId, exportId, item.id, entry, 'written');
         continue;
       }
 
-      if (shouldStartNewArchive(bytesInPart, size, splitBytes)) {
-        await rotatePart();
-        entry.archivePart = partNumber;
-      }
-
-      try {
-        const source = await ctx.store.getStream(
-          item.blob.storageClass === 'quarantine' ? 'quarantine' : 'evidence',
-          item.blob.objectKey,
-        );
-        const hasher = new Sha256Stream();
-        const pass = new PassThrough();
-        writer.append(entryPath, pass);
-        await pipeline(source, hasher, pass);
-        const actual = hasher.digestHex();
-        if (actual !== item.sha256) {
-          // The bytes are already in the archive; record the mismatch honestly
-          // and continue — the manifest and ExportItem mark it failed.
-          entry.error = `sha256 mismatch: expected ${item.sha256}, streamed ${actual}`;
-          failedCount += 1;
-          manifestEntries.push(entry);
-          await upsertExportItem(ctx, tenantId, exportId, item.id, entry, 'failed');
-          continue;
-        }
-        entry.verified = true;
-        bytesInPart += size;
-        totalBytes += size;
+      const state = await writeNative(item, entry);
+      if (state === 'verified') {
         written += 1;
-        manifestEntries.push(entry);
-        await upsertExportItem(ctx, tenantId, exportId, item.id, entry, 'verified');
-      } catch (err) {
-        entry.error = sanitizeError(err);
+        if (family.parents.has(item.id)) partByParentId.set(item.id, entry.archivePart);
+      } else {
         failedCount += 1;
-        manifestEntries.push(entry);
-        await upsertExportItem(ctx, tenantId, exportId, item.id, entry, 'failed');
       }
+      manifestEntries.push(entry);
+      await upsertExportItem(ctx, tenantId, exportId, item.id, entry, state);
+    }
+  }
+
+  /**
+   * Rescue: a parent that failed to write is not in the archive, so anything
+   * filed as "inside it" is nowhere at all.
+   *
+   * The parent being in the SELECTION is not the same as the parent being in
+   * the ARCHIVE. A parent with no preserved native bytes, or one whose bytes
+   * no longer hash to their recorded digest, is recorded as failed and never
+   * written — and without this pass its attachments would be dropped silently,
+   * which is the exact failure this change must not introduce. Normally empty.
+   */
+  const orphaned = [...inlinedByParent.entries()].filter(([id]) => !partByParentId.has(id));
+  if (orphaned.length > 0) {
+    const byItemId = new Map(orphaned.flatMap(([, kids]) => kids.map((k) => [k.itemId, k])));
+    ctx.log.warn(
+      { exportId, parents: orphaned.length, attachments: byItemId.size },
+      'export: parent natives missing from the archive; writing their attachments as files',
+    );
+    for await (const batch of loadItemsInBatches(ctx, tenantId, [...byItemId.keys()])) {
+      for (const item of batch) {
+        const filed = byItemId.get(item.id);
+        const entry = filed === undefined ? undefined : manifestEntries[filed.entryIndex];
+        if (entry === undefined) continue;
+        entry.placement = 'file';
+        entry.archivePath = allocatePath(item);
+        entry.containerPath = '';
+        entry.containerItemId = '';
+        entry.note =
+          'the parent native could not be exported, so this attachment was written as its own file rather than lost';
+        inlineCount -= 1;
+        const state = await writeNative(item, entry);
+        if (state === 'verified') written += 1;
+        else failedCount += 1;
+        await upsertExportItem(ctx, tenantId, exportId, item.id, entry, state);
+      }
+    }
+  }
+
+  // An inline row's part is its container's part, which is only known once the
+  // container has been written. Every remaining inline row has one, because
+  // the rescue pass above converted the ones that did not.
+  for (const [parentId, filed] of inlinedByParent) {
+    const part = partByParentId.get(parentId);
+    if (part === undefined) continue;
+    for (const { entryIndex } of filed) {
+      const entry = manifestEntries[entryIndex];
+      if (entry?.placement === 'inline') entry.archivePart = part;
     }
   }
 
   // Manifests and reports live in the FINAL archive part.
   const manifestJson = canonicalJson({
-    schema: 'cdfir.export.manifest.v1',
+    // v2 adds `placement`, `containerPath`, `containerItemId` and `note` to
+    // every entry, because with attachments left inline an entry can describe
+    // an item that is in the archive without being a file of its own.
+    schema: 'cdfir.export.manifest.v2',
     exportId,
     generatedAt: new Date().toISOString(),
+    attachments: params.attachments,
     itemCount: seen,
+    /** Items written as their own file AND hashed on the way in. */
     verifiedCount: written,
+    /** Items whose bytes are in the archive inside a parent native. */
+    inlineAttachmentCount: inlineCount,
     failedCount,
     items: manifestEntries,
   });
@@ -738,6 +1151,10 @@ async function runNativeExport(
       'custodianEmail',
       'verified',
       'error',
+      // Appended, so a reader that only knows the old columns still parses.
+      'placement',
+      'containerPath',
+      'note',
     ]
       .map((c) => csvEscape(c))
       .join(','),
@@ -751,32 +1168,92 @@ async function runNativeExport(
         e.custodianEmail,
         String(e.verified),
         e.error,
+        e.placement,
+        e.containerPath,
+        e.note,
       ]
         .map((v) => csvEscape(v))
         .join(','),
     ),
   ];
+  // Only files that exist, so `sha256sum -c hashlist.txt` runs clean. Inline
+  // attachments are NOT commented in here: GNU coreutils answers a comment
+  // line with "WARNING: N lines are improperly formatted", and a warning in
+  // the middle of an evidence check is worse than a second file. They get
+  // inline-attachments.csv instead, and the README points at it.
   const hashlist = manifestEntries
-    .filter((e) => e.verified)
+    .filter((e) => e.verified && e.placement === 'file')
     .map((e) => `${e.sha256}  ${e.archivePath}`)
     .join('\n');
   const exceptionsCsv = [
     ['evidenceItemId', 'archivePath', 'error'].map((c) => csvEscape(c)).join(','),
     ...manifestEntries
-      .filter((e) => !e.verified)
+      // `placement === 'file'` matters: an inline attachment is unverified
+      // because it was never hashed separately, not because anything failed.
+      // Listing a quarter of a million of them as exceptions would bury the
+      // handful that really did fail.
+      .filter((e) => !e.verified && e.placement === 'file')
       .map((e) => [e.evidenceItemId, e.archivePath, e.error].map((v) => csvEscape(v)).join(',')),
+  ];
+  const inlineEntries = manifestEntries.filter((e) => e.placement === 'inline');
+  const inlineCsv = [
+    ['evidenceItemId', 'sha256', 'size', 'containerItemId', 'containerPath', 'part']
+      .map((c) => csvEscape(c))
+      .join(','),
+    ...inlineEntries.map((e) =>
+      [
+        e.evidenceItemId,
+        e.sha256,
+        String(e.size),
+        e.containerItemId,
+        e.containerPath,
+        String(e.archivePart),
+      ]
+        .map((v) => csvEscape(v))
+        .join(','),
+    ),
   ];
   const readme = [
     'AEG-CloudDFIR native export',
     '===========================',
     '',
+    `Attachment layout: ${params.attachments}`,
+    '',
+    ...(inlineCount > 0
+      ? [
+          'Why there are fewer files than items',
+          '------------------------------------',
+          `This export covers ${String(seen)} item(s) and unzips to ${String(written)} file(s).`,
+          `The other ${String(inlineCount)} are email attachments, and they are NOT missing:`,
+          'an .eml file is RFC822 and already carries its attachments inside it, so',
+          'writing them out again would put a second copy of the same bytes in this',
+          'archive. They are listed in manifest.json with placement "inline" and in',
+          'inline-attachments.csv, which names the .eml each one is inside.',
+          '',
+          'To check one of them:',
+          '  1. Open the .eml named in the containerPath column with any mail client,',
+          '     or run `munpack`, `ripmime`, or a few lines of Python:',
+          "       python3 -c \"import email,sys;[open(p.get_filename() or 'part','wb')" +
+            '.write(p.get_payload(decode=True)) for p in email.message_from_file(' +
+            'open(sys.argv[1])).walk() if p.get_filename()]" <file.eml>',
+          '  2. SHA-256 the extracted attachment and compare with the sha256 column.',
+          '',
+          'An attachment whose parent email is NOT in this export is written as its',
+          'own file instead, with the reason in the "note" column. Nothing is dropped.',
+          '',
+        ]
+      : []),
     'Verification:',
     '  1. Extract every archive part.',
-    '  2. For each row in hashlist.txt, compute SHA-256 of the extracted file',
-    '     (e.g. `sha256sum <path>`) and compare with the recorded digest.',
+    '  2. Run `sha256sum -c hashlist.txt` (or `shasum -a 256 -c hashlist.txt`).',
+    '     It lists every file in this archive and nothing else, so it should',
+    '     report OK for all of them and complain about none.',
     '  3. manifest.json is canonical JSON; recompute its SHA-256 and compare',
     '     with the value recorded on the export record.',
     '  4. exceptions.csv lists any item that failed hash verification.',
+    ...(inlineCount > 0
+      ? ['  5. inline-attachments.csv lists every attachment left inside its parent.']
+      : []),
     '',
     TRUTHFULNESS_NOTICES.defensibility,
   ].join('\n');
@@ -785,10 +1262,21 @@ async function runNativeExport(
   writer.append('manifest.csv', Buffer.from(manifestCsvLines.join('\r\n') + '\r\n', 'utf8'));
   writer.append('hashlist.txt', Buffer.from(hashlist + '\n', 'utf8'));
   writer.append('exceptions.csv', Buffer.from(exceptionsCsv.join('\r\n') + '\r\n', 'utf8'));
+  if (inlineEntries.length > 0) {
+    writer.append('inline-attachments.csv', Buffer.from(inlineCsv.join('\r\n') + '\r\n', 'utf8'));
+  }
   writer.append('README.txt', Buffer.from(readme, 'utf8'));
   await writer.finalize();
   const lastUpload = await upload;
   outputPrefix = outputPrefix === '' ? lastUpload.objectKey : outputPrefix;
+  // The final part never goes through rotatePart, so it is recorded here or
+  // not at all. A single-part export reaches this line having pushed nothing.
+  parts.push({
+    partNumber,
+    objectKey: lastUpload.objectKey,
+    sha256: lastUpload.sha256,
+    sizeBytes: lastUpload.size,
+  });
 
   // Manifest hash: over the canonical manifest bytes (also inside the zip).
   const manifestPut = await ctx.store.putDerivative(
@@ -802,12 +1290,17 @@ async function runNativeExport(
   );
 
   return {
-    itemCount: written,
+    // Files written PLUS attachments carried inside them. Both are in the
+    // archive, so both count as delivered — reporting only the file count
+    // would tell a reviewer that 249,787 items went missing.
+    itemCount: written + inlineCount,
+    inlineCount,
     failedCount,
     totalBytes,
     outputPrefix,
     manifestSha256: manifestPut.sha256,
     archiveParts: partNumber,
+    parts,
   };
 }
 
@@ -817,8 +1310,19 @@ async function upsertExportItem(
   exportId: string,
   evidenceItemId: string,
   entry: ManifestEntry,
-  state: 'verified' | 'failed',
+  /**
+   * `written` is the inline case: the bytes ARE in the archive, inside a
+   * parent native, but we did not hash them separately so they are not
+   * `verified`. The enum already had the word for that.
+   */
+  state: 'verified' | 'written' | 'failed',
 ): Promise<void> {
+  // For an inline attachment there is no file to point at, so the column
+  // records the file it is inside. The `inside:` prefix is there so nobody
+  // ever reads this as a path they can extract. Nothing parses this column;
+  // manifest.json is the artifact a reviewer works from.
+  const archivePath =
+    entry.placement === 'inline' ? `inside:${entry.containerPath}` : entry.archivePath;
   await withTenantContext(ctx.prisma, tenantId, (tx) =>
     tx.exportItem.upsert({
       where: { exportId_evidenceItemId: { exportId, evidenceItemId } },
@@ -826,14 +1330,14 @@ async function upsertExportItem(
         tenantId,
         exportId,
         evidenceItemId,
-        archivePath: entry.archivePath,
+        archivePath,
         sha256: entry.sha256,
         verified: entry.verified,
         state,
         error: entry.error,
       },
       update: {
-        archivePath: entry.archivePath,
+        archivePath,
         sha256: entry.sha256,
         verified: entry.verified,
         state,

@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ConflictException, GoneException } from '@nestjs/common';
+import { ConflictException, GoneException, NotFoundException } from '@nestjs/common';
 import { ExportStatus, TenantRole } from '@aeg-clouddfir/database';
 import type { EvidenceObjectStore } from '@aeg-clouddfir/evidence';
 import { Readable } from 'node:stream';
 import { exportStatusResponse } from '@aeg-clouddfir/contracts';
 import { ExportsService } from './exports.service.js';
+import { signDownloadToken } from './download-token.js';
 import type { SelectionService } from '../search/selection.service.js';
 import {
   ITEM_A,
@@ -90,15 +91,19 @@ describe('ExportsService.create', () => {
         name: 'Export 1',
         selection: { kind: 'items', evidenceItemIds: [ITEM_A] },
         includeFamilies: true,
+        attachments: 'inline',
         archiveSplitMb: 2048,
       },
       fakeRequest(),
     );
 
     const created = exportCreate.mock.calls[0]?.[0] as { data: { parameters: unknown } };
+    // The frozen parameters are the whole worker contract. A layout choice
+    // that never reaches them is a choice the export silently ignores.
     expect(created.data.parameters).toEqual({
       selection: { kind: 'items', evidenceItemIds: [ITEM_A] },
       includeFamilies: true,
+      attachments: 'inline',
       archiveSplitMb: 2048,
     });
 
@@ -183,11 +188,35 @@ describe('ExportsService.create — response satisfies the client contract', () 
   });
 });
 
+/** No recorded part digests: the shape every export made before ADR-013 has. */
+const noRecordedParts = { exportPart: { findMany: vi.fn(async () => []) } };
+
+/** Recorded digests, as the worker now writes them. */
+function recordedParts(count: number) {
+  return {
+    exportPart: {
+      findMany: vi.fn(async () =>
+        Array.from({ length: count }, (_, i) => ({
+          partNumber: i + 1,
+          objectKey: `tenants/t/derivatives/${EXPORT_ID}/archive/${String(i + 1)}/export-part${String(i + 1).padStart(3, '0')}.zip`,
+          sha256: String(i + 1)
+            .repeat(64)
+            .slice(0, 64),
+          sizeBytes: 2048n,
+        })),
+      ),
+    },
+  };
+}
+
 describe('ExportsService.download', () => {
   it('refuses with 409 while the export is not ready', async () => {
     const { store } = makeStore();
     const { service } = makeService(
-      { export: { findFirst: vi.fn(async () => exportRow({ status: ExportStatus.running })) } },
+      {
+        export: { findFirst: vi.fn(async () => exportRow({ status: ExportStatus.running })) },
+        ...noRecordedParts,
+      },
       store,
     );
     await expect(service.download(auth, EXPORT_ID, fakeRequest())).rejects.toThrow(
@@ -202,6 +231,7 @@ describe('ExportsService.download', () => {
         export: {
           findFirst: vi.fn(async () => exportRow({ expiresAt: new Date(Date.now() - 60_000) })),
         },
+        ...noRecordedParts,
       },
       store,
     );
@@ -212,7 +242,7 @@ describe('ExportsService.download', () => {
     const manifest = { items: [{ archivePart: 1 }, { archivePart: 2 }] };
     const { store, presignGet } = makeStore(manifest);
     const { service, audit } = makeService(
-      { export: { findFirst: vi.fn(async () => exportRow()) } },
+      { export: { findFirst: vi.fn(async () => exportRow()) }, ...noRecordedParts },
       store,
     );
 
@@ -234,5 +264,159 @@ describe('ExportsService.download', () => {
     // Presigned URLs never enter the audit trail.
     const summary = (audit.append.mock.calls[0]?.[0] as { summary: unknown }).summary;
     expect(JSON.stringify(summary)).not.toContain('https://signed');
+  });
+
+  it('uses recorded part digests when it has them, without reading the manifest', async () => {
+    // export_parts is authoritative. Falling back to the manifest when rows
+    // exist would mean serving a digest-free answer for an export that has one.
+    const { store, presignGet } = makeStore();
+    const { service } = makeService(
+      { export: { findFirst: vi.fn(async () => exportRow()) }, ...recordedParts(3) },
+      store,
+    );
+
+    const result = await service.download(auth, EXPORT_ID, fakeRequest());
+
+    expect(result.parts).toHaveLength(3);
+    expect(result.parts[0]?.sha256).toBe('1'.repeat(64));
+    expect(result.parts[0]?.filename).toBe('export-part001.zip');
+    expect(result.parts[0]?.sizeBytes).toBe(2048);
+    // makeStore() with no manifest throws from getStream; reaching it would fail.
+    expect(presignGet).toHaveBeenCalledTimes(4);
+  });
+
+  /**
+   * The 130 GiB export on production was produced before digests were
+   * recorded. Serving it with `sha256: null` is the honest answer; inventing
+   * one, or dropping the part, would both be worse than saying "cannot verify".
+   */
+  it('reports null digests rather than hiding an export it cannot verify', async () => {
+    const manifest = { items: [{ archivePart: 1 }, { archivePart: 2 }] };
+    const { store } = makeStore(manifest);
+    const { service, audit } = makeService(
+      { export: { findFirst: vi.fn(async () => exportRow()) }, ...noRecordedParts },
+      store,
+    );
+
+    const result = await service.download(auth, EXPORT_ID, fakeRequest());
+
+    expect(result.parts).toHaveLength(2);
+    expect(result.parts.every((p) => p.sha256 === null)).toBe(true);
+    // And the audit trail records that this download could not be verified.
+    expect(audit.append).toHaveBeenCalledWith(
+      expect.objectContaining({ summary: expect.objectContaining({ verifiable: false }) }),
+    );
+  });
+
+  it('names a folder that is filesystem-safe and unique per export', async () => {
+    const { store } = makeStore();
+    const { service } = makeService(
+      {
+        export: { findFirst: vi.fn(async () => exportRow({ name: 'Smith v. Jones / 2026' })) },
+        ...recordedParts(1),
+      },
+      store,
+    );
+
+    const result = await service.download(auth, EXPORT_ID, fakeRequest());
+
+    expect(result.folderName).not.toMatch(/[\\/:*?"<>|]/);
+    // The id suffix matters: two exports of one case often share a name, and
+    // merging them into one folder would mix two evidence sets.
+    expect(result.folderName).toContain(EXPORT_ID.slice(0, 8));
+  });
+
+  it('issues a download token scoped to this export', async () => {
+    const { store } = makeStore();
+    const { service } = makeService(
+      { export: { findFirst: vi.fn(async () => exportRow()) }, ...recordedParts(1) },
+      store,
+    );
+
+    const result = await service.download(auth, EXPORT_ID, fakeRequest());
+
+    expect(result.downloadToken).not.toBe('');
+    expect(result.downloadTokenExpiresInSeconds).toBe(24 * 3600);
+    // The token is never audited, for the same reason presigned URLs are not.
+    const summary = JSON.stringify(result.downloadToken);
+    expect(summary).not.toContain(testConfig().CDFIR_SESSION_SECRET);
+  });
+});
+
+describe('ExportsService.refreshDownloadUrls', () => {
+  function tokenFor(exportId: string): string {
+    return signDownloadToken(
+      testConfig().CDFIR_SESSION_SECRET,
+      { tenantId: TENANT_ID, exportId, userId: auth.userId },
+      3600,
+    );
+  }
+
+  it('re-signs for a valid token and audits the refresh', async () => {
+    // Each refresh hands out fresh reach to evidence, so each one is a row in
+    // the audit log. A 65-part download will write several; that is the record.
+    const { store } = makeStore();
+    const { service, audit } = makeService(
+      { export: { findFirst: vi.fn(async () => exportRow()) }, ...recordedParts(2) },
+      store,
+    );
+
+    const result = await service.refreshDownloadUrls(tokenFor(EXPORT_ID), EXPORT_ID, fakeRequest());
+
+    expect(result.parts).toHaveLength(2);
+    expect(result.parts[0]?.filename).toBe('export-part001.zip');
+    expect(audit.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'export.downloaded',
+        summary: expect.objectContaining({ viaToken: true }),
+      }),
+    );
+  });
+
+  it('refuses a token minted for a different export', async () => {
+    // Otherwise one export's token is every export's token.
+    const other = '99999999-9999-4999-8999-999999999999';
+    const { store } = makeStore();
+    const { service } = makeService(
+      { export: { findFirst: vi.fn(async () => exportRow()) }, ...recordedParts(1) },
+      store,
+    );
+
+    await expect(
+      service.refreshDownloadUrls(tokenFor(other), EXPORT_ID, fakeRequest()),
+    ).rejects.toThrow(NotFoundException);
+  });
+
+  it('refuses a garbage token without leaking why', async () => {
+    const { store } = makeStore();
+    const { service } = makeService(
+      { export: { findFirst: vi.fn(async () => exportRow()) }, ...recordedParts(1) },
+      store,
+    );
+    await expect(
+      service.refreshDownloadUrls('not-a-token', EXPORT_ID, fakeRequest()),
+    ).rejects.toThrow(NotFoundException);
+  });
+
+  /**
+   * A token cannot be revoked, so the export's own expiry is what retires a
+   * long-running download. Checking it only at issue would let a token outlive
+   * the thing it points at.
+   */
+  it('re-checks the export expiry on every refresh, not just at issue', async () => {
+    const { store } = makeStore();
+    const { service } = makeService(
+      {
+        export: {
+          findFirst: vi.fn(async () => exportRow({ expiresAt: new Date(Date.now() - 60_000) })),
+        },
+        ...recordedParts(1),
+      },
+      store,
+    );
+
+    await expect(
+      service.refreshDownloadUrls(tokenFor(EXPORT_ID), EXPORT_ID, fakeRequest()),
+    ).rejects.toThrow(GoneException);
   });
 });
