@@ -5,8 +5,8 @@ Three pieces, deliberately separate:
 | Workflow      | Trigger                          | What it does                                          |
 | ------------- | -------------------------------- | ----------------------------------------------------- |
 | `ci.yml`      | every push and PR                | format, lint, typecheck, tests, build, migrations+RLS |
-| `release.yml` | CI finishing **green** on `main` | builds and pushes `api`/`web`/`worker` images to GHCR |
-| `deploy.yml`  | you, by hand                     | pulls a published tag onto the server and verifies it |
+| `release.yml` | CI finishing **green** on `main` | builds and pushes app and parser images to GHCR       |
+| `deploy.yml`  | you, by hand                     | pulls images, applies migrations, and verifies them   |
 
 Nothing deploys itself. Images exist only for commits that passed CI, and
 replacing what is running is always a human decision.

@@ -10,18 +10,35 @@
 # The two stacks cannot collide: different compose project (cdfir-staging),
 # different env file (.env.staging), different host ports, different database,
 # different Redis, different OpenSearch index prefix, different buckets.
+#
+# It runs the SAME migrate step as production, pointed at staging's database, and
+# for the same reason: staging is where a migration gets to fail. A staging deploy
+# that skips the schema reproduces the production outage here and teaches nothing,
+# because the symptom (403 everywhere, "no tenant selected") looks like a bug in
+# the code that shipped.
 set -euo pipefail
 
 usage() {
-  echo "usage: $0 <image-tag> [--dry-run]" >&2
+  echo "usage: $0 <image-tag> [--dry-run] [--skip-backup-check]" >&2
   echo "  e.g. $0 sha-1a2b3c4" >&2
   exit 64
 }
 
 TAG="${1:-}"
 [ -n "$TAG" ] || usage
+case "$TAG" in -*) usage ;; esac
+shift
+
 DRY_RUN=false
-[ "${2:-}" = "--dry-run" ] && DRY_RUN=true
+SKIP_BACKUP_CHECK=false
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dry-run) DRY_RUN=true ;;
+    --skip-backup-check) SKIP_BACKUP_CHECK=true ;;
+    *) echo "error: unknown option $1" >&2; usage ;;
+  esac
+  shift
+done
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_DIR="$REPO_ROOT/infra/compose"
@@ -72,12 +89,30 @@ WEB_PORT="$(env_value CDFIR_WEB_HOST_PORT)"; WEB_PORT="${WEB_PORT:-3100}"
 PREVIOUS_TAG="$(env_value CDFIR_IMAGE_TAG)"
 
 echo "==> staging: deploying $TAG (previous: ${PREVIOUS_TAG:-none recorded})"
+
+# --expendable-database, not --skip-backup-check: staging has no backup and is
+# not meant to have one (scripts/backup-postgres.sh dumps PRODUCTION). Using the
+# emergency override here would print an emergency warning on every staging
+# deploy, and a warning an operator sees every day is one they stop reading.
+MIGRATE_ARGS=(
+  --env-file "$ENV_FILE"
+  --compose-file "$COMPOSE_FILE"
+  --project "$PROJECT"
+  --api-service api-staging
+  --db-service postgres-staging
+  --expendable-database
+)
+[ "$SKIP_BACKUP_CHECK" = true ] && MIGRATE_ARGS+=(--skip-backup-check)
+
+cd "$COMPOSE_DIR"
+
 if [ "$DRY_RUN" = true ]; then
   echo "    dry run: would pull ${SERVICES[*]} at $TAG and restart them"
+  echo "    dry run: asking staging's database what the schema would need."
+  "$REPO_ROOT/scripts/migrate.sh" "$TAG" "${MIGRATE_ARGS[@]}" --status
   exit 0
 fi
 
-cd "$COMPOSE_DIR"
 docker image prune -f >/dev/null 2>&1 || true
 
 set_env_value CDFIR_IMAGE_TAG "$TAG"
@@ -85,6 +120,24 @@ set_env_value CDFIR_IMAGE_TAG "$TAG"
 echo "==> pulling"
 if ! compose pull crush-parser-staging api-staging worker-staging web-staging; then
   echo "error: pull failed — staging untouched" >&2
+  [ -n "$PREVIOUS_TAG" ] && set_env_value CDFIR_IMAGE_TAG "$PREVIOUS_TAG"
+  exit 1
+fi
+
+# SCHEMA BEFORE CODE, for the same reason as production: new code that reads a
+# column the database does not have answers 403 on every route. A failure here
+# restarts nothing — the old staging code keeps serving the old staging schema.
+echo "==> database migrations (before any new code serves traffic)"
+if ! "$REPO_ROOT/scripts/migrate.sh" "$TAG" "${MIGRATE_ARGS[@]}"; then
+  echo "error: staging migrations did not apply — NOTHING was restarted." >&2
+  [ -n "$PREVIOUS_TAG" ] && set_env_value CDFIR_IMAGE_TAG "$PREVIOUS_TAG"
+  exit 1
+fi
+
+echo "==> applying staging database migrations as cdfir_migrator"
+if ! compose run --rm --no-deps api-staging sh -lc \
+  'cd /app && node_modules/.bin/prisma migrate deploy --schema packages/database/prisma/schema.prisma'; then
+  echo "error: staging migration failed — application containers were not changed" >&2
   [ -n "$PREVIOUS_TAG" ] && set_env_value CDFIR_IMAGE_TAG "$PREVIOUS_TAG"
   exit 1
 fi
