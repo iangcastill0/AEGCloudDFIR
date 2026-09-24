@@ -193,10 +193,11 @@ function run(script: string, argv: string[], f: Fake): Run {
       CDFIR_BACKUP_STAMP_FILE: f.stamp,
     },
   });
-  let docker: string[] = [];
+  let docker: string[];
   try {
     docker = readFileSync(f.log, 'utf8').split('\n').filter(Boolean);
   } catch {
+    // No log file means the script exited before it ran a single docker command.
     docker = [];
   }
   return { code: r.status ?? -1, output: `${r.stdout ?? ''}${r.stderr ?? ''}`, docker };

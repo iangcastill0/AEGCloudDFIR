@@ -181,6 +181,22 @@ line **must `cd` into the repo**, because `scripts/backup-postgres.sh` reads
 One non-interactive command. Nothing is typed into an editor, and running it
 again is harmless.
 
+**First, check for an existing monitor line and remove it.** A stopgap
+`node --env-file=.env …/cli.js` line was put in root's crontab while this wrapper
+was still unshipped. Leave it and the checker runs twice every five minutes, from
+two different setups, which is how you end up debugging a schedule that is not
+the one you are reading:
+
+```bash
+crontab -l | grep -n monitoring || echo 'no monitor line in root crontab (good)'
+# If there is one, back the crontab up and drop just that line:
+crontab -l > "/root/crontab.bak.$(date +%s)"
+crontab -l | grep -v 'packages/monitoring' | crontab -
+crontab -l
+```
+
+Then install the schedule:
+
 ```bash
 install -o root -g root -m 0644 \
   /var/www/AEGCloudDFIR/infra/cron/cdfir-monitor /etc/cron.d/cdfir-monitor
