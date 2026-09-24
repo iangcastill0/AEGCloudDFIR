@@ -76,12 +76,23 @@ The binary needs `libicu72` in the runtime image. Without it .NET exits before
 
 ## Proof it runs on Linux
 
-Checked on 2026-09-24 in `debian:bookworm-slim` (`linux/amd64`, the Linode's
-architecture) with only `libicu72` added:
+Checked on 2026-09-24 in `debian:bookworm-slim` with only `libicu72` added.
+240 messages, a 400 KiB part size to force a split:
 
 ```
-{"candidate":"PST-Builder","ok":true,"messagesRequested":12,"messagesAdded":12,
- "failures":[],"outputBytes":271360,"peakWorkingSetMiB":259}
+{"ok":true,"messagesRequested":240,"messagesAdded":240,"failures":[],
+ "parts":[{"name":"export.pst","bytes":525312},
+          {"name":"export-002.pst","bytes":271360}],
+ "spooledAttachments":60,"peakWorkingSetMiB":70.6}
 ```
 
-`pffexport` then exported all 12 messages from that file, exit 0, zero errors.
+`pffexport` then read **each part on its own**, exit 0, zero errors, 213 + 27 =
+240 messages. The spool directory was left empty.
+
+**That run was `linux-arm64` on an arm64 host.** The `linux-x64` build — the one
+the worker image ships — writes byte-for-byte identical PSTs on the same host
+under `--platform linux/amd64`, but QEMU emulation corrupts the 32-bit integers
+in its JSON report (`messagesAdded` comes back as a string of nulls,
+`peakWorkingSetMiB` reads 1817 instead of 70). The PST files are fine; the
+metrics are not. So **the x86-64 binary has never been run on native x86-64
+hardware.** That is a staging check, not something this Mac can settle.

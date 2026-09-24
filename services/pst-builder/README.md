@@ -56,3 +56,8 @@ then nothing can read the file.
   files with different SHA-256. Do not treat a changed PST hash as tampering.
 - **Nobody has opened one of these in real Outlook.** libpff accepting the bytes
   is not the same as Outlook opening them without a repair prompt.
+- **The `linux-x64` binary has never run on native x86-64.** It has only been run
+  under QEMU emulation on an arm64 Mac, where it writes correct PSTs but reports
+  corrupted 32-bit numbers. Confirm on staging, which is native x86-64.
+- **Non-email items cannot go in a PST.** A mailbox file has nowhere to put a
+  loose PDF. They are skipped and listed in `exceptions.csv`.
