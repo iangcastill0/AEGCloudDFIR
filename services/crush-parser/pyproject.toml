@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cdfir-crush-parser"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi==0.116.1",
+  "uvicorn[standard]==0.35.0",
+  "crush @ git+https://github.com/kalink0/crush-forensics.git@9cec6246a3b12a21dd45a3fa2190aedcd2512d4e",
+]
+
+[tool.setuptools.packages.find]
+include = ["app*"]

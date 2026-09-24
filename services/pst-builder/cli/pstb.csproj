@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>pstb</AssemblyName>
+    <RootNamespace>Cdfir.Pstb</RootNamespace>
+    <!--
+      NOT InvariantGlobalization. Folder names and attachment filenames in real
+      mail are Japanese, Cyrillic, accented Latin. Invariant mode changes how
+      those compare and case-fold, so the runtime image ships libicu72 instead.
+      Missing libicu72 makes the binary exit before Main with
+      "Couldn't find a valid ICU package".
+    -->
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>linux-x64</RuntimeIdentifier>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <!-- Vendored, not from NuGet. See ../UPSTREAM.md for why. -->
+    <PB>$(MSBuildThisFileDirectory)../vendor/PST-Builder/src</PB>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="$(PB)/PstBuilder/PstBuilder.csproj" SetTargetFramework="TargetFramework=net8.0" />
+    <ProjectReference Include="$(PB)/PstBuilder.Eml/PstBuilder.Eml.csproj" SetTargetFramework="TargetFramework=net8.0" />
+  </ItemGroup>
+
+</Project>

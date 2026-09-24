@@ -6,3 +6,15 @@ coverage
 pnpm-lock.yaml
 tests/fixtures/**/*.eml
 tests/fixtures/**/*.json
+# Somebody else's source, copied in at a recorded commit. Reformatting it would
+# make `git apply -R services/pst-builder/patches/*` stop working and turn the
+# recorded upstream SHA into a claim nobody can check.
+services/pst-builder/vendor
+services/**/bin
+services/**/obj
+services/**/vendor
+.agents/skills
+.claude/skills
+.codex/skills
+.cursor/skills
+.github/skills
