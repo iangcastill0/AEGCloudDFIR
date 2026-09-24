@@ -101,7 +101,7 @@ Nine packages under `packages/`, three apps under `apps/` (api = NestJS on
 Fastify, worker = BullMQ consumers, web = Next.js App Router). The parts that
 span files and are easy to break:
 
-- **Tenant isolation is in the database, not the service layer.** 49 tables carry
+- **Tenant isolation is in the database, not the service layer.** 50 tables carry
   `FORCE ROW LEVEL SECURITY`. All tenant queries go through
   `withTenantContext(prisma, tenantId, fn)`, which sets `app.tenant_id` for the
   transaction; `withPlatformContext` sets `app.platform` and deliberately has

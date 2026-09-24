@@ -31,6 +31,13 @@ model Tenant {
   slug      String       @unique
   status    TenantStatus @default(active)
   planQuota Json         @default("{}") // {maxAccounts, maxCustodians, maxStoredBytes, maxConcurrentCollections, ...}
+  /// Billing hook only. The paywall is not wired yet; write routes do not read this.
+  billingStatus     BillingStatus @default(none)
+  /// Future Stripe (or similar) customer id. Null until money is collected.
+  billingCustomerId String?
+  /// Standing org join secret. Shown on Members; anyone who opens the link
+  /// and signs in is added as a reviewer. Rotate to kill an old link.
+  joinToken String? @unique
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
 
@@ -44,10 +51,13 @@ model Tenant {
   cases             Case[]
   savedSearches     SavedSearch[]
   exports           Export[]
+  exportParts       ExportPart[]
   productions       Production[]
   auditEvents       AuditEvent[]
   retentionPolicies RetentionPolicy[]
   deletionRequests  DeletionRequest[]
+  invites           TenantInvite[]
+  forensicImports   ForensicImport[]
 
   @@map("tenants")
 }
@@ -56,6 +66,14 @@ enum TenantStatus {
   active
   suspended
   pending_deletion
+}
+
+enum BillingStatus {
+  none
+  trial
+  active
+  past_due
+  canceled
 }
 
 model User {
@@ -72,7 +90,9 @@ model User {
   updatedAt       DateTime  @updatedAt
   lastLoginAt     DateTime?
 
-  memberships Membership[]
+  memberships    Membership[]
+  createdInvites TenantInvite[]
+  forensicImports ForensicImport[]
 
   @@unique([issuer, subject])
   @@map("users")
@@ -99,6 +119,27 @@ model Membership {
 enum MembershipStatus {
   active
   disabled
+}
+
+/// App-side invite to join a tenant. Distinct from Authentik enrollment invitations.
+model TenantInvite {
+  id              String     @id @default(uuid()) @db.Uuid
+  tenantId        String     @db.Uuid
+  email           String
+  role            TenantRole
+  /// SHA-256 hex of the secret token. The raw token is shown once, never stored.
+  tokenHash       String     @unique
+  expiresAt       DateTime
+  createdByUserId String     @db.Uuid
+  usedAt          DateTime?
+  createdAt       DateTime   @default(now())
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id])
+  createdBy User   @relation(fields: [createdByUserId], references: [id])
+
+  @@index([tenantId])
+  @@index([email])
+  @@map("tenant_invites")
 }
 
 model RoleAssignment {
@@ -473,6 +514,10 @@ enum ExceptionKind {
   api_error
   api_export_derivative
   quarantined
+  /// The evidence object is not in object storage. Collected, recorded, gone.
+  /// Its own kind because it is the only exception here that means the bytes
+  /// themselves are lost — everything else describes an item we still hold.
+  object_missing
   other
 }
 
@@ -500,6 +545,91 @@ enum JobAttemptStatus {
   succeeded
   failed
   lost
+}
+
+// ---------------------------------------------------------------------------
+// User-uploaded forensic imports
+// ---------------------------------------------------------------------------
+
+model ForensicImport {
+  id                   String               @id @default(uuid()) @db.Uuid
+  tenantId             String               @db.Uuid
+  sourceEvidenceItemId String               @unique @db.Uuid
+  createdById          String               @db.Uuid
+  name                 String
+  status               ForensicImportStatus @default(uploaded)
+  parserVersion        String               @default("")
+  manifestKey          String               @default("")
+  manifestSha256       String               @default("")
+  artifactCount        Int                  @default(0)
+  error                String               @default("")
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+
+  tenant         Tenant           @relation(fields: [tenantId], references: [id])
+  createdBy      User             @relation(fields: [createdById], references: [id])
+  sourceEvidence EvidenceItem     @relation("ImportSource", fields: [sourceEvidenceItemId], references: [id], onDelete: Restrict)
+  evidenceItems  EvidenceItem[]  @relation("ImportItems")
+  artifacts      ImportArtifact[]
+  cases          ImportCase[]
+
+  @@index([tenantId, createdById, createdAt])
+  @@index([tenantId, status])
+  @@map("forensic_imports")
+}
+
+enum ForensicImportStatus {
+  uploaded
+  analyzing
+  completed
+  failed
+}
+
+model ImportArtifact {
+  id             String  @id @default(uuid()) @db.Uuid
+  tenantId       String  @db.Uuid
+  importId       String  @db.Uuid
+  parentId       String? @db.Uuid
+  evidenceItemId String? @unique @db.Uuid
+  path           String
+  name           String
+  kind           String  @default("file")
+  mimeType       String  @default("")
+  size           BigInt  @default(0)
+  sha256         String  @default("")
+  viewerType     String  @default("")
+  metadata       Json    @default("{}")
+  previewKey     String  @default("")
+  previewSha256  String  @default("")
+  textIndex      String  @default("")
+  createdAt      DateTime @default(now())
+
+  forensicImport ForensicImport   @relation(fields: [importId], references: [id], onDelete: Cascade)
+  parent         ImportArtifact?  @relation("ImportArtifactTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children       ImportArtifact[] @relation("ImportArtifactTree")
+  evidenceItem   EvidenceItem?    @relation(fields: [evidenceItemId], references: [id], onDelete: SetNull)
+
+  @@unique([importId, path])
+  @@index([tenantId])
+  @@index([importId, parentId, id])
+  @@map("import_artifacts")
+}
+
+model ImportCase {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @db.Uuid
+  importId  String   @db.Uuid
+  caseId    String   @db.Uuid
+  addedById String?  @db.Uuid
+  createdAt DateTime @default(now())
+
+  forensicImport ForensicImport @relation(fields: [importId], references: [id], onDelete: Cascade)
+  case           Case           @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@unique([importId, caseId])
+  @@index([tenantId])
+  @@index([caseId])
+  @@map("import_cases")
 }
 
 // ---------------------------------------------------------------------------
@@ -539,6 +669,7 @@ model EvidenceItem {
   tenantId              String           @db.Uuid
   custodianId           String?          @db.Uuid
   collectionId          String?          @db.Uuid
+  importId              String?          @db.Uuid
   blobId                String?          @db.Uuid
   kind                  EvidenceKind
   /// Original filename or message subject-derived name.
@@ -573,6 +704,9 @@ model EvidenceItem {
   updatedAt             DateTime         @updatedAt
 
   tenant              Tenant                 @relation(fields: [tenantId], references: [id])
+  forensicImport      ForensicImport?         @relation("ImportItems", fields: [importId], references: [id], onDelete: SetNull)
+  sourceForImport     ForensicImport?         @relation("ImportSource")
+  importArtifact      ImportArtifact?
   blob                EvidenceBlob?          @relation(fields: [blobId], references: [id])
   custodian           Custodian?             @relation(fields: [custodianId], references: [id])
   emailMetadata       EmailMetadata?
@@ -598,6 +732,7 @@ model EvidenceItem {
   @@index([tenantId, sha256])
   @@index([tenantId, custodianId])
   @@index([collectionId])
+  @@index([importId])
   @@map("evidence_items")
 }
 
@@ -633,7 +768,16 @@ enum MalwareStatus {
   not_scanned
   clean
   infected
+  /// The scanner could not be reached, or refused the file. Retryable.
   scan_failed
+  /// The scanner was fine; the object was not in storage to read.
+  ///
+  /// Kept apart from scan_failed because they were recorded identically once,
+  /// and 32 items with no bytes at all sat behind the reassuring word "failed"
+  /// for twelve days until a 130 GiB export read every byte and found them.
+  /// Only process.scan writes this, and only when its own read missed: an item
+  /// scanned clean before its bytes vanished keeps that true history.
+  object_missing
 }
 
 /// Provider-side version lineage (Drive revisions, OneDrive versions).
@@ -1068,6 +1212,7 @@ model Case {
   exports       Export[]
   productions   Production[]
   collections   Collection[]
+  imports       ImportCase[]
 
   @@index([tenantId, status])
   @@map("cases")
@@ -1215,15 +1360,49 @@ model Export {
   tenant Tenant       @relation(fields: [tenantId], references: [id])
   case   Case?        @relation(fields: [caseId], references: [id])
   items  ExportItem[]
+  parts  ExportPart[]
 
   @@unique([tenantId, idempotencyKey])
   @@index([tenantId, status])
   @@map("exports")
 }
 
+/// One archive part of a native export, with the digest of the part ITSELF.
+///
+/// The manifest hashes every evidence item, which proves the contents once you
+/// have extracted them. It says nothing about whether a 2 GiB part arrived
+/// intact. A 130 GiB export is 65 parts, and without a digest per part the
+/// only way to detect a truncated download was to unzip all of it and hash
+/// 434,878 items.
+///
+/// Deliberately its own table rather than a field in manifest.json: the
+/// manifest is written INSIDE the final part, so using it to verify the parts
+/// means trusting a part to vouch for itself.
+model ExportPart {
+  id         String   @id @default(uuid()) @db.Uuid
+  tenantId   String   @db.Uuid
+  exportId   String   @db.Uuid
+  partNumber Int
+  objectKey  String
+  sha256     String
+  sizeBytes  BigInt
+  createdAt  DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  export Export @relation(fields: [exportId], references: [id], onDelete: Cascade)
+
+  @@unique([exportId, partNumber])
+  @@index([tenantId])
+  @@map("export_parts")
+}
+
 enum ExportKind {
   native
   csv
+  /// Outlook PST. A RECONSTRUCTION, not natives — see
+  /// TRUTHFULNESS_NOTICES.pstExport. Always shipped with the native .eml
+  /// digests, because the PST's own bytes hash to nothing anyone recorded.
+  pst
 }
 
 enum ExportStatus {

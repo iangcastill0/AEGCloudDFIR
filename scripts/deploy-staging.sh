@@ -28,7 +28,7 @@ COMPOSE_DIR="$REPO_ROOT/infra/compose"
 COMPOSE_FILE="$COMPOSE_DIR/docker-compose.staging.yml"
 ENV_FILE="$REPO_ROOT/.env.staging"
 PROJECT="cdfir-staging"
-SERVICES=(postgres-staging redis-staging opensearch-staging tika-staging api-staging worker-staging web-staging)
+SERVICES=(postgres-staging redis-staging opensearch-staging tika-staging crush-parser-staging api-staging worker-staging web-staging)
 
 if [ ! -f "$ENV_FILE" ]; then
   echo "error: $ENV_FILE not found. Create it from .env.staging.example first —" >&2
@@ -83,7 +83,7 @@ docker image prune -f >/dev/null 2>&1 || true
 set_env_value CDFIR_IMAGE_TAG "$TAG"
 
 echo "==> pulling"
-if ! compose pull api-staging worker-staging web-staging; then
+if ! compose pull crush-parser-staging api-staging worker-staging web-staging; then
   echo "error: pull failed — staging untouched" >&2
   [ -n "$PREVIOUS_TAG" ] && set_env_value CDFIR_IMAGE_TAG "$PREVIOUS_TAG"
   exit 1
@@ -112,7 +112,7 @@ if [ "$ready" != true ]; then
   if [ -n "$PREVIOUS_TAG" ]; then
     echo "==> rolling staging back to $PREVIOUS_TAG"
     set_env_value CDFIR_IMAGE_TAG "$PREVIOUS_TAG"
-    compose pull api-staging worker-staging web-staging || true
+    compose pull crush-parser-staging api-staging worker-staging web-staging || true
     compose up -d "${SERVICES[@]}" || true
   fi
   exit 1

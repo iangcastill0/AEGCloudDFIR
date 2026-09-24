@@ -23,6 +23,12 @@ export interface AuthContext {
    */
   caseIds?: string[] | null;
   includePrivileged: boolean;
+  /**
+   * Imported evidence is private before case attachment. Omit only for an org
+   * admin; every other caller may see imports they uploaded or imports attached
+   * to one of these assigned cases. Non-import evidence remains tenant-wide.
+   */
+  importAccess?: { ownerUserId: string; caseIds: string[] };
 }
 
 /** Fields that have a `.keyword` multi-field for exact/wildcard matching. */
@@ -298,6 +304,18 @@ export function wrapWithAuthorization(query: QueryDsl, auth: AuthContext): Query
   const filter: QueryDsl[] = [{ term: { tenantId: auth.tenantId } }];
   if (auth.caseIds !== null && auth.caseIds !== undefined) {
     filter.push({ terms: { caseIds: auth.caseIds } });
+  }
+  if (auth.importAccess !== undefined) {
+    filter.push({
+      bool: {
+        should: [
+          { bool: { must_not: [{ exists: { field: 'importId' } }] } },
+          { term: { importOwnerId: auth.importAccess.ownerUserId } },
+          { terms: { caseIds: auth.importAccess.caseIds } },
+        ],
+        minimum_should_match: 1,
+      },
+    });
   }
   if (!auth.includePrivileged) {
     filter.push({ term: { privileged: false } });

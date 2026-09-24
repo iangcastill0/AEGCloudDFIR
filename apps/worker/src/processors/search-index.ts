@@ -138,6 +138,8 @@ export interface SearchDocInput {
   provider: string | null;
   connectorAccountId?: string;
   collectionId: string | null;
+  importId?: string | null;
+  importOwnerId?: string | null;
   sourcePath: string;
   sourceLabels: string[];
   processingStatus: string;
@@ -235,6 +237,8 @@ export function buildSearchDoc(input: SearchDocInput): EvidenceSearchDoc {
     custodianEmail: input.custodianEmail ?? undefined,
     provider: input.provider ?? undefined,
     collectionId: input.collectionId ?? undefined,
+    importId: input.importId ?? undefined,
+    importOwnerId: input.importOwnerId ?? undefined,
     sourcePath: input.sourcePath || undefined,
     sourceLabels: input.sourceLabels.length > 0 ? input.sourceLabels : undefined,
     folder:
@@ -322,6 +326,7 @@ export async function processSearchIndex(
         ocrPages: { orderBy: { pageNumber: 'asc' }, take: MAX_OCR_PAGES_INDEXED },
         tagAssignments: { include: { tag: true } },
         caseItems: { select: { caseId: true } },
+        forensicImport: { select: { createdById: true } },
         productionItems: {
           include: {
             productionRun: { include: { production: { select: { id: true, name: true } } } },
@@ -403,6 +408,8 @@ export async function processSearchIndex(
     custodianEmail: item.custodian?.email ?? null,
     provider: item.provider,
     collectionId: item.collectionId,
+    importId: item.importId,
+    importOwnerId: item.forensicImport?.createdById ?? null,
     sourcePath: item.sourcePath,
     sourceLabels: item.sourceLabels,
     processingStatus: item.processingStatus,

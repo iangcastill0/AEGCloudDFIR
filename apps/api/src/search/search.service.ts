@@ -16,7 +16,7 @@ import {
   type ValidatedAst,
   type ValidatedNode,
 } from '@aeg-clouddfir/search';
-import { withTenantContext, type PrismaClient } from '@aeg-clouddfir/database';
+import { TenantRole, withTenantContext, type PrismaClient } from '@aeg-clouddfir/database';
 import type { FastifyRequest } from 'fastify';
 import '../common/http.js';
 import type { AuthContext } from '../common/http.js';
@@ -178,8 +178,9 @@ export class SearchService {
    */
   async buildSearchAuth(auth: AuthContext, caseId?: string): Promise<SearchAuthContext> {
     let caseIds: string[] | null = null;
+    const orgAdmin = auth.roles.includes(TenantRole.org_admin);
+    const memberCases = orgAdmin ? [] : await this.memberCaseIds(auth);
     if (isCaseRestricted(auth)) {
-      const memberCases = await this.memberCaseIds(auth);
       if (caseId !== undefined) {
         if (!memberCases.includes(caseId)) throw new NotFoundException();
         caseIds = [caseId];
@@ -197,6 +198,7 @@ export class SearchService {
       tenantId: auth.tenantId,
       caseIds,
       includePrivileged: mayViewPrivileged(auth),
+      ...(orgAdmin ? {} : { importAccess: { ownerUserId: auth.userId, caseIds: memberCases } }),
     };
   }
 

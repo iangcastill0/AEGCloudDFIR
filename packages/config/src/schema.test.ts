@@ -27,7 +27,10 @@ describe('loadConfig', () => {
     expect(config.CDFIR_API_PORT).toBe(4000);
     expect(config.CDFIR_S3_PRESIGN_TTL_SECONDS).toBe(300);
     expect(config.CDFIR_DEMO_MODE).toBe(false);
+    expect(config.CDFIR_SELF_SERVE_SIGNUP).toBe(false);
     expect(config.CDFIR_MAX_ARCHIVE_DEPTH).toBe(3);
+    expect(config.CDFIR_CRUSH_PARSER_URL).toBe('http://crush-parser:5200');
+    expect(config.CDFIR_IMPORT_PREVIEW_ROWS).toBe(200);
     expect(config.CDFIR_CORS_ALLOWED_ORIGINS).toEqual([]);
   });
 
@@ -129,5 +132,17 @@ describe('CDFIR_WORKER_CPU_CONCURRENCY', () => {
     // A typo does not fail loudly at runtime, it just thrashes. Better to
     // refuse to boot than to spend a day wondering why everything is slow.
     expect(() => loadConfig({ ...validEnv, CDFIR_WORKER_CPU_CONCURRENCY: '1000' })).toThrow();
+  });
+});
+
+describe('CDFIR_SELF_SERVE_SIGNUP', () => {
+  it('stays off unless the operator turns it on', () => {
+    expect(loadConfig(validEnv).CDFIR_SELF_SERVE_SIGNUP).toBe(false);
+  });
+
+  it('accepts the string a .env file actually supplies', () => {
+    expect(
+      loadConfig({ ...validEnv, CDFIR_SELF_SERVE_SIGNUP: 'true' }).CDFIR_SELF_SERVE_SIGNUP,
+    ).toBe(true);
   });
 });

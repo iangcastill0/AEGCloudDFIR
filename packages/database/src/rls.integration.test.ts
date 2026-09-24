@@ -90,6 +90,60 @@ suite('PostgreSQL RLS tenant isolation (integration)', () => {
     ).rejects.toThrow(/row-level security|violates/i);
   });
 
+  it('forensic imports and artifacts are hidden from other tenants', async () => {
+    const userId = randomUUID();
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.platform', 'true', true)`;
+      await tx.user.create({
+        data: {
+          id: userId,
+          issuer: 'https://rls.test',
+          subject: userId,
+          email: `${userId}@rls.test`,
+        },
+      });
+    });
+    const importId = await withTenantContext(prisma, tenantA, async (tx) => {
+      const evidence = await tx.evidenceItem.create({
+        data: {
+          tenantId: tenantA,
+          kind: 'file',
+          name: 'sample.json',
+          sha256: 'c'.repeat(64),
+        },
+      });
+      const created = await tx.forensicImport.create({
+        data: {
+          tenantId: tenantA,
+          sourceEvidenceItemId: evidence.id,
+          createdById: userId,
+          name: 'sample.json',
+        },
+      });
+      await tx.importArtifact.create({
+        data: {
+          tenantId: tenantA,
+          importId: created.id,
+          evidenceItemId: evidence.id,
+          path: 'sample.json',
+          name: 'sample.json',
+          size: 1n,
+          sha256: 'c'.repeat(64),
+        },
+      });
+      return created.id;
+    });
+
+    expect(
+      await withTenantContext(prisma, tenantB, (tx) =>
+        tx.forensicImport.findUnique({ where: { id: importId } }),
+      ),
+    ).toBeNull();
+    expect(
+      await withTenantContext(prisma, tenantB, (tx) => tx.importArtifact.findMany()),
+    ).toHaveLength(0);
+  });
+
   it('cross-tenant UPDATE/DELETE affect zero rows', async () => {
     const updated = await withTenantContext(prisma, tenantB, (tx) =>
       tx.evidenceBlob.updateMany({ data: { providerChecksums: {} }, where: {} }),

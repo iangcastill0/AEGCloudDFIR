@@ -133,7 +133,14 @@ export const chainOfCustodyEntry = z.object({
 
 export const createExportRequest = z.object({
   idempotencyKey,
-  kind: z.enum(['native', 'csv']),
+  /**
+   * `pst` is NOT a native export. It re-encodes each message into Outlook's
+   * format, so nothing in the file hashes to a digest anyone recorded — see
+   * TRUTHFULNESS_NOTICES.pstExport. The native `.eml` digests always ship
+   * alongside it, and `pst-export.ts` refuses to finish an export that has not
+   * written them.
+   */
+  kind: z.enum(['native', 'csv', 'pst']),
   name: z.string().min(1).max(200),
   caseId: uuid.optional(),
   selection: z.discriminatedUnion('kind', [
@@ -143,6 +150,16 @@ export const createExportRequest = z.object({
     z.object({ kind: z.literal('case'), caseId: uuid }),
   ]),
   includeFamilies: z.boolean().default(true),
+  /**
+   * Where email attachments land in a native export.
+   *
+   * `inline` (the default) leaves them where they already are: inside the
+   * parent `.eml`, which is RFC822 and carries them. `extracted` also writes
+   * each one as its own file under a directory named after the parent, which
+   * is a second copy of bytes the archive already holds — on one real 130 GiB
+   * export that was 249,787 of 434,878 items and about 30 GB.
+   */
+  attachments: z.enum(['inline', 'extracted']).default('inline'),
   csv: z
     .object({
       columns: z.array(z.string()).min(1),
@@ -150,11 +167,26 @@ export const createExportRequest = z.object({
     })
     .optional(),
   archiveSplitMb: z.number().int().min(64).max(10_240).default(2048),
+  /**
+   * Part size for a `pst` export, in MiB. Each part is a COMPLETE,
+   * independently-openable PST, not a byte-range volume of one big file.
+   *
+   * Capped at 3,072 MiB (3 GiB) because that is what the writer can actually
+   * do. Its own hard ceiling is `MaxSingleFileBytes - 128 MiB` — about
+   * 3.19 GiB — and anything larger is SILENTLY clamped down to it. Letting an
+   * operator ask for 10 GiB and quietly handing back 15 parts of 3.19 GiB is
+   * the kind of surprise that reads as a bug in the product.
+   *
+   * 3 GiB is also upstream's own default, described there as the size validated
+   * against real Outlook. Note that the largest PST anyone here has actually
+   * opened and checked is 2.77 GiB.
+   */
+  pstPartMb: z.number().int().min(64).max(3072).default(3072),
 });
 
 export const exportStatusResponse = z.object({
   id: uuid,
-  kind: z.enum(['native', 'csv']),
+  kind: z.enum(['native', 'csv', 'pst']),
   name: z.string(),
   status: z.enum(['queued', 'running', 'verifying', 'ready', 'failed', 'cancelled']),
   statusDetail: z.string(),
@@ -184,5 +216,49 @@ export const exportDownloadResponse = z.object({
   manifestUrl: z.string(),
   archiveUrls: z.array(z.string()),
   manifestSha256: z.string(),
+  expiresInSeconds: z.number().int(),
+  /**
+   * Per-part detail, so a client can save the parts into one folder under
+   * stable names and check each one as it lands.
+   *
+   * `sha256` is null for exports produced before part digests were recorded.
+   * Null means "cannot verify", and a client must say so rather than quietly
+   * presenting an unverified part as a verified one.
+   */
+  parts: z.array(
+    z.object({
+      partNumber: z.number().int().min(1),
+      filename: z.string(),
+      sizeBytes: z.number().int().nonnegative().nullable(),
+      sha256: z.string().nullable(),
+      url: z.string(),
+    }),
+  ),
+  /** Suggested folder name, already safe for a filesystem. */
+  folderName: z.string(),
+  /**
+   * Scoped credential that lets a download script re-sign URLs as it goes.
+   * Presigned URLs last minutes; a 65-part download does not.
+   */
+  downloadToken: z.string(),
+  downloadTokenExpiresInSeconds: z.number().int(),
+});
+
+/**
+ * POST /exports/:id/download/urls — fresh presigned URLs for a script that is
+ * already partway through, authenticated by the scoped download token rather
+ * than a session.
+ */
+export const exportDownloadRefreshResponse = z.object({
+  manifestUrl: z.string(),
+  parts: z.array(
+    z.object({
+      partNumber: z.number().int().min(1),
+      filename: z.string(),
+      sizeBytes: z.number().int().nonnegative().nullable(),
+      sha256: z.string().nullable(),
+      url: z.string(),
+    }),
+  ),
   expiresInSeconds: z.number().int(),
 });

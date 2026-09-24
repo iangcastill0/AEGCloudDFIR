@@ -216,3 +216,41 @@ export function keyClass(key: string): KeyClass {
       return 'unknown';
   }
 }
+
+/**
+ * The extension an export's parts actually have.
+ *
+ * `.zip` used to be written out by hand in three places — the API's key
+ * fallback, the API's presign, and the backfill script. That was right for as
+ * long as every export was a zip, and wrong the moment one was not. The
+ * filename is signed INTO the presigned URL, so a PST part would have arrived
+ * named `.zip`, Outlook would have refused it, and nothing in the product would
+ * have said why.
+ *
+ * Lives here, beside `derivativeKey`, because the key and the filename have to
+ * be decided together or they drift. Keyed on the export's `kind` column rather
+ * than sniffed from bytes: the column is a fact, a guess is not.
+ */
+export function archiveExtensionFor(kind: string): string {
+  return kind === 'pst' ? 'pst' : 'zip';
+}
+
+/**
+ * The derivative type a kind's parts are stored under.
+ *
+ * PST parts are kept apart from zip parts so an export cannot end up with both
+ * under one prefix, which would make the "walk until a part is missing"
+ * convention used by the API and the backfill script read the wrong files.
+ */
+export function derivativeTypeFor(kind: string): string {
+  return kind === 'pst' ? 'pst-archive' : 'archive';
+}
+
+/**
+ * Part filenames are part of the contract, not cosmetics: a client writes them
+ * into the download folder and `hashes.txt` names them, so every producer and
+ * every consumer must agree. One function, used by all of them.
+ */
+export function archivePartFilename(kind: string, partNumber: number): string {
+  return `export-part${String(partNumber).padStart(3, '0')}.${archiveExtensionFor(kind)}`;
+}

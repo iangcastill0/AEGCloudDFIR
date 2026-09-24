@@ -2,6 +2,7 @@ import { withTenantContext } from '@aeg-clouddfir/database';
 import { sanitizeError, type WorkerContext } from '../context.js';
 import { recordException } from '../progress.js';
 import { readAllCapped } from '../streams.js';
+import { isObjectNotFoundError, recordMissingObject } from './missing-object.js';
 import { createOcrRunner, type OcrRunner } from './process-ocr.js';
 import type { EvidenceStagePayload } from './payloads.js';
 import { previewPlan } from './preview-plan.js';
@@ -86,6 +87,21 @@ export async function processPreview(
     const stream = await ctx.store.getStream('evidence', item.blob.objectKey);
     input = await readAllCapped(stream, MAX_INPUT_BYTES);
   } catch (err) {
+    // "The stored file could not be read" is true of a slow network and of
+    // evidence that no longer exists, and this stage wrote both as kind
+    // 'other'. A preview is a convenience and a missing object is not, so this
+    // one case leaves the convenience rule behind and marks the item.
+    if (isObjectNotFoundError(err)) {
+      await recordMissingObject(ctx, {
+        tenantId,
+        item,
+        version,
+        stage: 'preview',
+        bucket: 'evidence',
+        objectKey: item.blob.objectKey,
+      });
+      return;
+    }
     await note(ctx, tenantId, item, `The stored file could not be read: ${sanitizeError(err)}`);
     return;
   }

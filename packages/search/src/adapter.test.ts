@@ -41,6 +41,7 @@ interface MockClient extends MinimalOpenSearchClient {
   search: ReturnType<typeof vi.fn>;
   deleteByQuery: ReturnType<typeof vi.fn>;
   updateByQuery: ReturnType<typeof vi.fn>;
+  reindex: ReturnType<typeof vi.fn>;
   cluster: { health: ReturnType<typeof vi.fn> };
 }
 
@@ -61,6 +62,7 @@ function mockClient(): MockClient {
     updateByQuery: vi
       .fn()
       .mockResolvedValue({ body: { total: 0, updated: 0, noops: 0, version_conflicts: 0 } }),
+    reindex: vi.fn().mockResolvedValue({ body: { created: 10, failures: [] } }),
     cluster: { health: vi.fn().mockResolvedValue({ body: { status: 'green' } }) },
   };
 }
@@ -80,13 +82,13 @@ describe('ensureIndex', () => {
     const client = mockClient();
     const result = await adapter(client).ensureIndex();
 
-    expect(result).toEqual({ created: true, indexName: 'test-evidence-v2' });
+    expect(result).toEqual({ created: true, indexName: 'test-evidence-v3' });
     expect(client.indices.create).toHaveBeenCalledTimes(1);
     const call = client.indices.create.mock.calls[0]?.[0] as {
       index: string;
       body: Record<string, unknown>;
     };
-    expect(call.index).toBe('test-evidence-v2');
+    expect(call.index).toBe('test-evidence-v3');
     expect(call.body['aliases']).toEqual({ 'test-evidence': {} });
     expect(call.body['mappings']).toBeDefined();
     expect(call.body['settings']).toBeDefined();
@@ -112,10 +114,58 @@ describe('ensureIndex', () => {
   it('does nothing when the alias already exists', async () => {
     const client = mockClient();
     client.indices.existsAlias.mockResolvedValue({ body: true });
+    client.indices.getAlias.mockResolvedValue({
+      body: { 'test-evidence-v3': { aliases: { 'test-evidence': {} } } },
+    });
 
     const result = await adapter(client).ensureIndex();
     expect(result.created).toBe(false);
     expect(client.indices.create).not.toHaveBeenCalled();
+  });
+
+  it('reindexes an older mapped alias into v3 before swapping it', async () => {
+    const client = mockClient();
+    client.indices.existsAlias.mockResolvedValue({ body: true });
+    client.indices.getAlias.mockResolvedValue({
+      body: { 'test-evidence-v2': { aliases: { 'test-evidence': {} } } },
+    });
+
+    const result = await adapter(client).ensureIndex();
+
+    expect(result).toEqual({ created: true, indexName: 'test-evidence-v3' });
+    expect(client.indices.create).toHaveBeenCalledWith(
+      expect.objectContaining({ index: 'test-evidence-v3' }),
+    );
+    expect(client.reindex).toHaveBeenCalledWith({
+      wait_for_completion: true,
+      refresh: true,
+      body: {
+        source: { index: ['test-evidence-v2'] },
+        dest: { index: 'test-evidence-v3', op_type: 'index' },
+      },
+    });
+    expect(client.indices.updateAliases).toHaveBeenCalledWith({
+      body: {
+        actions: [
+          { remove: { index: 'test-evidence-v2', alias: 'test-evidence' } },
+          { add: { index: 'test-evidence-v3', alias: 'test-evidence' } },
+        ],
+      },
+    });
+  });
+
+  it('keeps the old alias when automatic mapping migration reports a failure', async () => {
+    const client = mockClient();
+    client.indices.existsAlias.mockResolvedValue({ body: true });
+    client.indices.getAlias.mockResolvedValue({
+      body: { 'test-evidence-v2': { aliases: { 'test-evidence': {} } } },
+    });
+    client.reindex.mockResolvedValue({
+      body: { failures: [{ id: 'doc-1', cause: { reason: 'strict mapping error' } }] },
+    });
+
+    await expect(adapter(client).ensureIndex()).rejects.toThrow(/strict mapping error/);
+    expect(client.indices.updateAliases).not.toHaveBeenCalled();
   });
 
   it('re-links the alias when the index exists but the alias is missing', async () => {
@@ -126,7 +176,7 @@ describe('ensureIndex', () => {
     expect(result.created).toBe(false);
     expect(client.indices.create).not.toHaveBeenCalled();
     expect(client.indices.updateAliases).toHaveBeenCalledWith({
-      body: { actions: [{ add: { index: 'test-evidence-v2', alias: 'test-evidence' } }] },
+      body: { actions: [{ add: { index: 'test-evidence-v3', alias: 'test-evidence' } }] },
     });
   });
 });
@@ -370,20 +420,20 @@ describe('reindexToNewVersion', () => {
       batches([doc('a'), doc('b')], [doc('c')]),
     );
 
-    expect(result).toEqual({ indexName: 'test-evidence-v3', count: 3 });
+    expect(result).toEqual({ indexName: 'test-evidence-v4', count: 3 });
     expect(client.indices.create).toHaveBeenCalledWith(
-      expect.objectContaining({ index: 'test-evidence-v3' }),
+      expect.objectContaining({ index: 'test-evidence-v4' }),
     );
 
     const firstBulk = client.bulk.mock.calls[0]?.[0]?.body as unknown[];
-    expect(firstBulk[0]).toEqual({ index: { _index: 'test-evidence-v3', _id: 'a' } });
+    expect(firstBulk[0]).toEqual({ index: { _index: 'test-evidence-v4', _id: 'a' } });
 
     expect(client.indices.updateAliases).toHaveBeenCalledTimes(1);
     expect(client.indices.updateAliases).toHaveBeenCalledWith({
       body: {
         actions: [
           { remove: { index: 'test-evidence-v1', alias: 'test-evidence' } },
-          { add: { index: 'test-evidence-v3', alias: 'test-evidence' } },
+          { add: { index: 'test-evidence-v4', alias: 'test-evidence' } },
         ],
       },
     });
@@ -567,6 +617,23 @@ describe('addCaseToCollection', () => {
     await expect(
       adapter(client).addCaseToCollection('tenant-1', 'coll-1', 'case-1'),
     ).rejects.toThrow(/mapping conflict/);
+  });
+});
+
+describe('addCaseToImport', () => {
+  it('filters on both tenant and import and keeps the case id parameterized', async () => {
+    const client = mockClient();
+    await adapter(client).addCaseToImport('tenant-1', 'import-1', 'case-1');
+
+    const body = client.updateByQuery.mock.calls[0]?.[0]?.body as Record<string, unknown>;
+    const query = body.query as { bool?: { filter?: Record<string, unknown>[] } };
+    expect(query.bool?.filter).toEqual([
+      { term: { tenantId: 'tenant-1' } },
+      { term: { importId: 'import-1' } },
+    ]);
+    const script = body.script as { source: string; params: Record<string, string> };
+    expect(script.params).toEqual({ caseId: 'case-1' });
+    expect(script.source).toContain("ctx.op = 'noop'");
   });
 });
 

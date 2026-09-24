@@ -1,0 +1,17 @@
+--- a/src/PstBuilder/Messaging/StoreWriter.cs
++++ b/src/PstBuilder/Messaging/StoreWriter.cs
+@@ -321,7 +321,13 @@
+             var subEntries = new List<SlEntry>();
+             var (recipData, recipSub) = Stage(BuildRecipientTable(m));
+             subEntries.Add(new SlEntry(RecipientTableNid, recipData, recipSub));
+-            if (m.Attachments.Count > 0) AddAttachmentSubnodes(m, subEntries, attachSizes);
++            // LOCAL PATCH (see services/pst-builder/UPSTREAM.md). Upstream skips this when a
++            // message has no attachments, which leaves the message's local-descriptors tree
++            // without a 0x671 attachment-table entry. libpff then fails
++            // libpff_message_determine_attachments with "invalid local descriptors node" on
++            // EVERY no-attachment message -- and most real mail has no attachment. Writing an
++            // empty attachment table costs one subnode and makes libpff read the file cleanly.
++            AddAttachmentSubnodes(m, subEntries, attachSizes);
+ 
+             var (pcBid, subBid) = Stage(pc.Build(), subEntries);
+             _ndb.AddNode(m.Nid, pcBid, subBid, folder.Nid);

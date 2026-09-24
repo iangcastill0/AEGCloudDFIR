@@ -23,6 +23,9 @@ import type { AppLogger } from '../common/logger.js';
 import { AuditService } from '../audit/audit.service.js';
 import { AuthService } from './auth.service.js';
 import { OidcService } from './oidc.service.js';
+import { TenantsService } from '../tenants/tenants.service.js';
+import { joinRequest } from '@aeg-clouddfir/contracts';
+import { zodValidate } from '../common/zod-validate.js';
 import {
   MAX_LOGIN_RESTARTS,
   attemptFromState,
@@ -44,8 +47,8 @@ import {
   deriveSealingKey,
   openAuthFlow,
   sealAuthFlow,
-  sealSession,
   sessionCookieName,
+  writeSessionCookie,
   type SessionPayload,
 } from './session.js';
 import { generateCsrfToken } from '../security/csrf.js';
@@ -78,6 +81,7 @@ export class AuthController {
     @Inject(LOGGER) private readonly logger: AppLogger,
     private readonly oidc: OidcService,
     private readonly authService: AuthService,
+    private readonly tenantsService: TenantsService,
     private readonly audit: AuditService,
   ) {
     this.key = deriveSealingKey(config.CDFIR_SESSION_SECRET);
@@ -89,11 +93,7 @@ export class AuthController {
   }
 
   private setSessionCookie(reply: FastifyReply, payload: SessionPayload): void {
-    const maxAge = Math.max(1, payload.exp - Math.floor(Date.now() / 1000));
-    reply.setCookie(sessionCookieName(this.isProd), sealSession(this.key, payload), {
-      ...this.baseCookieOptions(),
-      maxAge,
-    });
+    writeSessionCookie(reply, this.key, payload, this.isProd);
   }
 
   /** Issue a double-submit CSRF token (readable by JS by design). */
@@ -257,6 +257,7 @@ export class AuthController {
 
   @Get('tenants')
   async tenants(@Req() request: FastifyRequest): Promise<{
+    canCreateTenant: boolean;
     tenants: Array<{
       tenantId: string;
       name: string;
@@ -269,6 +270,7 @@ export class AuthController {
     if (!session) throw new UnauthorizedException();
     const memberships = await this.authService.listMemberships(session.userId);
     return {
+      canCreateTenant: this.tenantsService.canCreateTenant(),
       tenants: memberships.map((m) => ({
         tenantId: m.tenantId,
         name: m.tenant.name,
@@ -313,5 +315,21 @@ export class AuthController {
     });
 
     return { ok: true };
+  }
+
+  /** CSRF-protected by the global CsrfGuard (mutating method). */
+  @Post('join')
+  @HttpCode(200)
+  async join(
+    @Body() body: unknown,
+    @Req() request: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ): Promise<{ tenantId: string; name: string; slug: string }> {
+    const session = request.cdfirSession;
+    if (!session) throw new UnauthorizedException();
+    const parsed = zodValidate(joinRequest, body);
+    const joined = await this.tenantsService.redeemInvite(session.userId, parsed.token, request);
+    this.setSessionCookie(reply, { ...session, tenantId: joined.tenantId });
+    return joined;
   }
 }

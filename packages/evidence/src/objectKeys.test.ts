@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { KeyValidationError } from './errors.js';
 import {
+  archiveExtensionFor,
+  archivePartFilename,
   assertKeyInTenant,
   derivativeKey,
+  derivativeTypeFor,
   exportKey,
   keyClass,
   manifestKey,
@@ -165,5 +168,35 @@ describe('keyClass', () => {
     expect(keyClass(`tenants/${TENANT}/other/x`)).toBe('unknown');
     expect(keyClass('tenants/not-a-uuid/originals/sha256/ab/x')).toBe('unknown');
     expect(keyClass('')).toBe('unknown');
+  });
+});
+
+describe('export part naming', () => {
+  /**
+   * The filename is signed INTO the presigned download URL, so it is what
+   * actually lands on a recipient's disk. `.zip` was written out by hand in
+   * three places; a PST part arriving named `.zip` is refused by Outlook with
+   * nothing in the product explaining why.
+   */
+  it('gives a pst export .pst and everything else .zip', () => {
+    expect(archiveExtensionFor('pst')).toBe('pst');
+    expect(archiveExtensionFor('native')).toBe('zip');
+    expect(archiveExtensionFor('csv')).toBe('zip');
+    expect(archivePartFilename('pst', 1)).toBe('export-part001.pst');
+    expect(archivePartFilename('native', 1)).toBe('export-part001.zip');
+  });
+
+  it('pads part numbers so parts sort in part order', () => {
+    // A 65-part export sorted as 1, 10, 11, 2 in a download folder is how a
+    // recipient concludes parts are missing.
+    expect(archivePartFilename('native', 9)).toBe('export-part009.zip');
+    expect(archivePartFilename('native', 65)).toBe('export-part065.zip');
+  });
+
+  it('keeps pst parts under their own derivative type', () => {
+    // Both kinds under one prefix would break the "walk until a part is
+    // missing" convention the API and the backfill script both use.
+    expect(derivativeTypeFor('pst')).toBe('pst-archive');
+    expect(derivativeTypeFor('native')).toBe('archive');
   });
 });

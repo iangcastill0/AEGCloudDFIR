@@ -78,6 +78,7 @@ export type CollectionExceptionKind =
   | 'api_error'
   | 'api_export_derivative'
   | 'quarantined'
+  | 'object_missing'
   | 'other';
 
 export interface CollectionExceptionInput {

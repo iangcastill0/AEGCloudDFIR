@@ -41,6 +41,7 @@ export function fakePrisma(models: Record<string, unknown>): PrismaClient {
     // Defaults to an empty result. Paged raw reads treat that as "no more
     // rows", so a test that does not care about them simply sees none.
     $queryRaw: vi.fn(async () => []),
+    caseMember: { findMany: vi.fn(async () => []) },
     ...models,
   };
   base.$transaction = vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(base));
@@ -97,6 +98,7 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     CDFIR_KEK_LOCAL_MASTER_KEY: TEST_KEK_BASE64,
     CDFIR_KEK_ACTIVE_KEY_ID: 'kek-test',
     CDFIR_S3_PRESIGN_TTL_SECONDS: 300,
+    CDFIR_EXPORT_DOWNLOAD_TOKEN_TTL_SECONDS: 24 * 3600,
     ...overrides,
   } as AppConfig;
 }

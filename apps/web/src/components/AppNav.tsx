@@ -8,6 +8,7 @@ import { API_URL } from '@/lib/api';
 const LINKS: Array<{ href: string; label: string; adminOnly?: boolean }> = [
   { href: '/', label: 'Dashboard' },
   { href: '/collections', label: 'Collections' },
+  { href: '/import', label: 'Import' },
   { href: '/cases', label: 'Cases' },
   { href: '/review', label: 'Review' },
   { href: '/exports', label: 'Exports' },

@@ -19,7 +19,9 @@ import { z } from 'zod';
 import {
   collectionAction,
   createCollectionRequestFields,
+  type CollectionItemStateCounts,
   type CollectionStatusResponse,
+  type CollectionThroughputResponse,
 } from '@aeg-clouddfir/contracts';
 import type { FastifyRequest } from 'fastify';
 import '../common/http.js';
@@ -30,6 +32,19 @@ import { assertWithinQuota, readQuota } from '../common/quotas.js';
 import { zodValidate } from '../common/zod-validate.js';
 import { chunk, queryInChunks, FAMILY_QUERY_CHUNK } from '../common/families.js';
 import { autoCaseDescription, autoCaseName } from './auto-case.js';
+import {
+  EMPTY_PACE,
+  completeBuckets,
+  computePace,
+  decideState,
+  fillBuckets,
+  historyBucketMinutes,
+  isDiscovering,
+  isMeasuring,
+  phaseProgress,
+  windowName,
+  type RawBucket,
+} from './throughput.js';
 import { AuditService } from '../audit/audit.service.js';
 import type { AppConfig } from '@aeg-clouddfir/config';
 import { derivativeKey, type EvidenceObjectStore } from '@aeg-clouddfir/evidence';
@@ -136,6 +151,22 @@ const COMPLETENESS_NARRATIVES: Record<string, string> = {
   failed: 'Collection failed before completing; collected items remain preserved.',
   cancelled: 'Collection was cancelled; items collected before cancellation remain preserved.',
 };
+
+/** How long the live throughput window looks back. */
+const LIVE_WINDOW_MINUTES = 60;
+
+/** Raw shapes of the two throughput reads. `bytes` is text: the column is BigInt. */
+interface ThroughputBoundsRow {
+  firstAt: Date | null;
+  lastAt: Date | null;
+  totalItems: number;
+  totalBytes: string;
+}
+interface ThroughputBucketRow {
+  startedAt: Date;
+  items: number;
+  bytes: string;
+}
 
 export interface CollectionListItem {
   id: string;
@@ -730,6 +761,235 @@ export class CollectionsService {
             : null,
         case:
           collection.case === null ? null : { id: collection.case.id, name: collection.case.name },
+      };
+    });
+  }
+
+  /**
+   * Measured throughput for one collection. No forecast, ever — see
+   * ./throughput.ts for the replay numbers that rule one out.
+   *
+   * Two window shapes:
+   * - `live`: the last 60 minutes at one bucket per minute, for "what is
+   *   happening right now".
+   * - `history`: the whole acquisition span, downsampled server-side to about
+   *   200 buckets. The real run had 3,948 minutes and a browser draws them on
+   *   roughly 900 pixels, so sending every minute would be four points per pixel
+   *   for no extra information.
+   *
+   * KNOWN, DELIBERATE FOLLOW-UP: there is no covering index for the rollup.
+   * Measured on the 434,910-item collection it ran 350 ms cold and **225 ms
+   * warm**, reading 237 MB, which is fine against the 5-second poll the browser
+   * uses. An index on evidence_items (collectionId, acquiredAt) INCLUDE (size)
+   * would cut it, but packages/database/prisma/schema.prisma already carries
+   * three other features' uncommitted changes and a migration here would tangle
+   * them. Add it in its own change.
+   */
+  async throughput(
+    auth: AuthContext,
+    id: string,
+    opts: {
+      window: 'live' | 'history';
+      /**
+       * What the caller's previous poll was told. The browser echoes this number
+       * back untouched; the SERVER still decides whether throttling rose, so the
+       * page and the API can never disagree about the state.
+       */
+      previousRateLimitWaitMs?: number;
+      now?: Date;
+    },
+  ): Promise<CollectionThroughputResponse> {
+    const now = opts.now ?? new Date();
+
+    return withTenantContext(this.prisma, auth.tenantId, async (tx) => {
+      const collection = await tx.collection.findFirst({
+        where: { id, tenantId: auth.tenantId },
+        include: { custodians: true },
+      });
+      if (!collection) throw new NotFoundException();
+
+      // Bounds and totals in one pass, so the window can be sized and the
+      // cumulative-bytes line can start from a true number rather than from the
+      // first bucket the window happens to include.
+      const bounds = await tx.$queryRaw<ThroughputBoundsRow[]>`
+        SELECT MIN(e."acquiredAt")                AS "firstAt",
+               MAX(e."acquiredAt")                AS "lastAt",
+               COUNT(*)::int                      AS "totalItems",
+               COALESCE(SUM(e."size"), 0)::text   AS "totalBytes"
+          FROM evidence_items e
+         WHERE e."tenantId"     = ${auth.tenantId}::uuid
+           AND e."collectionId" = ${id}::uuid
+      `;
+      const firstAt = bounds[0]?.firstAt ?? null;
+      const lastAt = bounds[0]?.lastAt ?? null;
+      const totalItems = bounds[0]?.totalItems ?? 0;
+      const totalBytes = Number(bounds[0]?.totalBytes ?? '0');
+
+      const [grouped, openPageCheckpoints, exceptionCount] = await Promise.all([
+        tx.collectionItem.groupBy({
+          by: ['state'],
+          where: { tenantId: auth.tenantId, collectionId: id },
+          _count: { _all: true },
+        }),
+        // An open page cursor means the provider has pages this run has not
+        // walked, so the denominator is still moving.
+        tx.collectionCheckpoint.count({
+          where: { tenantId: auth.tenantId, collectionId: id, cursorKind: 'page' },
+        }),
+        tx.collectionException.count({ where: { tenantId: auth.tenantId, collectionId: id } }),
+      ]);
+
+      const itemStates: CollectionItemStateCounts = {
+        discovered: 0,
+        fetching: 0,
+        preserved: 0,
+        processed: 0,
+        indexed: 0,
+        failed: 0,
+        skipped: 0,
+      };
+      for (const row of grouped) {
+        itemStates[row.state as keyof CollectionItemStateCounts] = row._count._all;
+      }
+
+      // Provider throttling, summed across every custodian and source. The
+      // per-custodian counters are the only place it is recorded.
+      let rateLimitWaitMs = 0;
+      for (const cc of collection.custodians) {
+        for (const source of collection.sources) {
+          rateLimitWaitMs += readCounters(cc.progress, source).rateLimitWaitMs;
+        }
+      }
+
+      const live = opts.window === 'live';
+      const liveFromMs = now.getTime() - LIVE_WINDOW_MINUTES * 60_000;
+      // The whole-run window spans acquisition only — first byte to last byte.
+      // The processing tail has no acquisitions in it, so extending the chart to
+      // the end of the run would squash 66 h of real work into 70% of the width
+      // and draw 27 h of zeros. The tail is reported as its own phase instead.
+      // A collection that has acquired nothing gets NO buckets, not 60 idle ones.
+      // Sixty grey stripes on a collection that is one minute old reads as an
+      // hour of failure; the honest answer is that there is nothing to draw yet.
+      const from =
+        firstAt === null
+          ? null
+          : live
+            ? new Date(Math.max(firstAt.getTime(), liveFromMs))
+            : firstAt;
+      const to = live ? now : lastAt;
+      const bucketMinutes = live
+        ? 1
+        : historyBucketMinutes(
+            from === null || to === null ? 0 : (to.getTime() - from.getTime()) / 60_000,
+          );
+
+      let rawBuckets: RawBucket[] = [];
+      if (from !== null && to !== null) {
+        const widthSeconds = bucketMinutes * 60;
+        // date_trunc cannot take a variable width, so the bucket start is
+        // floored on the epoch. `size` is BigInt in the column and JSON has no
+        // BigInt, so it comes back as text and is converted once, here.
+        const rows = await tx.$queryRaw<ThroughputBucketRow[]>`
+          SELECT to_timestamp(
+                   floor(extract(epoch FROM e."acquiredAt") / ${widthSeconds}::double precision)
+                   * ${widthSeconds}::double precision
+                 )                                AS "startedAt",
+                 COUNT(*)::int                    AS "items",
+                 COALESCE(SUM(e."size"), 0)::text AS "bytes"
+            FROM evidence_items e
+           WHERE e."tenantId"     = ${auth.tenantId}::uuid
+             AND e."collectionId" = ${id}::uuid
+             AND e."acquiredAt"  >= ${from}
+             AND e."acquiredAt"  <= ${to}
+           GROUP BY 1
+           ORDER BY 1
+        `;
+        rawBuckets = rows.map((row) => ({
+          startedAt: row.startedAt,
+          items: row.items,
+          bytes: Number(row.bytes),
+        }));
+      }
+
+      const windowBytes = rawBuckets.reduce((n, b) => n + b.bytes, 0);
+      const buckets =
+        from === null || to === null
+          ? []
+          : fillBuckets(rawBuckets, {
+              from,
+              to,
+              bucketMinutes,
+              // Everything preserved before this window still happened, so the
+              // cumulative line must not restart at zero.
+              bytesBefore: Math.max(totalBytes - windowBytes, 0),
+            });
+
+      const settled = completeBuckets(buckets, { now, bucketMinutes });
+      const measuring = isMeasuring({ completeBucketCount: settled.length, items: totalItems });
+      const pace = computePace(settled, { measuring, bucketMinutes });
+
+      const decision = decideState({
+        status: collection.status,
+        now,
+        lastAcquiredAt: lastAt,
+        itemStates,
+        openPageCheckpoints,
+        exceptionCount,
+        rateLimitWaitMs,
+        previousRateLimitWaitMs: opts.previousRateLimitWaitMs ?? null,
+        buckets: settled,
+        bucketMinutes,
+        totalItems,
+      });
+
+      const runStart = collection.startedAt ?? firstAt;
+      const runEnd = collection.finishedAt ?? now;
+      const runElapsedMs =
+        runStart === null ? 0 : Math.max(runEnd.getTime() - runStart.getTime(), 0);
+      const acquisitionElapsedMs =
+        firstAt === null || lastAt === null ? 0 : Math.max(lastAt.getTime() - firstAt.getTime(), 0);
+
+      const phases = phaseProgress({
+        itemStates,
+        denominatorMoving: isDiscovering({ status: collection.status, openPageCheckpoints }),
+        acquisitionElapsedMs,
+        runElapsedMs,
+        acquisitionPace: pace,
+        // The tail's pace is not measurable from acquiredAt: an item is
+        // processed long after it was acquired, and nothing records when. Rather
+        // than invent a number, the processing phase reports counts and elapsed
+        // time only — all-null, which means "not measured", not "zero".
+        processingPace: EMPTY_PACE,
+      });
+
+      return {
+        collectionId: collection.id,
+        status: collection.status,
+        window: opts.window,
+        windowName: windowName({
+          window: opts.window,
+          bucketMinutes,
+          bucketCount: buckets.length,
+        }),
+        bucketMinutes,
+        buckets,
+        totals: {
+          items: totalItems,
+          bytes: totalBytes,
+          firstAcquiredAt: firstAt?.toISOString() ?? null,
+          lastAcquiredAt: lastAt?.toISOString() ?? null,
+          acquisitionElapsedMs,
+          runElapsedMs,
+          idleBuckets: buckets.filter((b) => b.idle).length,
+        },
+        acquisition: phases.acquisition,
+        processing: phases.processing,
+        itemStates,
+        state: decision.state,
+        stateLabel: decision.stateLabel,
+        health: decision.health,
+        rateLimitWaitMs,
+        exceptionCount,
       };
     });
   }

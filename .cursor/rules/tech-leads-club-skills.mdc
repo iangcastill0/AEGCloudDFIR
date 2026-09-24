@@ -1,0 +1,24 @@
+---
+description: Use the Tech Leads Club project skills in this folder on every agent run.
+alwaysApply: true
+---
+
+# Tech Leads Club project skills
+
+This repo has the Tech Leads Club skill pack installed for agents that run here.
+
+Skill folders (same 92 skills, copied for each agent):
+
+- Cursor: `.cursor/skills/<name>/SKILL.md`
+- Claude Code: `.claude/skills/<name>/SKILL.md`
+- GitHub Copilot: `.github/skills/<name>/SKILL.md`
+- OpenAI Codex: `.codex/skills/<name>/SKILL.md`
+
+On every task in this repo:
+
+1. Check those project skills (also listed in the session skill list).
+2. If a skill's description matches the work, **read that `SKILL.md` first** and follow it.
+3. Load extra files it names (`references/`, `scripts/`) only when that skill says to.
+4. If a skill conflicts with this repo's own rules (`CLAUDE.md`, deploy/tenant/evidence rules), the repo rules win.
+
+Do not install these into `~/.cursor/skills-cursor/`. That folder is Cursor's built-in skills.

@@ -1,0 +1,17 @@
+-- Add 'pst' to ExportKind.
+--
+-- OPERATOR ACTION. Enum changes in this repo are applied by hand to BOTH
+-- databases (production and staging) before the image that uses them is
+-- deployed, because a worker that reads an Export row with kind='pst' from a
+-- database whose enum does not have that value fails on the read, not on the
+-- write.
+--
+-- `IF NOT EXISTS` is what makes the hand-application safe: once you have run
+-- this by hand, the later `migrate deploy` that replays this file is a no-op
+-- instead of an error.
+--
+-- ALTER TYPE ... ADD VALUE cannot run inside a transaction block on
+-- PostgreSQL < 12; this project is on 16, where it can. Prisma wraps each
+-- migration in a transaction, so on an older server this file would need
+-- splitting. It does not here.
+ALTER TYPE "ExportKind" ADD VALUE IF NOT EXISTS 'pst';

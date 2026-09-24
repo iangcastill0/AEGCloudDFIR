@@ -34,3 +34,13 @@ sbom/*.json
 
 # Written by scripts/backup-postgres.sh; read by the monitor to detect a missed backup.
 .last-backup
+
+# Build output from vendored services (the PST writer is C#). The SOURCE is
+# vendored on purpose at a recorded upstream SHA; its compiled artifacts are
+# not. CI publishes the binary, so committing bin/ and obj/ would add tens of
+# megabytes of generated files that go stale the moment anyone rebuilds.
+services/**/bin/
+services/**/obj/
+services/**/publish-*/
+__pycache__/
+*.pyc

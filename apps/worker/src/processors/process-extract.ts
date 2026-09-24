@@ -5,6 +5,7 @@ import { convertToPlainText, isConvertible } from './soffice.js';
 import { QUEUES, dedupKeys } from '../queues.js';
 import { isImageOcr, ocrDecision } from './ocr-policy.js';
 import { PayloadTooLargeError, readAllCapped } from '../streams.js';
+import { isObjectNotFoundError, recordMissingObject } from './missing-object.js';
 import type { EvidenceStagePayload } from './payloads.js';
 
 const MAX_INPUT_BYTES = 200 * 1024 * 1024;
@@ -89,16 +90,31 @@ export async function processExtract(
   }
   if (item.blob === null) return;
 
+  const bucket =
+    item.blob.storageClass === 'quarantine' ? ('quarantine' as const) : ('evidence' as const);
+
   let input: Buffer;
   try {
-    const stream = await ctx.store.getStream(
-      item.blob.storageClass === 'quarantine' ? 'quarantine' : 'evidence',
-      item.blob.objectKey,
-    );
+    const stream = await ctx.store.getStream(bucket, item.blob.objectKey);
     input = await readAllCapped(stream, MAX_INPUT_BYTES);
   } catch (err) {
     if (err instanceof PayloadTooLargeError) {
       await markExtractException(ctx, payload, item, 'unsupported_item', sanitizeError(err));
+      return;
+    }
+    // A missing object was rethrown here, so BullMQ retried eight times with
+    // backoff against a key that will never come back, and the item finished as
+    // a generic job failure. It is a permanent, nameable condition; record it
+    // and stop.
+    if (isObjectNotFoundError(err)) {
+      await recordMissingObject(ctx, {
+        tenantId,
+        item,
+        version,
+        stage: 'extract',
+        bucket,
+        objectKey: item.blob.objectKey,
+      });
       return;
     }
     throw err;

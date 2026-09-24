@@ -24,12 +24,20 @@ before relying on the affected behavior.
 
 4. **Authentik is the only login IdP.** AEG-CloudDFIR is an OIDC relying party
    using authorization-code + PKCE. Local passwords are never stored. MFA
-   policy is enforced inside Authentik, not in AEG-CloudDFIR.
+   policy is enforced inside Authentik (TOTP at enrollment and every later
+   sign-in), not in AEG-CloudDFIR. There is no confirmation email. Public
+   enrollment (sign up) is an Authentik flow; it creates an IdP account, not
+   a tenant.
 5. **OIDC `sub` is stable per user per Authentik instance.** User rows key on
-   `(issuer, sub)`. Email is informational and may change.
+   `(issuer, sub)`. Email is informational and may change. One-time app
+   invites still match on email (case-insensitive) at redeem time. The
+   standing org join link does not: anyone who signs in and opens it is
+   added as a reviewer.
 6. **Group-to-role mapping is optional.** When enabled, the configured group
    claim is authoritative on each login; when disabled, roles are managed in
-   AEG-CloudDFIR by `org_admin`s.
+   AEG-CloudDFIR by `org_admin`s. Tenant membership is always app-owned
+   (create-organization, standing join link, or one-time invite). Authentik
+   groups do not create tenants.
 
 ## Provider access
 

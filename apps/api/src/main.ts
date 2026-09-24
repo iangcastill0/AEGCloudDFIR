@@ -76,7 +76,12 @@ async function bootstrap(): Promise<void> {
       config.CDFIR_CORS_ALLOWED_ORIGINS.length > 0 ? config.CDFIR_CORS_ALLOWED_ORIGINS : false,
     credentials: true,
     methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['content-type', 'x-csrf-token', 'x-request-id'],
+    // `authorization` is here for exactly one call: the browser folder-save
+    // re-signing its download URLs with the scoped export token. The web app is
+    // a different origin from the API, so that header forces a preflight, and a
+    // preflight that does not list it fails before the request is ever sent.
+    // Only the origins above may use it; it is not a general loosening.
+    allowedHeaders: ['content-type', 'x-csrf-token', 'x-request-id', 'authorization'],
   });
 
   // Correlation id: honor a sane inbound x-request-id, always echo it back.

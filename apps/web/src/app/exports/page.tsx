@@ -22,6 +22,17 @@ import {
 } from '@/lib/hooks';
 import { errorMessage } from '@/lib/errors';
 import { formatBytes, formatDateTime } from '@/lib/format';
+import { API_URL } from '@/lib/api';
+import {
+  buildBashScript,
+  buildHashesTxt,
+  buildPowerShellScript,
+  recommendScript,
+  saveExportToFolder,
+  supportsDirectoryPicker,
+  type DownloadPlanInput,
+  type FolderSaveProgress,
+} from '@/lib/export-download';
 
 const CSV_COLUMNS = [
   'evidence_id',
@@ -123,7 +134,7 @@ function CreateExportDialog({
   const cases = useCases();
 
   const [name, setName] = useState('');
-  const [kind, setKind] = useState<'native' | 'csv'>('native');
+  const [kind, setKind] = useState<'native' | 'csv' | 'pst'>('native');
   const [selectionKind, setSelectionKind] = useState<'tag' | 'saved_search' | 'case'>('tag');
   const [selectionId, setSelectionId] = useState('');
   const [includeFamilies, setIncludeFamilies] = useState(true);
@@ -187,12 +198,23 @@ function CreateExportDialog({
         legend="Export kind"
         name="export-kind"
         value={kind}
-        onChange={(v) => setKind(v as 'native' | 'csv')}
+        onChange={(v) => setKind(v as 'native' | 'csv' | 'pst')}
         options={[
           { value: 'native', label: 'Native files', description: 'Original bytes plus manifest.' },
           { value: 'csv', label: 'CSV metadata', description: 'Chosen columns, one row per item.' },
+          {
+            value: 'pst',
+            label: 'Outlook PST (email only)',
+            // Said here, at the point of choosing, and not only in the finished
+            // export. Someone who picks this needs to know before they wait
+            // hours for it that the bytes inside are not the collected bytes.
+            description:
+              'Email re-encoded into Outlook mailbox files. A reconstruction, not natives — the native .eml digests ship alongside it.',
+          },
         ]}
       />
+      {/* The standing notice, verbatim, whenever PST is the chosen kind. */}
+      {kind === 'pst' ? <TruthNotice kind="pstExport" variant="warning" /> : null}
       <Select
         label="Select items from"
         value={selectionKind}
@@ -262,34 +284,116 @@ function CreateExportDialog({
 }
 
 /**
- * Resolves an export's presigned URLs, then shows them.
+ * Resolves an export's presigned URLs, then offers the right way to save them.
  *
  * The endpoint returns an envelope, not a file, so this cannot be a plain link.
- * The parts are listed individually rather than auto-downloaded: an export can
- * be split into several archives, browsers block multiple programmatic
- * downloads, and — more importantly — the manifest and its SHA-256 are what
- * make the download verifiable. Hiding them behind an automatic save would bury
- * the one artifact a recipient needs to check the contents against.
+ *
+ * Which way is "right" depends on size, because a browser cannot make a folder
+ * from a download — path separators are stripped from both the `download`
+ * attribute and the Content-Disposition filename. A small export is streamed
+ * into a folder the user picks; a large one gets a script, which resumes a
+ * broken part and does not need a tab open for hours.
+ *
+ * The manifest and its SHA-256 stay visible on every path. They are what make
+ * the download verifiable, and burying them behind a convenient button would
+ * hide the one artifact a recipient needs.
  */
 function ExportDownload({ exportId, expiresAt }: { exportId: string; expiresAt: string | null }) {
   const download = useExportDownload();
   const links = download.data;
+  const [saving, setSaving] = useState<FolderSaveProgress | null>(null);
+  const [saveError, setSaveError] = useState('');
+  const [saved, setSaved] = useState(false);
 
   if (links) {
-    const parts = links.archiveUrls;
-    const multi = parts.length > 1;
+    const plan: DownloadPlanInput = {
+      exportId,
+      folderName: links.folderName,
+      manifestUrl: links.manifestUrl,
+      manifestSha256: links.manifestSha256,
+      parts: links.parts,
+      downloadToken: links.downloadToken,
+      apiBaseUrl: API_URL,
+    };
+    const useScript = recommendScript(links.parts);
+    const canPickFolder = supportsDirectoryPicker();
+    const unverifiable = links.parts.filter((p) => p.sha256 === null).length;
+
     return (
       <div className="cdfir-downloads">
-        {parts.map((url, i) => (
-          <a key={url} href={url}>
-            {multi ? `Download part ${String(i + 1)} of ${String(parts.length)}` : 'Download'}
-          </a>
-        ))}
+        <span className="cdfir-field__hint">
+          {`${String(links.parts.length)} part(s) \u2192 ${links.folderName}/`}
+        </span>
+
+        {useScript ? (
+          <span className="cdfir-field__hint">
+            This export is large enough that a browser tab is the wrong tool. The script resumes a
+            broken part and refreshes its own links.
+          </span>
+        ) : null}
+
+        <a href={textFileUrl(buildBashScript(plan))} download={`download-${links.folderName}.sh`}>
+          Download script (macOS / Linux)
+        </a>
+        <a
+          href={textFileUrl(buildPowerShellScript(plan))}
+          download={`download-${links.folderName}.ps1`}
+        >
+          Download script (Windows)
+        </a>
+        <a
+          href={textFileUrl(buildHashesTxt(links.parts, links.manifestSha256))}
+          download="hashes.txt"
+        >
+          hashes.txt
+        </a>
+
+        {canPickFolder ? (
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={saving !== null}
+            onClick={() => {
+              setSaveError('');
+              setSaved(false);
+              void saveExportToFolder(plan, setSaving)
+                .then(() => {
+                  setSaved(true);
+                })
+                .catch((err: unknown) => {
+                  setSaveError(errorMessage(err));
+                })
+                .finally(() => {
+                  setSaving(null);
+                });
+            }}
+          >
+            {saving === null ? 'Save to folder\u2026' : 'Saving\u2026'}
+          </Button>
+        ) : (
+          <span className="cdfir-field__hint">
+            Saving straight to a folder needs Chrome or Edge. Use the script above instead.
+          </span>
+        )}
+
+        {saving !== null ? (
+          <span className="cdfir-field__hint">
+            {`Saving ${saving.filename} (${String(saving.done + 1)} of ${String(saving.total)})\u2026`}
+          </span>
+        ) : null}
+        {saved ? <span className="cdfir-field__hint">Saved. Verify with hashes.txt.</span> : null}
+        {saveError !== '' ? <span className="cdfir-field__error">{saveError}</span> : null}
+
         <a href={links.manifestUrl}>Download manifest</a>
         <span className="cdfir-field__hint">manifest sha256, to verify the archive:</span>
         <span className="cdfir-downloads__hash">{links.manifestSha256}</span>
+        {unverifiable > 0 ? (
+          <span className="cdfir-field__error">
+            {`${String(unverifiable)} part(s) have no recorded digest and cannot be checked against hashes.txt. Verify their contents after extracting instead.`}
+          </span>
+        ) : null}
         <span className="cdfir-field__hint">
-          {`Links expire in ${String(Math.round(links.expiresInSeconds / 60))} min. Reopen for fresh ones.`}
+          {`Links expire in ${String(Math.round(links.expiresInSeconds / 60))} min. Both the script and "Save to folder" refresh their own as they go, so a long download does not need reopening. The plain links above go stale.`}
         </span>
       </div>
     );
@@ -315,4 +419,14 @@ function ExportDownload({ exportId, expiresAt }: { exportId: string; expiresAt: 
       ) : null}
     </div>
   );
+}
+
+/**
+ * A data: URL for generated text.
+ *
+ * Deliberately not a blob: URL — those need revoking, and a leaked one would
+ * outlive the component holding a download token in it.
+ */
+function textFileUrl(contents: string): string {
+  return `data:text/plain;charset=utf-8,${encodeURIComponent(contents)}`;
 }

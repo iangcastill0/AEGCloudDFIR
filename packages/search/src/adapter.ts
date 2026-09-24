@@ -60,6 +60,7 @@ export interface SearchAdapter {
     collectionId: string,
     caseId: string,
   ): Promise<UpdateByQueryResult>;
+  addCaseToImport(tenantId: string, importId: string, caseId: string): Promise<UpdateByQueryResult>;
   /**
    * Rewrite the top-level `folder` field on every document that carries one
    * folder value. Not `email.folder` — the document builder writes it flat.
@@ -153,6 +154,14 @@ export interface MinimalOpenSearchClient {
     refresh?: boolean;
     conflicts?: string;
   }): Promise<OsApiResponse<UpdateByQueryBody>>;
+  reindex(params: {
+    wait_for_completion: boolean;
+    refresh: boolean;
+    body: {
+      source: { index: string[] };
+      dest: { index: string; op_type: 'index' };
+    };
+  }): Promise<OsApiResponse<{ failures?: unknown[]; timed_out?: boolean }>>;
   cluster: {
     health(): Promise<OsApiResponse<{ status: string }>>;
   };
@@ -237,7 +246,45 @@ export class OpenSearchAdapter implements SearchAdapter {
       index: this.indexScope,
     });
     if (aliasExists.body) {
-      return { created: false, indexName };
+      const current = await this.client.indices.getAlias({
+        name: this.alias,
+        index: this.indexScope,
+      });
+      const currentIndices = Object.keys(current.body);
+      if (currentIndices.includes(indexName)) {
+        return { created: false, indexName };
+      }
+
+      const targetExists = await this.client.indices.exists({ index: indexName });
+      if (!targetExists.body) {
+        await this.client.indices.create({
+          index: indexName,
+          body: EVIDENCE_MAPPING as unknown as Record<string, unknown>,
+        });
+      }
+      const copied = await this.client.reindex({
+        wait_for_completion: true,
+        refresh: true,
+        body: {
+          source: { index: currentIndices },
+          dest: { index: indexName, op_type: 'index' },
+        },
+      });
+      const failures = copied.body.failures ?? [];
+      if (copied.body.timed_out === true || failures.length > 0) {
+        throw new Error(
+          `mapping migration to ${indexName} failed: ${JSON.stringify(failures[0] ?? 'timed out')}`,
+        );
+      }
+      await this.client.indices.updateAliases({
+        body: {
+          actions: [
+            ...currentIndices.map((index) => ({ remove: { index, alias: this.alias } })),
+            { add: { index: indexName, alias: this.alias } },
+          ],
+        },
+      });
+      return { created: true, indexName };
     }
     const indexExists = await this.client.indices.exists({ index: indexName });
     if (!indexExists.body) {
@@ -362,6 +409,46 @@ export class OpenSearchAdapter implements SearchAdapter {
     if (failures.length > 0) {
       throw new Error(
         `adding case ${caseId} to collection ${collectionId} failed for ` +
+          `${String(failures.length)} document(s): ${JSON.stringify(failures[0])}`,
+      );
+    }
+    return {
+      updated: body.updated ?? 0,
+      unchanged: body.noops ?? 0,
+      conflicts: body.version_conflicts ?? 0,
+    };
+  }
+
+  async addCaseToImport(
+    tenantId: string,
+    importId: string,
+    caseId: string,
+  ): Promise<UpdateByQueryResult> {
+    const response = await this.client.updateByQuery({
+      index: this.alias,
+      conflicts: 'proceed',
+      refresh: true,
+      body: {
+        query: {
+          bool: {
+            filter: [{ term: { tenantId } }, { term: { importId } }],
+          },
+        },
+        script: {
+          lang: 'painless',
+          source:
+            'if (ctx._source.caseIds == null) { ctx._source.caseIds = [params.caseId]; } ' +
+            'else if (!ctx._source.caseIds.contains(params.caseId)) { ctx._source.caseIds.add(params.caseId); } ' +
+            "else { ctx.op = 'noop'; }",
+          params: { caseId },
+        },
+      },
+    });
+    const body = response.body;
+    const failures = body.failures ?? [];
+    if (failures.length > 0) {
+      throw new Error(
+        `adding case ${caseId} to import ${importId} failed for ` +
           `${String(failures.length)} document(s): ${JSON.stringify(failures[0])}`,
       );
     }

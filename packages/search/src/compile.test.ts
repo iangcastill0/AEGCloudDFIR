@@ -125,6 +125,31 @@ describe('tenant isolation (ADVERSARIAL)', () => {
       wrapWithAuthorization({ match_all: {} }, { tenantId: '', includePrivileged: false }),
     ).toThrow(QueryValidationError);
   });
+
+  it('keeps imported evidence private to its owner or assigned case members', () => {
+    const wrapped = wrapWithAuthorization(
+      { match_all: {} },
+      {
+        tenantId: 'tenant-1',
+        includePrivileged: true,
+        importAccess: {
+          ownerUserId: 'user-1',
+          caseIds: ['case-1'],
+        },
+      },
+    );
+    const filter = (wrapped.bool as { filter: QueryDsl[] }).filter;
+    expect(filter).toContainEqual({
+      bool: {
+        should: [
+          { bool: { must_not: [{ exists: { field: 'importId' } }] } },
+          { term: { importOwnerId: 'user-1' } },
+          { terms: { caseIds: ['case-1'] } },
+        ],
+        minimum_should_match: 1,
+      },
+    });
+  });
 });
 
 describe('compile shapes', () => {

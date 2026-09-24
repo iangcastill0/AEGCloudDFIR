@@ -5,9 +5,11 @@ import {
   type CanActivate,
   type ExecutionContext,
 } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
 import type { FastifyRequest } from 'fastify';
 import '../common/http.js';
 import { CSRF_COOKIE } from '../auth/session.js';
+import { SKIP_CSRF_KEY } from './skip-csrf.decorator.js';
 
 export const CSRF_HEADER = 'x-csrf-token';
 
@@ -31,12 +33,18 @@ export function csrfTokensMatch(cookieValue: unknown, headerValue: unknown): boo
 /**
  * Double-submit CSRF guard. Registered globally: every mutating request must
  * send the cdfir_csrf cookie value back in the x-csrf-token header.
+ *
+ * One handler is exempt, marked with `@SkipCsrf()` — see that decorator for why
+ * a Bearer-only route cannot be attacked this way.
  */
 @Injectable()
 export class CsrfGuard implements CanActivate {
+  constructor(private readonly reflector: Reflector) {}
+
   canActivate(context: ExecutionContext): boolean {
     const request = context.switchToHttp().getRequest<FastifyRequest>();
     if (SAFE_METHODS.has(request.method.toUpperCase())) return true;
+    if (this.isExempt(context)) return true;
 
     const cookieValue = request.cookies?.[CSRF_COOKIE];
     const rawHeader = request.headers[CSRF_HEADER];
@@ -45,5 +53,17 @@ export class CsrfGuard implements CanActivate {
       throw new ForbiddenException('CSRF token missing or invalid');
     }
     return true;
+  }
+
+  /**
+   * The handler, and ONLY the handler. `getAllAndOverride` would also read the
+   * controller class, and one `@SkipCsrf()` up there would silently exempt
+   * every route on it — including the ones somebody adds next year. Anything
+   * that is not a route handler carrying the mark fails closed.
+   */
+  private isExempt(context: ExecutionContext): boolean {
+    const handler: unknown = context.getHandler();
+    if (typeof handler !== 'function') return false;
+    return this.reflector.get<boolean>(SKIP_CSRF_KEY, handler) === true;
   }
 }

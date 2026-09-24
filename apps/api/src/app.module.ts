@@ -17,6 +17,7 @@ import { TagsModule } from './tags/tags.module.js';
 import { CasesModule } from './cases/cases.module.js';
 import { ExportsModule } from './exports/exports.module.js';
 import { ProductionsModule } from './productions/productions.module.js';
+import { ImportsModule } from './imports/imports.module.js';
 import { CsrfGuard } from './security/csrf.js';
 import { PRISMA } from './common/tokens.js';
 
@@ -38,6 +39,7 @@ import { PRISMA } from './common/tokens.js';
     CasesModule,
     ExportsModule,
     ProductionsModule,
+    ImportsModule,
   ],
   providers: [
     // Global double-submit CSRF enforcement on every mutating route.

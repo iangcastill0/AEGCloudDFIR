@@ -4,7 +4,7 @@ import { buildAliasName, buildIndexName, EVIDENCE_MAPPING, MAPPING_VERSION } fro
 
 describe('index naming', () => {
   it('builds versioned index names and stable alias names', () => {
-    expect(MAPPING_VERSION).toBe(2);
+    expect(MAPPING_VERSION).toBe(3);
     expect(buildIndexName('cdfir', 1)).toBe('cdfir-evidence-v1');
     expect(buildIndexName('cdfir', 2)).toBe('cdfir-evidence-v2');
     expect(buildAliasName('cdfir')).toBe('cdfir-evidence');
@@ -174,13 +174,17 @@ describe('EVIDENCE_MAPPING — fields that must never be dynamically typed', () 
     }
   ).mappings.properties;
 
-  it.each(['evidenceItemId', 'tenantId', 'collectionId', 'custodianId'])(
-    '%s is a keyword, so it can be sorted and aggregated',
-    (field) => {
-      expect(props[field]).toBeDefined();
-      expect(props[field]?.type).toBe('keyword');
-    },
-  );
+  it.each([
+    'evidenceItemId',
+    'tenantId',
+    'collectionId',
+    'importId',
+    'importOwnerId',
+    'custodianId',
+  ])('%s is a keyword, so it can be sorted and aggregated', (field) => {
+    expect(props[field]).toBeDefined();
+    expect(props[field]?.type).toBe('keyword');
+  });
 
   it('the sort key compile() uses is sortable', () => {
     // compile.ts sorts on evidenceItemId as its stable tiebreaker; a text field

@@ -24,6 +24,22 @@ export { Tag } from './Tag.js';
 export type { TagProps } from './Tag.js';
 export { ProgressBar } from './ProgressBar.js';
 export type { ProgressBarProps } from './ProgressBar.js';
+export { Sparkline } from './Sparkline.js';
+export type { SparklineProps, SparklineBucket, SparklinePace } from './Sparkline.js';
+export { AreaChart } from './AreaChart.js';
+export type { AreaChartProps, AreaChartBucket } from './AreaChart.js';
+export { PhaseBar } from './PhaseBar.js';
+export type { PhaseBarProps } from './PhaseBar.js';
+export {
+  groupDigits,
+  shortBytes,
+  shortDuration,
+  phaseSegments,
+  sparklineLabel,
+  areaLabel,
+  phaseBarLabel,
+} from './charts.js';
+export type { PhaseCounts, PhaseSegment, ChartPoint, ChartBox } from './charts.js';
 export { EmptyState, ErrorState, Skeleton } from './states.js';
 export type { EmptyStateProps, ErrorStateProps, SkeletonProps } from './states.js';
 export { VisuallyHidden } from './VisuallyHidden.js';

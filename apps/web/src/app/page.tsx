@@ -2,6 +2,7 @@
 import Link from 'next/link';
 import { EmptyState, Notice, Table } from '@aeg-clouddfir/ui';
 import { QueryBoundary, StatusPill } from '@/components/shared';
+import { SignupLinkPanel } from '@/components/SignupLinkPanel';
 import { useCollections, useExports, useMe, useProductions, isCollectionActive } from '@/lib/hooks';
 import { formatDateTime } from '@/lib/format';
 
@@ -160,9 +161,20 @@ export default function DashboardPage() {
           </QueryBoundary>
         </section>
 
+        {me.data?.roles.includes('org_admin') && me.data.tenant?.id ? (
+          <section className="card">
+            <SignupLinkPanel tenantId={me.data.tenant.id} heading="Invite people" />
+          </section>
+        ) : null}
+
         <section className="card" aria-labelledby="dash-links">
           <h2 id="dash-links">Quick links</h2>
           <ul>
+            {me.data?.roles.includes('org_admin') ? (
+              <li>
+                <Link href="/admin/members">Members and sign-up link</Link>
+              </li>
+            ) : null}
             <li>
               <Link href="/connectors">Connect a Microsoft or Google account</Link>
             </li>

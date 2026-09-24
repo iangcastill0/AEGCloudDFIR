@@ -51,7 +51,13 @@ export interface EvidenceItemTarget {
   evidenceItemId: string;
 }
 
-export type FailureTarget = CollectionItemTarget | EvidenceItemTarget;
+export interface ForensicImportTarget {
+  kind: 'forensic-import';
+  tenantId: string;
+  importId: string;
+}
+
+export type FailureTarget = CollectionItemTarget | EvidenceItemTarget | ForensicImportTarget;
 
 function str(data: Record<string, unknown>, key: string): string | null {
   const value = data[key];
@@ -92,6 +98,12 @@ export function failureTargetFor(
     return { kind: 'evidence-item', tenantId, evidenceItemId };
   }
 
+  if (queue === QUEUES.importAnalyze) {
+    const importId = str(data, 'importId');
+    if (importId === null) return null;
+    return { kind: 'forensic-import', tenantId, importId };
+  }
+
   return null;
 }
 
@@ -111,6 +123,24 @@ export async function recordTerminalFailure(
   reason: string,
 ): Promise<void> {
   const message = `job did not finish: ${reason}`.slice(0, 1000);
+
+  if (target.kind === 'forensic-import') {
+    await withTenantContext(ctx.prisma, target.tenantId, (tx) =>
+      tx.forensicImport.updateMany({
+        where: {
+          id: target.importId,
+          tenantId: target.tenantId,
+          status: { not: 'completed' },
+        },
+        data: { status: 'failed', error: message },
+      }),
+    );
+    ctx.log.warn(
+      { importId: target.importId, reason },
+      'recorded a terminal import failure the processor never saw',
+    );
+    return;
+  }
 
   if (target.kind === 'evidence-item') {
     await withTenantContext(ctx.prisma, target.tenantId, async (tx) => {

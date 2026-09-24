@@ -11,7 +11,10 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { TenantRole } from '@aeg-clouddfir/database';
-import type { CollectionStatusResponse } from '@aeg-clouddfir/contracts';
+import type {
+  CollectionStatusResponse,
+  CollectionThroughputResponse,
+} from '@aeg-clouddfir/contracts';
 import type { FastifyRequest } from 'fastify';
 import '../common/http.js';
 import type { AuthContext } from '../common/http.js';
@@ -84,6 +87,29 @@ export class CollectionsController {
     @Req() request: FastifyRequest,
   ): Promise<CollectionStatusResponse> {
     return this.collections.status(requireAuth(request), id);
+  }
+
+  /**
+   * Measured throughput: per-minute buckets, the two phases, and the state the
+   * SERVER decided. `window=history` returns the whole run downsampled;
+   * anything else returns the live 60-minute window.
+   *
+   * `sinceRateLimitWaitMs` is the value the caller's previous response carried.
+   * The browser echoes it back untouched and the server compares — that is how
+   * "throttling rose since the last poll" is decided in one place only.
+   */
+  @Get(':id/throughput')
+  @RequireRoles(TenantRole.org_admin, TenantRole.case_manager, TenantRole.reviewer)
+  async throughput(
+    @Param('id') id: string,
+    @Query() query: Record<string, unknown>,
+    @Req() request: FastifyRequest,
+  ): Promise<CollectionThroughputResponse> {
+    const since = Number(query['sinceRateLimitWaitMs']);
+    return this.collections.throughput(requireAuth(request), id, {
+      window: query['window'] === 'history' ? 'history' : 'live',
+      ...(Number.isFinite(since) && since >= 0 ? { previousRateLimitWaitMs: since } : {}),
+    });
   }
 
   /**

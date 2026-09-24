@@ -6,8 +6,8 @@
  * atomically to a new version.
  */
 
-// v2 adds the audit.* field group (dynamic:strict requires a new index).
-export const MAPPING_VERSION = 2;
+// v3 adds importId (dynamic:strict requires a new index).
+export const MAPPING_VERSION = 3;
 
 export function buildIndexName(prefix: string, version: number): string {
   return `${prefix}-evidence-v${version}`;
@@ -93,6 +93,8 @@ export const EVIDENCE_MAPPING = {
       provider: keyword,
       connectorAccountId: keyword,
       collectionId: keyword,
+      importId: keyword,
+      importOwnerId: keyword,
       sourcePath: keyword,
       sourceLabels: keywordLower,
       folder: keyword,

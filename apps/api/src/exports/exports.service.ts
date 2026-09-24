@@ -13,7 +13,12 @@ import {
 } from '@aeg-clouddfir/database';
 import type { z } from 'zod';
 import { createExportRequest } from '@aeg-clouddfir/contracts';
-import { derivativeKey, type EvidenceObjectStore } from '@aeg-clouddfir/evidence';
+import {
+  archivePartFilename,
+  derivativeKey,
+  derivativeTypeFor,
+  type EvidenceObjectStore,
+} from '@aeg-clouddfir/evidence';
 import type { AppConfig } from '@aeg-clouddfir/config';
 import type { FastifyRequest } from 'fastify';
 import '../common/http.js';
@@ -25,6 +30,7 @@ import { zodValidate } from '../common/zod-validate.js';
 import { AuditService } from '../audit/audit.service.js';
 import { SelectionService } from '../search/selection.service.js';
 import { chunk, FAMILY_QUERY_CHUNK } from '../common/families.js';
+import { signDownloadToken, verifyDownloadToken } from './download-token.js';
 
 type CreateExportRequest = z.infer<typeof createExportRequest>;
 
@@ -37,6 +43,39 @@ const ACTIVE_STATUSES: ExportStatus[] = [
 
 /** create() returns the full export plus whether this replayed an existing one. */
 export type CreateExportResult = ExportDto & { replayed: boolean };
+
+/**
+ * One archive part, ready for a client to save into a folder.
+ *
+ * `sha256` and `sizeBytes` are null for exports produced before part digests
+ * were recorded. Null means "cannot verify" and must be shown that way, never
+ * folded into a silent success.
+ */
+export interface ExportDownloadPart {
+  partNumber: number;
+  filename: string;
+  sizeBytes: number | null;
+  sha256: string | null;
+  url: string;
+}
+
+export interface ExportDownloadResult {
+  manifestUrl: string;
+  /** Legacy shape, kept so an older client keeps working. Same URLs as `parts`. */
+  archiveUrls: string[];
+  manifestSha256: string;
+  expiresInSeconds: number;
+  parts: ExportDownloadPart[];
+  folderName: string;
+  downloadToken: string;
+  downloadTokenExpiresInSeconds: number;
+}
+
+export interface ExportDownloadRefreshResult {
+  manifestUrl: string;
+  parts: ExportDownloadPart[];
+  expiresInSeconds: number;
+}
 
 export interface ExportDto {
   id: string;
@@ -192,6 +231,7 @@ export class ExportsService {
         const parameters = {
           selection: input.selection,
           includeFamilies: input.includeFamilies,
+          attachments: input.attachments,
           ...(input.csv !== undefined ? { csv: input.csv } : {}),
           archiveSplitMb: input.archiveSplitMb,
         };
@@ -304,18 +344,105 @@ export class ExportsService {
     }
   }
 
-  async download(
-    auth: AuthContext,
+  /**
+   * The parts of an export, with a digest each where one was recorded.
+   *
+   * Two sources, in order of trust. `export_parts` is authoritative and is
+   * written in the same transaction that marks an export ready. Exports made
+   * before that existed have no rows, so the count still falls back to the
+   * manifest and every digest comes back null — "cannot verify", which a
+   * client must show as such rather than implying the part checked out.
+   */
+  private async resolveParts(
+    tenantId: string,
+    exportId: string,
+    kind: string,
+  ): Promise<
+    { partNumber: number; objectKey: string; sha256: string | null; sizeBytes: number | null }[]
+  > {
+    const recorded = await withTenantContext(this.prisma, tenantId, (tx) =>
+      tx.exportPart.findMany({
+        where: { exportId, tenantId },
+        orderBy: { partNumber: 'asc' },
+        select: { partNumber: true, objectKey: true, sha256: true, sizeBytes: true },
+      }),
+    );
+    if (recorded.length > 0) {
+      return recorded.map((p) => ({
+        partNumber: p.partNumber,
+        objectKey: p.objectKey,
+        sha256: p.sha256,
+        sizeBytes: Number(p.sizeBytes),
+      }));
+    }
+
+    const manifestKey = derivativeKey(tenantId, exportId, 'export-manifest', 1, 'manifest.json');
+    const count = await this.archivePartCount(tenantId, manifestKey);
+    return Array.from({ length: count }, (_, i) => ({
+      partNumber: i + 1,
+      objectKey: derivativeKey(
+        tenantId,
+        exportId,
+        derivativeTypeFor(kind),
+        i + 1,
+        archivePartFilename(kind, i + 1),
+      ),
+      sha256: null,
+      sizeBytes: null,
+    }));
+  }
+
+  /**
+   * Presign every part and the manifest.
+   *
+   * Filenames are part of the contract, not cosmetics: they are what a client
+   * writes into the download folder, so they must sort in part order and be
+   * identical whichever endpoint issued them. The disposition is signed into
+   * the URL because the HTML `download` attribute is ignored cross-origin, and
+   * without it a browser renders manifest.json as text instead of saving it.
+   */
+  private async presignBundle(
+    tenantId: string,
+    exportId: string,
+    kind: string,
+    parts: {
+      partNumber: number;
+      objectKey: string;
+      sha256: string | null;
+      sizeBytes: number | null;
+    }[],
+  ): Promise<{ manifestUrl: string; signed: ExportDownloadPart[]; ttlSeconds: number }> {
+    const ttlSeconds = this.config.CDFIR_S3_PRESIGN_TTL_SECONDS;
+    const manifestKey = derivativeKey(tenantId, exportId, 'export-manifest', 1, 'manifest.json');
+    const manifestUrl = await this.store.presignGet(tenantId, manifestKey, {
+      ttlSeconds,
+      downloadFilename: 'manifest.json',
+    });
+    const signed = await Promise.all(
+      parts.map(async (part) => {
+        const filename = archivePartFilename(kind, part.partNumber);
+        return {
+          partNumber: part.partNumber,
+          filename,
+          sizeBytes: part.sizeBytes,
+          sha256: part.sha256,
+          url: await this.store.presignGet(tenantId, part.objectKey, {
+            ttlSeconds,
+            downloadFilename: filename,
+          }),
+        };
+      }),
+    );
+    return { manifestUrl, signed, ttlSeconds };
+  }
+
+  /** Load a ready, unexpired export or throw the right error for why not. */
+  private async loadDownloadable(
+    tenantId: string,
     id: string,
-    request: FastifyRequest,
-  ): Promise<{
-    manifestUrl: string;
-    archiveUrls: string[];
-    manifestSha256: string;
-    expiresInSeconds: number;
-  }> {
-    const row = await withTenantContext(this.prisma, auth.tenantId, (tx) =>
-      tx.export.findFirst({ where: { id, tenantId: auth.tenantId } }),
+  ): Promise<{ name: string; kind: string; manifestSha256: string }> {
+    const row = await withTenantContext(this.prisma, tenantId, (tx) =>
+      tx.export.findFirst({ where: { id, tenantId } }),
     );
     if (!row) throw new NotFoundException();
     if (row.status !== ExportStatus.ready) {
@@ -324,38 +451,31 @@ export class ExportsService {
     if (row.expiresAt !== null && row.expiresAt.getTime() < Date.now()) {
       throw new GoneException('this export has expired and its download window is closed');
     }
+    return { name: row.name, kind: row.kind, manifestSha256: row.manifestSha256 };
+  }
 
-    // Key layout is the worker's putDerivative convention.
-    const manifestKey = derivativeKey(auth.tenantId, id, 'export-manifest', 1, 'manifest.json');
-    const parts = await this.archivePartCount(auth.tenantId, manifestKey);
-    const archiveKeys = Array.from({ length: parts }, (_, i) =>
-      derivativeKey(
-        auth.tenantId,
-        id,
-        'archive',
-        i + 1,
-        `export-part${String(i + 1).padStart(3, '0')}.zip`,
-      ),
+  async download(
+    auth: AuthContext,
+    id: string,
+    request: FastifyRequest,
+  ): Promise<ExportDownloadResult> {
+    const row = await this.loadDownloadable(auth.tenantId, id);
+    const parts = await this.resolveParts(auth.tenantId, id, row.kind);
+    const { manifestUrl, signed, ttlSeconds } = await this.presignBundle(
+      auth.tenantId,
+      id,
+      row.kind,
+      parts,
     );
 
-    const ttlSeconds = this.config.CDFIR_S3_PRESIGN_TTL_SECONDS;
-    // Sign the disposition in: without it the browser renders manifest.json as
-    // text instead of saving it, and the HTML download attribute is ignored
-    // cross-origin.
-    const manifestUrl = await this.store.presignGet(auth.tenantId, manifestKey, {
-      ttlSeconds,
-      downloadFilename: `export-${id}-manifest.json`,
-    });
-    const archiveUrls = await Promise.all(
-      archiveKeys.map((key, i) =>
-        this.store.presignGet(auth.tenantId, key, {
-          ttlSeconds,
-          downloadFilename: `export-${id}-part${String(i + 1).padStart(3, '0')}.zip`,
-        }),
-      ),
+    const tokenTtl = this.config.CDFIR_EXPORT_DOWNLOAD_TOKEN_TTL_SECONDS;
+    const downloadToken = signDownloadToken(
+      this.config.CDFIR_SESSION_SECRET,
+      { tenantId: auth.tenantId, exportId: id, userId: auth.userId },
+      tokenTtl,
     );
 
-    // Audit the download; presigned URLs are never logged or audited.
+    // Audit the download; presigned URLs and the token are never logged.
     await this.audit.append({
       tenantId: auth.tenantId,
       actorUserId: auth.userId,
@@ -364,15 +484,89 @@ export class ExportsService {
       action: 'export.downloaded',
       targetType: 'export',
       targetId: id,
-      summary: { name: row.name, kind: row.kind, archiveParts: parts },
+      summary: {
+        name: row.name,
+        kind: row.kind,
+        archiveParts: parts.length,
+        verifiable: parts.every((p) => p.sha256 !== null),
+      },
       request,
     });
 
     return {
       manifestUrl,
-      archiveUrls,
+      // Kept alongside `parts` so an older client keeps working unchanged.
+      archiveUrls: signed.map((p) => p.url),
       manifestSha256: row.manifestSha256,
       expiresInSeconds: ttlSeconds,
+      parts: signed,
+      folderName: downloadFolderName(row.name, id),
+      downloadToken,
+      downloadTokenExpiresInSeconds: tokenTtl,
     };
   }
+
+  /**
+   * Re-sign for a script that is already partway through, authenticated by the
+   * scoped token rather than a session.
+   *
+   * Every call is audited. A 65-part download refreshing as it goes will write
+   * several rows, and that is the intended record: each one handed out fresh
+   * reach to evidence, and the audit log is what says so.
+   */
+  async refreshDownloadUrls(
+    token: string,
+    id: string,
+    request: FastifyRequest,
+  ): Promise<ExportDownloadRefreshResult> {
+    const claims = verifyDownloadToken(this.config.CDFIR_SESSION_SECRET, token);
+    // A token for a DIFFERENT export is as unauthorised as no token at all.
+    if (claims === null || claims.exportId !== id) throw new NotFoundException();
+
+    // Re-checked on every refresh, not just at issue: a token cannot be
+    // revoked, so the export's own expiry is what retires a long download.
+    const row = await this.loadDownloadable(claims.tenantId, id);
+    const parts = await this.resolveParts(claims.tenantId, id, row.kind);
+    const { manifestUrl, signed, ttlSeconds } = await this.presignBundle(
+      claims.tenantId,
+      id,
+      row.kind,
+      parts,
+    );
+
+    await this.audit.append({
+      tenantId: claims.tenantId,
+      actorUserId: claims.userId,
+      actorDisplay: 'export download token',
+      effectiveRoles: [],
+      action: 'export.downloaded',
+      targetType: 'export',
+      targetId: id,
+      summary: { name: row.name, kind: row.kind, archiveParts: parts.length, viaToken: true },
+      request,
+    });
+
+    return { manifestUrl, parts: signed, expiresInSeconds: ttlSeconds };
+  }
+}
+
+/**
+ * A folder name a filesystem will accept, on every OS, that still says which
+ * export it is.
+ *
+ * The id suffix is not decoration: two exports of the same case are routinely
+ * given the same name, and silently merging them into one folder would mix two
+ * evidence sets together.
+ */
+export function downloadFolderName(name: string, exportId: string): string {
+  const safe = name
+    .normalize('NFKD')
+    // Windows forbids \ / : * ? " < > | ; trailing dots and spaces break it too.
+    .replace(/[\\/:*?"<>|]+/g, '-')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^[-.]+|[-.\s]+$/g, '')
+    .slice(0, 60);
+  const stem = safe === '' ? 'export' : safe;
+  return `${stem}-${exportId.slice(0, 8)}`;
 }

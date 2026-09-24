@@ -442,3 +442,175 @@ export const addCaseItemsResponse = z.object({
   requested: z.number().int(),
   added: z.number().int(),
 });
+
+/**
+ * How a collection is moving, measured. NOT predicted.
+ *
+ * There is deliberately no field anywhere below for a finish time, a remaining
+ * duration, or a low/high band around one. Replaying the biggest real run
+ * (185,379 provider items that became 434,910 evidence items and 130 GB,
+ * 2026-09-10 19:43 to 2026-09-14 16:56) a 5-minute measurement window predicted
+ * the rest of the run between -16% and +33% of the truth, a 30-minute window
+ * between -25% and +68%, and even a low/high band missed the real answer at 4 of
+ * 9 checkpoints. A number that wrong, shown to someone deciding whether to wait,
+ * is worse than no number. Elapsed time, measured pace, counts and size only.
+ *
+ * Two phases, reported apart. Acquisition (bytes arriving from the provider)
+ * took 66.00 h of that run; the run took 93.22 h. So 27.22 h — 29% — happened
+ * after the last byte arrived, in parse/extract/OCR/index. A single bar cannot
+ * show that, and today's UI does not show it at all.
+ */
+export const collectionThroughputState = z.enum([
+  /** Too little measured yet to state a pace. Show counts, no rate. */
+  'measuring',
+  /** The denominator is still moving, so no percentage can be honest. */
+  'discovering',
+  /** Acquiring from the provider at a normal pace for this run. */
+  'fetching',
+  /** Acquisition is done; the processing tail is still running. */
+  'processing',
+  /** Still moving, but below this run's own 10th-percentile minute. */
+  'slow',
+  /** Provider throttling rose since the previous poll. */
+  'rate_limited',
+  /** Nothing acquired for 15 minutes while work is still in flight. */
+  'stalled',
+  /** Terminal: completed, failed or cancelled. */
+  'finished',
+]);
+export type CollectionThroughputState = z.infer<typeof collectionThroughputState>;
+
+/**
+ * Whether anything is wrong, decided by the SERVER.
+ *
+ * The browser must never re-derive this from the counts. Two places computing
+ * "is this healthy" drift apart, and then the page and the ledger disagree in
+ * front of a user. `healthy` is impossible whenever exceptions exist, however
+ * the collection ended.
+ */
+export const collectionThroughputHealth = z.enum(['healthy', 'attention', 'problem']);
+
+/** One measurement bucket. `bytes` is a number: JSON has no BigInt. */
+export const collectionThroughputBucket = z.object({
+  /** Bucket start, ISO 8601 UTC. */
+  startedAt: z.string(),
+  /** Whole minutes from the first acquired item, so x starts at 0. */
+  minutesFromStart: z.number().int(),
+  items: z.number().int(),
+  bytes: z.number().int(),
+  /**
+   * Bytes preserved up to and including this bucket. Drawn, never extended
+   * forward: 249,531 of that run's 434,910 items were attachments that `parse`
+   * created after their parent, so the final total is unknowable mid-run.
+   */
+  cumulativeBytes: z.number().int(),
+  /** Acquired nothing. Only 12 minutes of 3,948 were idle, and no gap ran over 5. */
+  idle: z.boolean(),
+});
+export type CollectionThroughputBucket = z.infer<typeof collectionThroughputBucket>;
+
+/**
+ * Measured pace, with this run's own spread.
+ *
+ * Both curves are drawn because neither predicts the other: across 3,948
+ * buckets of the real run items/sec and bytes/sec correlated at -0.143, which is
+ * nothing. Item size p50 was 21 kB, p99 3,188 kB and the largest single item
+ * 672 MB, so a fast minute by count can be a slow minute by bytes.
+ *
+ * Every field is nullable, and null means "not measured yet" — never 0. A zero
+ * pace on screen reads as stalled, and saying "stalled" about a collection that
+ * has simply not been running a full minute is a false alarm.
+ */
+export const collectionThroughputPace = z.object({
+  itemsPerMinute: z.number().nullable(),
+  bytesPerMinute: z.number().nullable(),
+  /** p10/p50/p90 of this run's own minutes — the band behind the sparkline. */
+  p10ItemsPerMinute: z.number().nullable(),
+  p50ItemsPerMinute: z.number().nullable(),
+  p90ItemsPerMinute: z.number().nullable(),
+  peakItemsPerMinute: z.number().nullable(),
+});
+export type CollectionThroughputPace = z.infer<typeof collectionThroughputPace>;
+
+/** One of the two phases, with its own progress, its own clock, its own pace. */
+export const collectionPhaseProgress = z.object({
+  phase: z.enum(['acquisition', 'processing']),
+  /** Items settled in this phase. */
+  done: z.number().int(),
+  /**
+   * null while the denominator is still moving. A page walk that has not
+   * finished, or a parse that will still create attachment children, means any
+   * total is provisional — and a percentage of a provisional total is a lie.
+   */
+  total: z.number().int().nullable(),
+  percent: z.number().nullable(),
+  /** Still working inside this phase. */
+  inFlight: z.number().int(),
+  /** Wall clock spent in this phase so far, milliseconds. */
+  elapsedMs: z.number().int(),
+  pace: collectionThroughputPace,
+});
+export type CollectionPhaseProgress = z.infer<typeof collectionPhaseProgress>;
+
+/**
+ * `collection_items` state counts, the input to the stacked phase bar. Grouped
+ * in the database rather than counted in the browser: this breakdown measured
+ * 31.9 ms on the 434,910-item collection as an index-only scan.
+ */
+export const collectionItemStateCounts = z.object({
+  discovered: z.number().int(),
+  fetching: z.number().int(),
+  preserved: z.number().int(),
+  processed: z.number().int(),
+  indexed: z.number().int(),
+  failed: z.number().int(),
+  skipped: z.number().int(),
+});
+export type CollectionItemStateCounts = z.infer<typeof collectionItemStateCounts>;
+
+export const collectionThroughputResponse = z.object({
+  collectionId: uuid,
+  status: collectionStatusValue,
+  /**
+   * Which window was measured, and its plain name for the heading. Named rather
+   * than inferred from the bucket count so the page can never mislabel itself.
+   */
+  window: z.enum(['live', 'history']),
+  windowName: z.string(),
+  /** Minutes per bucket. 1 for the live window; wider for a downsampled run. */
+  bucketMinutes: z.number().int(),
+  /**
+   * Oldest first, gaps filled with idle buckets. The history window is
+   * downsampled server-side to about 200 buckets: the real run had 3,948
+   * minutes, and a browser draws them on roughly 900 pixels.
+   */
+  buckets: z.array(collectionThroughputBucket),
+  totals: z.object({
+    items: z.number().int(),
+    bytes: z.number().int(),
+    /** First and last acquisition, so elapsed time is checkable, not asserted. */
+    firstAcquiredAt: z.string().nullable(),
+    lastAcquiredAt: z.string().nullable(),
+    /** Acquisition wall clock. 66.00 h of the real run's 93.22 h. */
+    acquisitionElapsedMs: z.number().int(),
+    /** Whole-run wall clock, so the tail is the difference of the two. */
+    runElapsedMs: z.number().int(),
+    idleBuckets: z.number().int(),
+  }),
+  acquisition: collectionPhaseProgress,
+  processing: collectionPhaseProgress,
+  itemStates: collectionItemStateCounts,
+  /** Decided by the server. See collectionThroughputState. */
+  state: collectionThroughputState,
+  /** The word shown beside the icon, because colour is never the only signal. */
+  stateLabel: z.string(),
+  health: collectionThroughputHealth,
+  /**
+   * Total provider throttling so far. Across the whole 66 h acquisition this was
+   * 8.45 minutes, so a rise in it really does mean the provider pushed back.
+   */
+  rateLimitWaitMs: z.number().int(),
+  /** Outstanding exceptions. Any non-zero count forbids `healthy`. */
+  exceptionCount: z.number().int(),
+});
+export type CollectionThroughputResponse = z.infer<typeof collectionThroughputResponse>;
