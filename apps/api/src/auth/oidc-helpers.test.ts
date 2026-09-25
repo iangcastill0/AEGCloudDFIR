@@ -145,11 +145,22 @@ describe('authorization parameters', () => {
     ).toEqual({
       redirect_uri: 'https://api.ev.example/auth/callback',
       scope: 'openid profile email',
+      prompt: 'login',
       state: 'st',
       nonce: 'no',
       code_challenge: 'ch',
       code_challenge_method: 'S256',
     });
+  });
+
+  it('always forces re-authentication so a leftover Authentik session is not adopted', () => {
+    const params = buildAuthorizationParameters({
+      apiPublicUrl: 'https://api.ev.example',
+      state: 'st',
+      nonce: 'no',
+      codeChallenge: 'ch',
+    });
+    expect(params.prompt).toBe('login');
   });
 
   it('normalizes trailing slashes in the public URL', () => {
