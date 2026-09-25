@@ -422,7 +422,7 @@ describe('native export records a digest for each archive part', () => {
     expect(rows[0]?.sizeBytes).toBe(4096n);
   });
 
-  it('records nothing for a CSV export, which has no archive parts', async () => {
+  it('records the CSV object as the single downloadable part, plus a sidecar manifest', async () => {
     const f = fakeCtx();
     const { writer } = arm(f);
     f.tx.export.findUnique.mockResolvedValue({
@@ -433,12 +433,41 @@ describe('native export records a digest for each archive part', () => {
         selection: { kind: 'items', evidenceItemIds: [GOOD_ID] },
         includeFamilies: false,
         archiveSplitMb: 2048,
+        csv: { columns: ['evidence_id', 'name'], delimiter: ',' },
       },
     });
+    f.store.putDerivative.mockImplementation(
+      (_t: string, _e: string, type: string, version: number, filename: string) =>
+        Promise.resolve({
+          objectKey: `key/${type}/${String(version)}/${filename}`,
+          sha256: `${type}`.padEnd(64, '0'),
+          size: type === 'export-csv' ? 88 : 32,
+        }),
+    );
 
     await processExportRun(f.ctx, payload, { createArchive: () => writer });
 
-    expect(f.tx.exportPart.createMany).not.toHaveBeenCalled();
+    const puts = f.store.putDerivative.mock.calls as unknown as [
+      string,
+      string,
+      string,
+      number,
+      string,
+    ][];
+    expect(puts.some((c) => c[2] === 'export-csv' && c[4] === 'export.csv')).toBe(true);
+    expect(puts.some((c) => c[2] === 'export-manifest' && c[4] === 'manifest.json')).toBe(true);
+
+    expect(f.tx.exportPart.createMany).toHaveBeenCalledTimes(1);
+    const rows = (
+      f.tx.exportPart.createMany.mock.calls[0]?.[0] as {
+        data: { partNumber: number; objectKey: string; sha256: string; sizeBytes: bigint }[];
+      }
+    ).data;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.partNumber).toBe(1);
+    expect(rows[0]?.objectKey).toBe('key/export-csv/1/export.csv');
+    expect(rows[0]?.sha256).toBe('export-csv'.padEnd(64, '0'));
+    expect(rows[0]?.sizeBytes).toBe(88n);
   });
 });
 
