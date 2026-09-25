@@ -67,6 +67,22 @@ configure`). There is no confirmation email. AEG-CloudDFIR deliberately
    Do not list empty values in compose — an empty HOST makes Authentik think
    mail is configured.
 
+## If the login page has no Sign up link
+
+The live site is on Authentik’s **default** login flow
+(`/if/flow/default-authentication-flow/`). That page is login-only until the
+`cdfir-enrollment` flow exists and is linked. Check:
+
+```
+https://auth.aegclouddfir.com/if/flow/cdfir-enrollment/
+```
+
+A 404 means the blueprint was never applied. The YAML lives at
+`infra/authentik/blueprints/aeg-auth-flows.yaml`. Restart Authentik’s worker
+after that file is on the host so it loads (see the deploy / Linode steps).
+Then Providers → `cdfir` → Authentication flow should be
+**CloudDFIR authentication**.
+
 ## Verifying
 
 - `curl $CDFIR_OIDC_ISSUER.well-known/openid-configuration` returns metadata whose

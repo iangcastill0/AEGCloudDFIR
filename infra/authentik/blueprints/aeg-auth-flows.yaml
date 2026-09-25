@@ -173,7 +173,7 @@ entries:
       slug: cdfir-authentication
     attrs:
       name: CloudDFIR authentication
-      title: Sign in to AEG-CloudDFIR
+      title: Sign in or create an account
       designation: authentication
       authentication: none
 
@@ -186,7 +186,28 @@ entries:
         - email
         - username
       enrollment_flow: !KeyOf cdfir-enrollment
-      recovery_flow: !Find [authentik_flows.flow, [slug, default-recovery-flow]]
+      # No recovery_flow: this install has no default-recovery-flow (and
+      # no SMTP). A !Find for it made the whole blueprint fail validate,
+      # so cdfir-enrollment was never created.
+
+  # Live prod is still on Authentik's default login flow (we watched
+  # /if/flow/default-authentication-flow/ — no Sign up link, and
+  # /if/flow/cdfir-enrollment/ is 404). Put Sign up on that same page so
+  # aegclouddfir.com and invite links get it even before the provider is
+  # switched to cdfir-authentication. The admin console uses this stage too;
+  # a Sign up link there is harmless.
+  - model: authentik_stages_identification.identificationstage
+    identifiers:
+      name: default-authentication-identification
+    attrs:
+      # Must restate user_fields. A partial update with only enrollment_flow
+      # made Authentik treat this stage as having no user fields, reject the
+      # serializer, and roll back the whole file (so cdfir-enrollment never
+      # landed). Live values today: {email,username}.
+      user_fields:
+        - email
+        - username
+      enrollment_flow: !KeyOf cdfir-enrollment
 
   - model: authentik_flows.flowstagebinding
     identifiers:
@@ -195,14 +216,11 @@ entries:
       order: 10
 
   - model: authentik_flows.flowstagebinding
-    id: cdfir-authentication-password-binding
     identifiers:
       target: !KeyOf cdfir-authentication
       stage:
         !Find [authentik_stages_password.passwordstage, [name, default-authentication-password]]
       order: 20
-    attrs:
-      re_evaluate_policies: true
 
   - model: authentik_stages_authenticator_validate.authenticatorvalidatestage
     id: cdfir-authentication-mfa
@@ -218,13 +236,10 @@ entries:
         - !KeyOf cdfir-totp-setup
 
   - model: authentik_flows.flowstagebinding
-    id: cdfir-authentication-mfa-binding
     identifiers:
       target: !KeyOf cdfir-authentication
       stage: !KeyOf cdfir-authentication-mfa
       order: 30
-    attrs:
-      re_evaluate_policies: true
 
   - model: authentik_flows.flowstagebinding
     identifiers:
@@ -232,27 +247,3 @@ entries:
       stage:
         !Find [authentik_stages_user_login.userloginstage, [name, default-authentication-login]]
       order: 100
-
-  - model: authentik_policies.policybinding
-    identifiers:
-      target: !KeyOf cdfir-authentication-password-binding
-      policy:
-        !Find [
-          authentik_policies_expression.expressionpolicy,
-          [name, default-authentication-flow-password-stage],
-        ]
-      order: 10
-    attrs:
-      failure_result: true
-
-  - model: authentik_policies.policybinding
-    identifiers:
-      target: !KeyOf cdfir-authentication-mfa-binding
-      policy:
-        !Find [
-          authentik_policies_expression.expressionpolicy,
-          [name, default-authentication-flow-authenticator-validate-stage],
-        ]
-      order: 10
-    attrs:
-      failure_result: true
