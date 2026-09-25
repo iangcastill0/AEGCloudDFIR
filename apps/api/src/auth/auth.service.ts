@@ -1,9 +1,9 @@
 import { Inject, Injectable } from '@nestjs/common';
 import {
   withTenantContext,
+  TenantRole,
   type Prisma,
   type PrismaClient,
-  type TenantRole,
   type User,
 } from '@aeg-clouddfir/database';
 import { PRISMA, LOGGER } from '../common/tokens.js';
@@ -61,13 +61,36 @@ export class AuthService {
 
   /**
    * Reconcile source='oidc_group' role assignments with the roles mapped from
-   * the user's IdP groups, per tenant membership, inside each tenant's RLS
-   * context. Locally-assigned roles are never touched.
+   * the user's IdP groups. Locally-assigned roles are never touched.
+   *
+   * IdP groups are global on a shared Authentik. ADR-014 keeps tenancy in the
+   * app, so mapped roles apply only on a tenant this person already
+   * administers (a local org_admin grant from bootstrap, self-serve create,
+   * or an org_admin invite). A standing join or a reviewer invite must not
+   * pick up org_admin from `cdfir-org-admins` on the next login.
    */
   async syncOidcGroupRoles(userId: string, mappedRoles: readonly TenantRole[]): Promise<void> {
     const memberships = await this.listMemberships(userId);
     for (const membership of memberships) {
       await withTenantContext(this.prisma, membership.tenantId, async (tx) => {
+        const locallyAdministers = membership.roles.some(
+          (assignment) => assignment.role === TenantRole.org_admin && assignment.source === 'local',
+        );
+        if (!locallyAdministers) {
+          // Guest of this tenant: drop any oidc_group copy left by the old
+          // all-memberships loop, and do not insert mapped roles.
+          const removed = await tx.roleAssignment.deleteMany({
+            where: { membershipId: membership.id, source: OIDC_GROUP_SOURCE },
+          });
+          if (removed.count > 0) {
+            this.logger.info(
+              { userId, tenantId: membership.tenantId, removed: removed.count, added: 0 },
+              'oidc group roles stripped from guest membership',
+            );
+          }
+          return;
+        }
+
         // notIn: [] matches every row, so an empty mapping clears all oidc_group roles.
         const removed = await tx.roleAssignment.deleteMany({
           where: {
