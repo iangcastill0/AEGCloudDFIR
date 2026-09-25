@@ -20,5 +20,9 @@
       "command": "pnpm tsx scripts/demo-provider.ts"
     }
   ],
-  "ports": [3000, 4000, 9443]
+  "ports": [
+    { "name": "web", "port": 3000 },
+    { "name": "api", "port": 4000 },
+    { "name": "authentik", "port": 9443 }
+  ]
 }
