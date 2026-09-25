@@ -153,10 +153,9 @@ describe('TenantsService.createInvite', () => {
       fakeRequest(),
     );
     expect(result.email).toBe('pat@example.com');
-    expect(result.inviteUrl).toMatch(/^https:\/\/api\.ev\.test\/auth\/login\?redirectTo=/);
+    expect(result.inviteUrl).toMatch(/^https:\/\/app\.ev\.test\/signup\?token=/);
     const stored = create.mock.calls[0]?.[0] as { data: { tokenHash: string } };
-    const next = new URL(result.inviteUrl).searchParams.get('redirectTo') ?? '';
-    const token = new URL(next, 'https://app.ev.test').searchParams.get('token') ?? '';
+    const token = new URL(result.inviteUrl).searchParams.get('token') ?? '';
     expect(stored.data.tokenHash).toBe(hashInviteToken(token));
     expect(stored.data.tokenHash).not.toBe(token);
     expect(audit.appendTx).toHaveBeenCalledWith(
@@ -419,7 +418,7 @@ describe('TenantsService join link', () => {
     const result = await service.getOrCreateJoinLink(makeAuth([TenantRole.org_admin]));
     expect(result.role).toBe(TenantRole.reviewer);
     expect(result.inviteUrl).toBe(
-      `https://api.ev.test/auth/login?redirectTo=${encodeURIComponent('/signup?token=standing-token-value-32chars!!')}`,
+      'https://app.ev.test/signup?token=standing-token-value-32chars!!',
     );
   });
 
@@ -433,11 +432,7 @@ describe('TenantsService join link', () => {
     });
     const result = await service.getOrCreateJoinLink(makeAuth([TenantRole.org_admin]));
     expect(result.role).toBe(TenantRole.reviewer);
-    const minted =
-      new URL(
-        new URL(result.inviteUrl).searchParams.get('redirectTo') ?? '',
-        'https://app.ev.test',
-      ).searchParams.get('token') ?? '';
+    const minted = new URL(result.inviteUrl).searchParams.get('token') ?? '';
     expect(minted.length).toBeGreaterThan(16);
     expect(update).toHaveBeenCalledWith(expect.objectContaining({ data: { joinToken: minted } }));
   });
@@ -448,11 +443,7 @@ describe('TenantsService join link', () => {
       tenant: { update },
     });
     const result = await service.rotateJoinLink(makeAuth([TenantRole.org_admin]), fakeRequest());
-    const minted =
-      new URL(
-        new URL(result.inviteUrl).searchParams.get('redirectTo') ?? '',
-        'https://app.ev.test',
-      ).searchParams.get('token') ?? '';
+    const minted = new URL(result.inviteUrl).searchParams.get('token') ?? '';
     expect(update).toHaveBeenCalledWith(expect.objectContaining({ data: { joinToken: minted } }));
     expect(audit.appendTx).toHaveBeenCalledWith(
       expect.anything(),
