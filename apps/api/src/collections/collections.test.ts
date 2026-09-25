@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { CollectionStatus, ConnectorStatus, TenantRole } from '@aeg-clouddfir/database';
 import {
   collectionPhaseProgress,
@@ -28,6 +28,7 @@ import {
 import {
   CONNECTOR_ID,
   ITEM_A,
+  MEMBERSHIP_ID,
   TENANT_ID,
   fakeAudit,
   fakePrisma,
@@ -562,6 +563,97 @@ describe('CollectionsService.manifestDownload', () => {
     const result = await service.manifestDownload(auth, COLLECTION_ID, fakeRequest());
     expect(result.manifestUrl).toBe('https://signed/manifest');
     expect(result.completenessReportUrl).toBeNull();
+  });
+
+  it('hands a case-restricted caller the manifest of a collection filed under their case', async () => {
+    const count = vi.fn(async () => 1);
+    const { service } = makeService({
+      collection: {
+        findFirst: vi.fn(async () => ({
+          id: COLLECTION_ID,
+          manifestKey: 'k',
+          manifestSha256: 'e'.repeat(64),
+          status: 'completed',
+          caseId: CASE_ID,
+        })),
+      },
+      caseMember: { count },
+    });
+    const result = await service.manifestDownload(
+      makeAuth([TenantRole.read_only]),
+      COLLECTION_ID,
+      fakeRequest(),
+    );
+    expect(result.manifestSha256).toBe('e'.repeat(64));
+    expect(count).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ caseId: CASE_ID, membershipId: MEMBERSHIP_ID }),
+      }),
+    );
+  });
+
+  it('404s a case-restricted caller for a collection filed under a case they are not on', async () => {
+    // One in-case item names the collection on the chain of custody. The
+    // manifest is the whole collection, including items that were never added
+    // to their case.
+    const { service } = makeService({
+      collection: {
+        findFirst: vi.fn(async () => ({
+          id: COLLECTION_ID,
+          manifestKey: 'k',
+          manifestSha256: 'd'.repeat(64),
+          status: 'completed',
+          caseId: CASE_ID,
+        })),
+      },
+      caseMember: { count: vi.fn(async () => 0) },
+    });
+    await expect(
+      service.manifestDownload(makeAuth([TenantRole.read_only]), COLLECTION_ID, fakeRequest()),
+    ).rejects.toThrow(NotFoundException);
+  });
+
+  it('404s a case-restricted caller when the collection has no case', async () => {
+    const count = vi.fn(async () => 1);
+    const { service } = makeService({
+      collection: {
+        findFirst: vi.fn(async () => ({
+          id: COLLECTION_ID,
+          manifestKey: 'k',
+          manifestSha256: 'f'.repeat(64),
+          status: 'completed',
+          caseId: null,
+        })),
+      },
+      caseMember: { count },
+    });
+    await expect(
+      service.manifestDownload(makeAuth([TenantRole.read_only]), COLLECTION_ID, fakeRequest()),
+    ).rejects.toThrow(NotFoundException);
+    expect(count).not.toHaveBeenCalled();
+  });
+
+  it('does not ask a reviewer whether they sit on the collection case', async () => {
+    const count = vi.fn(async () => 0);
+    const { service } = makeService({
+      collection: {
+        findFirst: vi.fn(async () => ({
+          id: COLLECTION_ID,
+          manifestKey: 'k',
+          manifestSha256: 'a'.repeat(64),
+          status: 'completed',
+          caseId: CASE_ID,
+        })),
+      },
+      caseMember: { count },
+    });
+    const result = await service.manifestDownload(
+      makeAuth([TenantRole.reviewer]),
+      COLLECTION_ID,
+      fakeRequest(),
+    );
+    expect(result.manifestSha256).toBe('a'.repeat(64));
+    expect(count).not.toHaveBeenCalled();
   });
 });
 
