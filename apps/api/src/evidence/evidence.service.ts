@@ -22,7 +22,7 @@ import type { FastifyRequest } from 'fastify';
 import '../common/http.js';
 import type { AuthContext } from '../common/http.js';
 import { APP_CONFIG, EVIDENCE_STORE, PRISMA } from '../common/tokens.js';
-import { isCaseRestricted } from '../common/roles.js';
+import { isCaseRestricted, mayViewPrivileged } from '../common/roles.js';
 import { chunk, FAMILY_QUERY_CHUNK } from '../common/families.js';
 import { AuditService } from '../audit/audit.service.js';
 import { mayReadImport } from '../imports/import-access.js';
@@ -87,8 +87,11 @@ export class EvidenceService {
 
   /**
    * Load an item, enforcing tenant scope and — for case-restricted callers —
-   * membership of at least one assigned case. Both misses are a plain 404 so
-   * cross-tenant probing is indistinguishable from a missing id.
+   * membership of at least one assigned case. Callers who may not see
+   * privileged material (the same rule search uses) are refused when any tag
+   * on the item has isPrivileged. Every miss is a plain 404 so probing cannot
+   * tell a hidden item from a missing id. This runs before the loader, so a
+   * download URL is never issued for a hidden item.
    */
   private async requireItem<T>(
     auth: AuthContext,
@@ -105,6 +108,16 @@ export class EvidenceService {
           },
         });
         if (visible === 0) throw new NotFoundException();
+      }
+      if (!mayViewPrivileged(auth)) {
+        const privileged = await tx.tagAssignment.count({
+          where: {
+            tenantId: auth.tenantId,
+            evidenceItemId: id,
+            tag: { isPrivileged: true },
+          },
+        });
+        if (privileged > 0) throw new NotFoundException();
       }
       const row = await loader(tx);
       if (row === null) throw new NotFoundException();
@@ -310,18 +323,32 @@ export class EvidenceService {
       tx.evidenceItem.findFirst({ where: { id, tenantId: auth.tenantId }, select: { id: true } }),
     );
     const items = await withTenantContext(this.prisma, auth.tenantId, async (tx) => {
-      const rels = await tx.evidenceRelationship.findMany({
+      let rels = await tx.evidenceRelationship.findMany({
         where: { tenantId: auth.tenantId, OR: [{ parentId: id }, { childId: id }] },
         include: {
           parent: { select: { id: true, kind: true, name: true, size: true, sha256: true } },
           child: { select: { id: true, kind: true, name: true, size: true, sha256: true } },
         },
       });
-      let visibleRels = rels;
+      const otherIdOf = (rel: (typeof rels)[number]) =>
+        rel.parentId === id ? rel.childId : rel.parentId;
+
+      if (!mayViewPrivileged(auth) && rels.length > 0) {
+        const otherIds = rels.map(otherIdOf);
+        const hidden = await tx.tagAssignment.findMany({
+          where: {
+            tenantId: auth.tenantId,
+            evidenceItemId: { in: otherIds },
+            tag: { isPrivileged: true },
+          },
+          select: { evidenceItemId: true },
+        });
+        const hiddenIds = new Set(hidden.map((row) => row.evidenceItemId));
+        rels = rels.filter((rel) => !hiddenIds.has(otherIdOf(rel)));
+      }
+
       if (isCaseRestricted(auth) && rels.length > 0) {
-        const otherIds = [
-          ...new Set(rels.map((rel) => (rel.parentId === id ? rel.childId : rel.parentId))),
-        ];
+        const otherIds = [...new Set(rels.map(otherIdOf))];
         const visible = new Set<string>();
         for (const batch of chunk(otherIds, FAMILY_QUERY_CHUNK)) {
           const rows = await tx.caseItem.findMany({
@@ -335,15 +362,13 @@ export class EvidenceService {
           });
           for (const row of rows) visible.add(row.evidenceItemId);
         }
-        visibleRels = rels.filter((rel) =>
-          visible.has(rel.parentId === id ? rel.childId : rel.parentId),
-        );
+        rels = rels.filter((rel) => visible.has(otherIdOf(rel)));
       }
-      return visibleRels.map((rel) => {
+
+      return rels.map((rel) => {
         const other = rel.parentId === id ? rel.child : rel.parent;
         return {
           relationship: rel.kind,
-          // Direction is relative to the requested item.
           direction: rel.parentId === id ? ('child' as const) : ('parent' as const),
           detail: rel.detail,
           item: {

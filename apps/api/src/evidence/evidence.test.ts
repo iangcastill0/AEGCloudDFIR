@@ -66,6 +66,62 @@ describe('EvidenceService authorization', () => {
     // The item row is never even loaded once the ACL check fails.
     expect(findFirst).not.toHaveBeenCalled();
   });
+
+  it('refuses a privileged item to a reviewer before any download URL', async () => {
+    const { store, presignGet } = makeStore();
+    const findFirst = vi.fn(async () => baseItem());
+    const { service } = makeService(
+      {
+        evidenceItem: { findFirst },
+        tagAssignment: { count: vi.fn(async () => 1) },
+      },
+      store,
+    );
+    await expect(
+      service.native(makeAuth([TenantRole.reviewer]), ITEM_A, false, fakeRequest()),
+    ).rejects.toThrow(NotFoundException);
+    expect(findFirst).not.toHaveBeenCalled();
+    expect(presignGet).not.toHaveBeenCalled();
+  });
+
+  it('refuses a privileged item to read_only even inside an assigned case', async () => {
+    const { store, presignGet } = makeStore();
+    const findFirst = vi.fn(async () => baseItem());
+    const { service } = makeService(
+      {
+        caseItem: { count: vi.fn(async () => 1) },
+        evidenceItem: { findFirst },
+        tagAssignment: { count: vi.fn(async () => 1) },
+      },
+      store,
+    );
+    await expect(service.detail(makeAuth([TenantRole.read_only]), ITEM_A)).rejects.toThrow(
+      NotFoundException,
+    );
+    expect(findFirst).not.toHaveBeenCalled();
+    expect(presignGet).not.toHaveBeenCalled();
+  });
+
+  it('still returns a privileged item to a case manager', async () => {
+    const { store, presignGet } = makeStore();
+    const count = vi.fn(async () => 1);
+    const { service } = makeService(
+      {
+        evidenceItem: { findFirst: vi.fn(async () => baseItem()) },
+        tagAssignment: { count },
+      },
+      store,
+    );
+    const result = await service.native(
+      makeAuth([TenantRole.case_manager]),
+      ITEM_A,
+      false,
+      fakeRequest(),
+    );
+    expect(result.url).toContain('https://signed.example');
+    expect(count).not.toHaveBeenCalled();
+    expect(presignGet).toHaveBeenCalled();
+  });
 });
 
 describe('EvidenceService.native', () => {
@@ -212,7 +268,10 @@ describe('EvidenceService.detail — the people on a message', () => {
   it('returns who the message was from and to, in header order', async () => {
     const { store } = makeStore();
     const { service } = makeService(
-      { evidenceItem: { findFirst: vi.fn(async () => emailItem()) } },
+      {
+        evidenceItem: { findFirst: vi.fn(async () => emailItem()) },
+        tagAssignment: { count: vi.fn(async () => 0) },
+      },
       store,
     );
     const detail = await service.detail(makeAuth([TenantRole.reviewer]), ITEM_A);
@@ -228,7 +287,10 @@ describe('EvidenceService.detail — the people on a message', () => {
     // the exact claim TRUTHFULNESS_NOTICES.bcc exists to prevent.
     const { store } = makeStore();
     const { service } = makeService(
-      { evidenceItem: { findFirst: vi.fn(async () => emailItem()) } },
+      {
+        evidenceItem: { findFirst: vi.fn(async () => emailItem()) },
+        tagAssignment: { count: vi.fn(async () => 0) },
+      },
       store,
     );
     const detail = await service.detail(makeAuth([TenantRole.reviewer]), ITEM_A);
@@ -249,11 +311,52 @@ describe('EvidenceService.detail — the people on a message', () => {
             participants: [],
           })),
         },
+        tagAssignment: { count: vi.fn(async () => 0) },
       },
       store,
     );
     const detail = await service.detail(makeAuth([TenantRole.reviewer]), ITEM_A);
     expect(detail.participants).toEqual([]);
+  });
+});
+
+describe('EvidenceService.family', () => {
+  const CHILD = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+
+  function familyModels(hiddenIds: string[]) {
+    return {
+      evidenceItem: { findFirst: vi.fn(async () => ({ id: ITEM_A })) },
+      tagAssignment: {
+        count: vi.fn(async () => 0),
+        findMany: vi.fn(async () => hiddenIds.map((evidenceItemId) => ({ evidenceItemId }))),
+      },
+      evidenceRelationship: {
+        findMany: vi.fn(async () => [
+          {
+            kind: 'attachment',
+            parentId: ITEM_A,
+            childId: CHILD,
+            detail: '',
+            parent: { id: ITEM_A, kind: 'email', name: 'note.eml', size: 10n, sha256: 'aa' },
+            child: { id: CHILD, kind: 'file', name: 'secret.pdf', size: 20n, sha256: 'bb' },
+          },
+        ]),
+      },
+    };
+  }
+
+  it('omits a privileged family link for a reviewer', async () => {
+    const { store } = makeStore();
+    const { service } = makeService(familyModels([CHILD]), store);
+    const result = await service.family(makeAuth([TenantRole.reviewer]), ITEM_A);
+    expect(result.items).toEqual([]);
+  });
+
+  it('keeps a privileged family link for a case manager', async () => {
+    const { store } = makeStore();
+    const { service } = makeService(familyModels([CHILD]), store);
+    const result = await service.family(makeAuth([TenantRole.case_manager]), ITEM_A);
+    expect(result.items.map((row) => row.item.id)).toEqual([CHILD]);
   });
 });
 
@@ -280,6 +383,7 @@ describe('EvidenceService.preview', () => {
     const { service } = makeService(
       {
         evidenceItem: { findFirst: vi.fn(async () => ({ id: ITEM_A })) },
+        tagAssignment: { count: vi.fn(async () => 0) },
         preview: { findMany: vi.fn(async () => previews) },
       },
       store,

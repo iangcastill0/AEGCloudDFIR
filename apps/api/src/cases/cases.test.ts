@@ -942,3 +942,33 @@ describe('CasesService.addItems on a whole collection', () => {
     );
   });
 });
+
+describe('CasesService.items privilege', () => {
+  function list(role: TenantRole) {
+    const findMany = vi.fn(async () => []);
+    const { service } = makeService({
+      case: { findFirst: vi.fn(async () => caseRow()) },
+      caseItem: { findMany },
+    });
+    return { service, findMany, role };
+  }
+
+  it('hides privileged items from a reviewer', async () => {
+    const { service, findMany } = list(TenantRole.reviewer);
+    await service.items(makeAuth([TenantRole.reviewer]), CASE_ID, { limit: 50 });
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          evidenceItem: { tagAssignments: { none: { tag: { isPrivileged: true } } } },
+        }),
+      }),
+    );
+  });
+
+  it('leaves privileged items visible to a case manager', async () => {
+    const { service, findMany } = list(TenantRole.case_manager);
+    await service.items(makeAuth([TenantRole.case_manager]), CASE_ID, { limit: 50 });
+    const where = findMany.mock.calls[0]?.[0] as { where: Record<string, unknown> };
+    expect(where.where).not.toHaveProperty('evidenceItem');
+  });
+});

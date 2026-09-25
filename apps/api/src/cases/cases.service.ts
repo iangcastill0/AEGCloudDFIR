@@ -507,7 +507,19 @@ export class CasesService {
     return withTenantContext(this.prisma, auth.tenantId, async (tx) => {
       await this.requireCase(tx, auth, id);
       const rows = await tx.caseItem.findMany({
-        where: { tenantId: auth.tenantId, caseId: id },
+        where: {
+          tenantId: auth.tenantId,
+          caseId: id,
+          // Same rule as search: a reviewer must not learn the id of a
+          // privileged item from the case list.
+          ...(mayViewPrivileged(auth)
+            ? {}
+            : {
+                evidenceItem: {
+                  tagAssignments: { none: { tag: { isPrivileged: true } } },
+                },
+              }),
+        },
         include: { evidenceItem: { select: { name: true, kind: true } } },
         orderBy: { id: 'asc' },
         take: page.limit + 1,
