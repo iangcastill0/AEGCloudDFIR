@@ -327,6 +327,21 @@ export class TenantsService {
     if (!user) throw new ForbiddenException('user no longer exists');
 
     return withTenantContext(this.prisma, found.id, async (tx) => {
+      const existing = await tx.membership.findUnique({
+        where: { tenantId_userId: { tenantId: found.id, userId } },
+        select: { id: true, status: true },
+      });
+      // The standing link is for people who are not in the org yet. It is
+      // copied onto the dashboard and Members page and pasted into Slack.
+      // Adding reviewer to someone who is already a member would let a
+      // read_only (or disabled) account promote itself by opening that URL.
+      if (existing) {
+        if (existing.status !== MembershipStatus.active) {
+          throw new ForbiddenException('you no longer have access to this organization');
+        }
+        return { tenantId: found.id, name: found.name, slug: found.slug };
+      }
+
       await this.ensureMembership(tx, found.id, userId, STANDING_JOIN_ROLE);
       await this.audit.appendTx(tx, {
         tenantId: found.id,
