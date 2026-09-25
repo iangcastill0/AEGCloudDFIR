@@ -7,7 +7,10 @@ import {
   expandFamilies,
   exportStatusDetail,
   loadItemsInBatches,
+  partitionPstSelection,
   processExportRun,
+  PST_NOT_EMAIL_EXCEPTION,
+  pstExportStatusDetail,
   shouldStartNewArchive,
   type ArchiveWriterLike,
 } from './export-run.js';
@@ -204,6 +207,85 @@ describe('exportStatusDetail', () => {
     const detail = exportStatusDetail(100, 3, 40);
     expect(detail).toContain('60 file(s)');
     expect(detail).toContain('3 item(s) failed verification');
+  });
+});
+
+describe('partitionPstSelection', () => {
+  const email = {
+    id: 'mail-1',
+    kind: 'email',
+    childRelationships: [] as { parentId: string; kind: string }[],
+  };
+  const attachedPdf = {
+    id: 'att-1',
+    kind: 'file',
+    childRelationships: [{ parentId: 'mail-1', kind: 'attachment' }],
+  };
+  const loosePdf = {
+    id: 'file-1',
+    kind: 'file',
+    childRelationships: [] as { parentId: string; kind: string }[],
+  };
+  const orphanAttachment = {
+    id: 'att-orphan',
+    kind: 'file',
+    childRelationships: [{ parentId: 'mail-missing', kind: 'attachment' }],
+  };
+
+  it('names a loose non-email in exceptions, not as a verification failure', () => {
+    const split = partitionPstSelection([email, loosePdf]);
+    expect(split.emailIds).toEqual(['mail-1']);
+    expect(split.inlineCount).toBe(0);
+    expect(split.omitted).toEqual([{ evidenceItemId: 'file-1', error: PST_NOT_EMAIL_EXCEPTION }]);
+  });
+
+  it('does not list an attachment whose parent email is in the PST', () => {
+    // The bytes are already inside the message. Calling that "left out" would
+    // be the same lie the zip path used to tell about inline attachments.
+    const split = partitionPstSelection([attachedPdf, email]);
+    expect(split.omitted).toEqual([]);
+    expect(split.inlineCount).toBe(1);
+  });
+
+  it('lists an attachment whose parent email is not in this export', () => {
+    const split = partitionPstSelection([orphanAttachment, email]);
+    expect(split.omitted).toEqual([
+      { evidenceItemId: 'att-orphan', error: PST_NOT_EMAIL_EXCEPTION },
+    ]);
+    expect(split.inlineCount).toBe(0);
+  });
+
+  it('treats a family-linked file as omitted, not as inside the message', () => {
+    const related = {
+      id: 'related-1',
+      kind: 'file',
+      childRelationships: [{ parentId: 'mail-1', kind: 'family' }],
+    };
+    const split = partitionPstSelection([email, related]);
+    expect(split.inlineCount).toBe(0);
+    expect(split.omitted).toEqual([
+      { evidenceItemId: 'related-1', error: PST_NOT_EMAIL_EXCEPTION },
+    ]);
+  });
+});
+
+describe('pstExportStatusDetail', () => {
+  it('does not call omitted items failed verification', () => {
+    const detail = pstExportStatusDetail(10, 0, 0, 4);
+    expect(detail).toContain('4 non-email item(s) were left out of the PST');
+    expect(detail).toContain('exceptions.csv');
+    expect(detail).not.toMatch(/failed verification/);
+  });
+
+  it('says attachments stayed inside the messages, without naming a zip file', () => {
+    const detail = pstExportStatusDetail(10, 0, 40, 0);
+    expect(detail).toContain('10 email(s) in the PST');
+    expect(detail).toContain('40 attachment(s) already inside those messages');
+    expect(detail).not.toContain('inline-attachments.csv');
+  });
+
+  it('still reports real hash failures', () => {
+    expect(pstExportStatusDetail(10, 2, 0, 1)).toContain('2 item(s) failed verification');
   });
 });
 
