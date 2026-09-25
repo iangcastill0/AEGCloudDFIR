@@ -32,6 +32,25 @@ const REDACTED_PARAMS = new Set([
   'session_state',
 ]);
 
+/**
+ * Sign-in from `/signup?token=…` puts the invite token *inside* `redirectTo`
+ * (`/auth/login?redirectTo=/signup?token=…`). A top-level-only redact would
+ * log the standing join secret. Same for `code` nested in a return URL.
+ */
+function redactEmbeddedCredentials(value: string): string {
+  const q = value.indexOf('?');
+  if (q === -1) return value;
+  const nested = new URLSearchParams(value.slice(q + 1));
+  let changed = false;
+  for (const key of [...nested.keys()]) {
+    if (!REDACTED_PARAMS.has(key.toLowerCase())) continue;
+    nested.set(key, '[redacted]');
+    changed = true;
+  }
+  if (!changed) return value;
+  return `${value.slice(0, q + 1)}${decodeURIComponent(nested.toString())}`;
+}
+
 export function logSafeUrl(url: string): string {
   const split = url.indexOf('?');
   if (split === -1) return url;
@@ -42,9 +61,18 @@ export function logSafeUrl(url: string): string {
     const params = new URLSearchParams(query);
     let changed = false;
     for (const key of [...params.keys()]) {
-      if (!REDACTED_PARAMS.has(key.toLowerCase())) continue;
-      params.set(key, '[redacted]');
-      changed = true;
+      if (REDACTED_PARAMS.has(key.toLowerCase())) {
+        params.set(key, '[redacted]');
+        changed = true;
+        continue;
+      }
+      const current = params.get(key);
+      if (current === null) continue;
+      const nested = redactEmbeddedCredentials(current);
+      if (nested !== current) {
+        params.set(key, nested);
+        changed = true;
+      }
     }
     if (!changed) return url;
     return `${path}?${decodeURIComponent(params.toString())}`;
