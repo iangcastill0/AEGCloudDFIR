@@ -149,7 +149,7 @@ export class TagsService {
     const row = await withTenantContext(this.prisma, auth.tenantId, async (tx) => {
       const existing = await tx.tag.findFirst({
         where: { id, tenantId: auth.tenantId },
-        select: { id: true },
+        select: { id: true, isPrivileged: true, isConfidential: true },
       });
       if (!existing) throw new NotFoundException();
       const updated = await tx.tag.updateMany({
@@ -170,6 +170,16 @@ export class TagsService {
         summary: { changedFields: Object.keys(fields) },
         request,
       });
+      // Search copies isPrivileged onto every assigned document at index time
+      // and then hides privileged:true from reviewers. Flipping the flag here
+      // used to leave those documents stale, so Review kept returning the
+      // body. Same for isConfidential, which is also a document field.
+      const privilegeChanged =
+        (fields.isPrivileged !== undefined && fields.isPrivileged !== existing.isPrivileged) ||
+        (fields.isConfidential !== undefined && fields.isConfidential !== existing.isConfidential);
+      if (privilegeChanged) {
+        await this.reindexAssigned(tx, auth.tenantId, id, 'tag-def');
+      }
       return tx.tag.findFirstOrThrow({ where: { id, tenantId: auth.tenantId } });
     });
     return toDto(row);
@@ -192,6 +202,12 @@ export class TagsService {
           `tag has ${assignmentCount} assignments; pass ?force=1 to delete them as well`,
         );
       }
+      // Re-index first so the outbox rows exist in this transaction. The
+      // worker runs after commit, when the tag (and its assignments) are
+      // already gone, and rebuilds each document from that new truth.
+      if (assignmentCount > 0) {
+        await this.reindexAssigned(tx, auth.tenantId, id, 'tag-def');
+      }
       // FK cascade removes assignments (and their notes).
       await tx.tag.delete({ where: { id } });
       await this.audit.appendTx(tx, {
@@ -207,6 +223,29 @@ export class TagsService {
       });
       return { ok: true as const, assignmentsRemoved: assignmentCount };
     });
+  }
+
+  /**
+   * Queue a fresh search rebuild for every item that currently carries this
+   * tag. Bulk apply/remove already does this; definition changes must too,
+   * because the index document stores privileged/confidential as fields.
+   */
+  private async reindexAssigned(
+    tx: TenantScopedTx,
+    tenantId: string,
+    tagId: string,
+    reason: string,
+  ): Promise<void> {
+    const assigned = await tx.tagAssignment.findMany({
+      where: { tenantId, tagId },
+      select: { evidenceItemId: true },
+    });
+    await enqueueReindex(
+      tx,
+      tenantId,
+      assigned.map((row) => row.evidenceItemId),
+      reason,
+    );
   }
 
   /** Expand requested item ids per the tag's family behavior. */

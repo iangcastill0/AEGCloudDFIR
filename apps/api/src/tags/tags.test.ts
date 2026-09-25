@@ -224,23 +224,96 @@ describe('TagsService.update', () => {
       service.update(auth, TAG_ID, { name: 'Warm', version: 1 }, fakeRequest()),
     ).rejects.toThrow(ConflictException);
   });
+
+  it('reindexes assigned items when a tag is marked privileged', async () => {
+    const outboxCreateMany = vi.fn(async (args: { data: unknown[] }) => ({
+      count: args.data.length,
+    }));
+    const row = tagRow({ isPrivileged: false, version: 1 });
+    const { service } = makeService({
+      tag: {
+        findFirst: vi.fn(async () => row),
+        findFirstOrThrow: vi.fn(async () => ({ ...row, isPrivileged: true, version: 2 })),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+      tagAssignment: {
+        findMany: vi.fn(async () => [{ evidenceItemId: ITEM_A }, { evidenceItemId: ITEM_B }]),
+      },
+      evidenceItem: {
+        findMany: vi.fn(async (args: { where: { id: { in: string[] } } }) =>
+          args.where.id.in.map((id: string) => ({ id, version: 1 })),
+        ),
+      },
+      outboxEvent: { createMany: outboxCreateMany },
+    });
+
+    await service.update(auth, TAG_ID, { isPrivileged: true, version: 1 }, fakeRequest());
+
+    const rows = (
+      outboxCreateMany.mock.calls[0]?.[0] as {
+        data: { topic: string; dedupKey: string; payload: Record<string, unknown> }[];
+      }
+    ).data;
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.topic).toBe('search.index');
+    expect(rows[0]?.dedupKey).toMatch(new RegExp(`^index:${ITEM_A}:v1:tag-def-`));
+    expect(rows[1]?.dedupKey).toMatch(new RegExp(`^index:${ITEM_B}:v1:tag-def-`));
+  });
+
+  it('does not reindex when only the name changes', async () => {
+    const outboxCreateMany = vi.fn();
+    const assignmentFindMany = vi.fn();
+    const row = tagRow({ version: 1 });
+    const { service } = makeService({
+      tag: {
+        findFirst: vi.fn(async () => row),
+        findFirstOrThrow: vi.fn(async () => ({ ...row, name: 'Warm', version: 2 })),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+      tagAssignment: { findMany: assignmentFindMany },
+      outboxEvent: { createMany: outboxCreateMany },
+    });
+
+    await service.update(auth, TAG_ID, { name: 'Warm', version: 1 }, fakeRequest());
+    expect(assignmentFindMany).not.toHaveBeenCalled();
+    expect(outboxCreateMany).not.toHaveBeenCalled();
+  });
 });
 
 describe('TagsService.remove', () => {
   it('blocks deletion while assignments exist unless forced', async () => {
     const tagDelete = vi.fn(async () => ({}));
+    const outboxCreateMany = vi.fn(async (args: { data: unknown[] }) => ({
+      count: args.data.length,
+    }));
     const { service, audit } = makeService({
       tag: { findFirst: vi.fn(async () => tagRow()), delete: tagDelete },
-      tagAssignment: { count: vi.fn(async () => 7) },
+      tagAssignment: {
+        count: vi.fn(async () => 7),
+        findMany: vi.fn(async () => [{ evidenceItemId: ITEM_A }]),
+      },
+      evidenceItem: {
+        findMany: vi.fn(async (args: { where: { id: { in: string[] } } }) =>
+          args.where.id.in.map((id: string) => ({ id, version: 1 })),
+        ),
+      },
+      outboxEvent: { createMany: outboxCreateMany },
     });
     await expect(service.remove(auth, TAG_ID, false, fakeRequest())).rejects.toThrow(
       ConflictException,
     );
     expect(tagDelete).not.toHaveBeenCalled();
+    expect(outboxCreateMany).not.toHaveBeenCalled();
 
     const result = await service.remove(auth, TAG_ID, true, fakeRequest());
     expect(result.assignmentsRemoved).toBe(7);
     expect(tagDelete).toHaveBeenCalledTimes(1);
+    const rows = (
+      outboxCreateMany.mock.calls[0]?.[0] as { data: { topic: string; dedupKey: string }[] }
+    ).data;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.topic).toBe('search.index');
+    expect(rows[0]?.dedupKey).toMatch(new RegExp(`^index:${ITEM_A}:v1:tag-def-`));
     expect(audit.appendTx).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
