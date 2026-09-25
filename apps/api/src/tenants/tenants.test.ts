@@ -256,7 +256,11 @@ describe('TenantsService.redeemInvite', () => {
 
     const result = await service.redeemInvite(USER_ID, token, fakeRequest());
     expect(result).toEqual({ tenantId: TENANT_ID, name: 'Acme', slug: 'acme' });
-    expect(membershipCreate).toHaveBeenCalled();
+    expect(membershipCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ invited: true }),
+      }),
+    );
     expect(roleCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ role: TenantRole.reviewer, source: 'local' }),
@@ -292,7 +296,11 @@ describe('TenantsService.redeemInvite', () => {
 
     const result = await service.redeemInvite(USER_ID, token, fakeRequest());
     expect(result).toEqual({ tenantId: TENANT_ID, name: 'Acme', slug: 'acme' });
-    expect(membershipCreate).toHaveBeenCalled();
+    expect(membershipCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ invited: true }),
+      }),
+    );
     expect(roleCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ role: TenantRole.reviewer, source: 'local' }),

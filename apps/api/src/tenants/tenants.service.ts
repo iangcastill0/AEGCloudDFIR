@@ -283,7 +283,7 @@ export class TenantsService {
 
     return withTenantContext(this.prisma, invite.tenantId, async (tx) => {
       const tenant = await this.requireActiveTenant(tx, invite.tenantId);
-      await this.ensureMembership(tx, tenant.id, userId, invite.role);
+      await this.ensureMembership(tx, tenant.id, userId, invite.role, true);
       await tx.tenantInvite.update({
         where: { id: invite.id },
         data: { usedAt: new Date() },
@@ -326,7 +326,7 @@ export class TenantsService {
     if (!user) throw new ForbiddenException('user no longer exists');
 
     return withTenantContext(this.prisma, found.id, async (tx) => {
-      await this.ensureMembership(tx, found.id, userId, STANDING_JOIN_ROLE);
+      await this.ensureMembership(tx, found.id, userId, STANDING_JOIN_ROLE, true);
       await this.audit.appendTx(tx, {
         tenantId: found.id,
         actorUserId: userId,
@@ -360,23 +360,29 @@ export class TenantsService {
     tenantId: string,
     userId: string,
     role: TenantRole,
+    invited: boolean,
   ): Promise<void> {
     const existing = await tx.membership.findUnique({
       where: { tenantId_userId: { tenantId, userId } },
-      select: { id: true, status: true },
+      select: { id: true, status: true, invited: true },
     });
     let membershipId: string;
     if (existing) {
       membershipId = existing.id;
-      if (existing.status !== MembershipStatus.active) {
+      if (existing.status !== MembershipStatus.active || (invited && !existing.invited)) {
         await tx.membership.update({
           where: { id: membershipId },
-          data: { status: MembershipStatus.active },
+          data: {
+            ...(existing.status !== MembershipStatus.active
+              ? { status: MembershipStatus.active }
+              : {}),
+            ...(invited ? { invited: true } : {}),
+          },
         });
       }
     } else {
       const created = await tx.membership.create({
-        data: { tenantId, userId, status: MembershipStatus.active },
+        data: { tenantId, userId, status: MembershipStatus.active, invited },
         select: { id: true },
       });
       membershipId = created.id;
