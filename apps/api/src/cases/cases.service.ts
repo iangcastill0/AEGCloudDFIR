@@ -24,7 +24,7 @@ import type { CursorQuery } from '../common/pagination.js';
 import { zodValidate } from '../common/zod-validate.js';
 import { chunk, expandFamilies, inOwnTx, queryInChunks } from '../common/families.js';
 import { enqueueReindex } from '../common/reindex.js';
-import { isCaseRestricted } from '../common/roles.js';
+import { isCaseRestricted, mayViewPrivileged } from '../common/roles.js';
 import { AuditService } from '../audit/audit.service.js';
 import { SelectionService } from '../search/selection.service.js';
 
@@ -507,7 +507,19 @@ export class CasesService {
     return withTenantContext(this.prisma, auth.tenantId, async (tx) => {
       await this.requireCase(tx, auth, id);
       const rows = await tx.caseItem.findMany({
-        where: { tenantId: auth.tenantId, caseId: id },
+        where: {
+          tenantId: auth.tenantId,
+          caseId: id,
+          // Same rule as search: a reviewer must not learn the id of a
+          // privileged item from the case list.
+          ...(mayViewPrivileged(auth)
+            ? {}
+            : {
+                evidenceItem: {
+                  tagAssignments: { none: { tag: { isPrivileged: true } } },
+                },
+              }),
+        },
         include: { evidenceItem: { select: { name: true, kind: true } } },
         orderBy: { id: 'asc' },
         take: page.limit + 1,

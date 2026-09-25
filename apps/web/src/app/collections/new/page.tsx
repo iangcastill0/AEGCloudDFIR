@@ -1095,7 +1095,7 @@ function AuditScopeFields({ state, dispatch }: StepProps) {
 
       <TextArea
         label="Actor filter (optional)"
-        hint="Restrict to specific actor principals (UPN/email), one per line or comma-separated, where the provider supports it."
+        hint="Restrict to one actor principal (UPN/email) where the provider supports it. Google Reports accepts at most one; leave blank for all users. Separate collections per actor if you need more than one."
         rows={2}
         value={a.actorFilterText}
         onChange={(e) =>
