@@ -931,6 +931,70 @@ describe('CollectionsService.action — retry covers processing exceptions', () 
     });
   });
 
+  it('reopens a sealed collection when Retry re-queues pst.extract', async () => {
+    // pst.extract drops work unless status is fetching. Retry on completed
+    // used to enqueue the job, clear the exception ledger, set pending, and
+    // leave the collection sealed — the worker no-oped and messages never
+    // appeared.
+    const collectionUpdate = vi.fn(async () => ({}));
+    const outboxCreateMany = vi.fn(async () => ({}));
+    const { service } = makeService({
+      collection: {
+        findFirst: vi.fn(async () => ({ id: COLLECTION_ID, status: CollectionStatus.completed })),
+        update: collectionUpdate,
+      },
+      collectionItem: {
+        findMany: vi.fn(async () => []),
+        updateMany: vi.fn(async () => ({ count: 0 })),
+      },
+      evidenceItem: {
+        findMany: vi.fn(async () => [
+          { id: EXCEPTED_ID, version: 1, kind: 'container', custodianId: CUSTODIAN_ID },
+        ]),
+        updateMany: vi.fn(async () => ({})),
+      },
+      collectionException: { findMany: vi.fn(async () => []), deleteMany: vi.fn(async () => ({})) },
+      outboxEvent: { createMany: outboxCreateMany },
+    });
+
+    const result = await service.action(auth, COLLECTION_ID, 'retry', fakeRequest());
+
+    expect(result.status).toBe(CollectionStatus.fetching);
+    expect(collectionUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { status: CollectionStatus.fetching, finishedAt: null },
+      }),
+    );
+  });
+
+  it('does not reopen a sealed collection for a plain extract retry', async () => {
+    // Emails and ordinary files do not go through pst.extract; their processors
+    // ignore collection status. Flipping every sealed retry back to fetching
+    // would be noise.
+    const collectionUpdate = vi.fn(async () => ({}));
+    const { service } = makeService({
+      collection: {
+        findFirst: vi.fn(async () => ({ id: COLLECTION_ID, status: CollectionStatus.completed })),
+        update: collectionUpdate,
+      },
+      collectionItem: {
+        findMany: vi.fn(async () => []),
+        updateMany: vi.fn(async () => ({ count: 0 })),
+      },
+      evidenceItem: {
+        findMany: vi.fn(async () => [{ id: EXCEPTED_ID, version: 1, kind: 'file' }]),
+        updateMany: vi.fn(async () => ({})),
+      },
+      collectionException: { findMany: vi.fn(async () => []), deleteMany: vi.fn(async () => ({})) },
+      outboxEvent: { createMany: vi.fn(async () => ({})) },
+    });
+
+    const result = await service.action(auth, COLLECTION_ID, 'retry', fakeRequest());
+
+    expect(result.status).toBe(CollectionStatus.completed);
+    expect(collectionUpdate).not.toHaveBeenCalled();
+  });
+
   it('does not send a container with no custodian to extract', async () => {
     const { service, outboxCreateMany, updateMany, deleteMany } = retryService({
       exceptedItems: [{ id: EXCEPTED_ID, version: 1, kind: 'container', custodianId: null }],

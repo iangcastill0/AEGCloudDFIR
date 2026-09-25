@@ -1308,7 +1308,14 @@ export class CollectionsService {
         }
       }
 
-      if (failedItems.length > 0) {
+      // pst.extract refuses any collection that is not `fetching` (same gate as
+      // fetch-item). Retry is allowed on a sealed `completed` collection, and
+      // used to enqueue pst.extract while leaving status completed — the worker
+      // then dropped the job, the exception ledger was already cleared, and the
+      // container sat `pending` forever with no messages reconstructed.
+      const needsFetching =
+        failedItems.length > 0 || processingJobs.some((job) => job.topic === 'pst.extract');
+      if (needsFetching) {
         await tx.collection.update({
           where: { id },
           data: { status: CollectionStatus.fetching, finishedAt: null },
@@ -1328,7 +1335,7 @@ export class CollectionsService {
       );
       return {
         id,
-        status: failedItems.length > 0 ? CollectionStatus.fetching : collection.status,
+        status: needsFetching ? CollectionStatus.fetching : collection.status,
         retriedItems: failedItems.length,
         retriedProcessing: processingJobs.length,
         retriedIndexing: reindexed,
