@@ -8,7 +8,13 @@ import {
   withTenantContext,
   type Prisma,
 } from '@aeg-clouddfir/database';
-import { Sha256Stream, canonicalJson, sanitizeFilename } from '@aeg-clouddfir/evidence';
+import {
+  Sha256Stream,
+  archivePartFilename,
+  canonicalJson,
+  derivativeTypeFor,
+  sanitizeFilename,
+} from '@aeg-clouddfir/evidence';
 import { ProductionArchiveWriter, csvEscape } from '@aeg-clouddfir/production';
 import { AUDIT_CSV_COLUMNS, auditRowsFor } from './audit-csv.js';
 import {
@@ -662,7 +668,7 @@ interface ExportResult {
   outputPrefix: string;
   manifestSha256: string;
   archiveParts: number;
-  /** Empty for a CSV export, which produces no archive parts. */
+  /** One row per downloadable object. CSV is a single `export.csv` part. */
   parts: ExportPartDigest[];
 }
 
@@ -842,14 +848,38 @@ async function runCsvExport(
     }
   }
   const csv = Buffer.from(lines.join('\r\n') + '\r\n', 'utf8');
+  const filename = archivePartFilename('csv', 1);
   const put = await ctx.store.putDerivative(
     tenantId,
     exportId,
-    'export-csv',
+    derivativeTypeFor('csv'),
     1,
-    'export.csv',
+    filename,
     csv,
     'text/csv; charset=utf-8',
+  );
+  // Sidecar next to the CSV, same as zip/PST: download always fetches
+  // manifest.json, and hashes.txt names it. Using the CSV's own digest as the
+  // "manifest" hash made verification look at a file that was never written.
+  const manifestJson = canonicalJson({
+    schema: 'cdfir.export.csv.manifest.v1',
+    exportId,
+    generatedAt: new Date().toISOString(),
+    kind: 'csv',
+    itemCount,
+    filename,
+    sha256: put.sha256,
+    sizeBytes: put.size,
+    items: [{ archivePart: 1, filename, sha256: put.sha256, sizeBytes: put.size }],
+  });
+  const manifestPut = await ctx.store.putDerivative(
+    tenantId,
+    exportId,
+    'export-manifest',
+    1,
+    'manifest.json',
+    Buffer.from(manifestJson, 'utf8'),
+    'application/json',
   );
   return {
     itemCount,
@@ -859,10 +889,16 @@ async function runCsvExport(
     omittedCount: 0,
     totalBytes: csv.byteLength,
     outputPrefix: put.objectKey,
-    manifestSha256: put.sha256,
-    archiveParts: 0,
-    // A CSV export is one object, not a split archive.
-    parts: [],
+    manifestSha256: manifestPut.sha256,
+    archiveParts: 1,
+    parts: [
+      {
+        partNumber: 1,
+        objectKey: put.objectKey,
+        sha256: put.sha256,
+        sizeBytes: put.size,
+      },
+    ],
   };
 }
 

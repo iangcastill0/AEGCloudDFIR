@@ -178,12 +178,13 @@ describe('export part naming', () => {
    * three places; a PST part arriving named `.zip` is refused by Outlook with
    * nothing in the product explaining why.
    */
-  it('gives a pst export .pst and everything else .zip', () => {
+  it('gives each kind its own extension and filename', () => {
     expect(archiveExtensionFor('pst')).toBe('pst');
     expect(archiveExtensionFor('native')).toBe('zip');
-    expect(archiveExtensionFor('csv')).toBe('zip');
+    expect(archiveExtensionFor('csv')).toBe('csv');
     expect(archivePartFilename('pst', 1)).toBe('export-part001.pst');
     expect(archivePartFilename('native', 1)).toBe('export-part001.zip');
+    expect(archivePartFilename('csv', 1)).toBe('export.csv');
   });
 
   it('pads part numbers so parts sort in part order', () => {
@@ -193,10 +194,11 @@ describe('export part naming', () => {
     expect(archivePartFilename('native', 65)).toBe('export-part065.zip');
   });
 
-  it('keeps pst parts under their own derivative type', () => {
+  it('keeps pst and csv parts under their own derivative types', () => {
     // Both kinds under one prefix would break the "walk until a part is
     // missing" convention the API and the backfill script both use.
     expect(derivativeTypeFor('pst')).toBe('pst-archive');
     expect(derivativeTypeFor('native')).toBe('archive');
+    expect(derivativeTypeFor('csv')).toBe('export-csv');
   });
 });
