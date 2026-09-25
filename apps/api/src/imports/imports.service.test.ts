@@ -129,6 +129,44 @@ describe('ImportsService', () => {
     ).toBe(true);
   });
 
+  it('uses a fresh search dedup key so a second attach can re-stamp the case', async () => {
+    // A key of case-import:id:caseId works once ever. If search.case-import
+    // fails, re-attach was a silent no-op and Review never saw the case.
+    const importId = '99999999-9999-4999-8999-999999999999';
+    const outboxCreateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const prisma = fakePrisma({
+      forensicImport: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: importId,
+          createdById: USER_ID,
+          cases: [],
+        }),
+      },
+      case: { findFirst: vi.fn().mockResolvedValue({ id: CASE_ID }) },
+      importCase: { createMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      evidenceItem: {
+        findMany: vi.fn(async ({ cursor }: { cursor?: { id: string } }) =>
+          cursor ? [] : [{ id: ITEM_A }],
+        ),
+      },
+      caseItem: { createMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      outboxEvent: { createMany: outboxCreateMany },
+    });
+    const audit = fakeAudit();
+    const service = new ImportsService(prisma, store() as never, audit.service);
+    const body = { caseId: CASE_ID };
+
+    await service.attach(makeAuth([TenantRole.case_manager]), importId, body, fakeRequest());
+    await service.attach(makeAuth([TenantRole.case_manager]), importId, body, fakeRequest());
+
+    const keys = outboxCreateMany.mock.calls.map(
+      (call) => (call[0]?.data as { dedupKey: string }[])[0]?.dedupKey,
+    );
+    expect(keys[0]).toMatch(new RegExp(`^case-import:${importId}:${CASE_ID}:`));
+    expect(keys[1]).toMatch(new RegExp(`^case-import:${importId}:${CASE_ID}:`));
+    expect(keys[0]).not.toBe(keys[1]);
+  });
+
   it('re-runs malware scanning before retrying an import whose scan failed', async () => {
     const importId = '99999999-9999-4999-8999-999999999999';
     const outboxCreate = vi.fn().mockResolvedValue({ id: 'event-1' });

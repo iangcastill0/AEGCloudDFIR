@@ -895,6 +895,53 @@ describe('CollectionsService.action — retry covers processing exceptions', () 
       }),
     );
   });
+
+  it('re-queues a failed email through parse, not extract', async () => {
+    // process.extract returns immediately for emails. Retrying them as extract
+    // left the item pending, deleted the ledger row, and never created attachments.
+    const { service, outboxCreateMany, updateMany } = retryService({
+      exceptedItems: [{ id: EXCEPTED_ID, version: 3, kind: 'email', custodianId: CUSTODIAN_ID }],
+    });
+    const result = await service.action(auth, COLLECTION_ID, 'retry', fakeRequest());
+    expect(result.retriedProcessing).toBe(1);
+    const rows = (outboxCreateMany.mock.calls[0]![0] as { data: { topic: string }[] }).data;
+    expect(rows).toEqual([expect.objectContaining({ topic: 'process.parse' })]);
+    expect(updateMany).toHaveBeenCalled();
+  });
+
+  it('re-queues a failed PST through pst.extract, not Tika', async () => {
+    // Tika on a container can "succeed" with garbage text and never reconstruct
+    // the messages. pst.extract is the only reader that does.
+    const { service, outboxCreateMany } = retryService({
+      exceptedItems: [
+        { id: EXCEPTED_ID, version: 1, kind: 'container', custodianId: CUSTODIAN_ID },
+      ],
+    });
+    await service.action(auth, COLLECTION_ID, 'retry', fakeRequest());
+    const rows = (
+      outboxCreateMany.mock.calls[0]![0] as {
+        data: { topic: string; payload: { collectionId: string; custodianId: string } }[];
+      }
+    ).data;
+    expect(rows[0]?.topic).toBe('pst.extract');
+    expect(rows[0]?.payload).toMatchObject({
+      collectionId: COLLECTION_ID,
+      custodianId: CUSTODIAN_ID,
+      evidenceItemId: EXCEPTED_ID,
+    });
+  });
+
+  it('does not send a container with no custodian to extract', async () => {
+    const { service, outboxCreateMany, updateMany, deleteMany } = retryService({
+      exceptedItems: [{ id: EXCEPTED_ID, version: 1, kind: 'container', custodianId: null }],
+      ledger: [{ id: 'exc-mine', detail: { evidenceItemId: EXCEPTED_ID } }],
+    });
+    const result = await service.action(auth, COLLECTION_ID, 'retry', fakeRequest());
+    expect(result.retriedProcessing).toBe(0);
+    expect(outboxCreateMany).not.toHaveBeenCalled();
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(deleteMany).not.toHaveBeenCalled();
+  });
 });
 
 describe('CollectionsService.create files the collection under a case', () => {

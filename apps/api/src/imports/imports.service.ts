@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import {
   BadRequestException,
@@ -528,7 +529,11 @@ export class ImportsService {
           {
             tenantId: auth.tenantId,
             topic: 'search.case-import',
-            dedupKey: `case-import:${id}:${input.caseId}`,
+            // A fresh token per call. Dispatched outbox rows are kept and
+            // (topic, dedupKey) is unique, so a key built from the import and
+            // case alone would work exactly once ever. If search.case-import
+            // failed, re-attach was a silent no-op and Review never saw the case.
+            dedupKey: `case-import:${id}:${input.caseId}:${randomUUID()}`,
             payload: { tenantId: auth.tenantId, importId: id, caseId: input.caseId },
           },
         ],
