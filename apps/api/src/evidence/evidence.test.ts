@@ -5,6 +5,7 @@ import type { EvidenceObjectStore } from '@aeg-clouddfir/evidence';
 import { EvidenceService } from './evidence.service.js';
 import {
   ITEM_A,
+  ITEM_B,
   TENANT_ID,
   fakeAudit,
   fakePrisma,
@@ -390,5 +391,88 @@ describe('EvidenceService.auditRecords', () => {
     });
     expect(result.items).toHaveLength(2);
     expect(result.nextCursor).toBe('rec-1');
+  });
+});
+
+describe('EvidenceService.family — case-restricted ACL on related items', () => {
+  const CHILD = ITEM_B;
+  const childRow = {
+    id: CHILD,
+    kind: 'file',
+    name: 'secret-attachment.pdf',
+    size: 99n,
+    sha256: 'deadbeef',
+  };
+
+  function familyRel() {
+    return {
+      kind: 'attachment',
+      detail: '',
+      parentId: ITEM_A,
+      childId: CHILD,
+      parent: {
+        id: ITEM_A,
+        kind: 'email',
+        name: 'parent.eml',
+        size: 10n,
+        sha256: 'aaaa',
+      },
+      child: childRow,
+    };
+  }
+
+  it('omits a related item that is outside the read_only caller cases', async () => {
+    const { store } = makeStore();
+    const caseItemFindMany = vi.fn(async () => []);
+    const { service } = makeService(
+      {
+        caseItem: {
+          count: vi.fn(async () => 1),
+          findMany: caseItemFindMany,
+        },
+        evidenceItem: { findFirst: vi.fn(async () => ({ id: ITEM_A })) },
+        evidenceRelationship: { findMany: vi.fn(async () => [familyRel()]) },
+      },
+      store,
+    );
+    const result = await service.family(makeAuth([TenantRole.read_only]), ITEM_A);
+    expect(result.items).toEqual([]);
+    expect(caseItemFindMany).toHaveBeenCalled();
+  });
+
+  it('keeps a related item that sits in a case the read_only caller belongs to', async () => {
+    const { store } = makeStore();
+    const { service } = makeService(
+      {
+        caseItem: {
+          count: vi.fn(async () => 1),
+          findMany: vi.fn(async () => [{ evidenceItemId: CHILD }]),
+        },
+        evidenceItem: { findFirst: vi.fn(async () => ({ id: ITEM_A })) },
+        evidenceRelationship: { findMany: vi.fn(async () => [familyRel()]) },
+      },
+      store,
+    );
+    const result = await service.family(makeAuth([TenantRole.read_only]), ITEM_A);
+    expect(result.items.map((row) => row.item.id)).toEqual([CHILD]);
+    expect(result.items[0]?.item.name).toBe('secret-attachment.pdf');
+  });
+
+  it('does not re-check case membership for a tenant-wide reviewer', async () => {
+    const { store } = makeStore();
+    const caseItemFindMany = vi.fn(async () => []);
+    const { service } = makeService(
+      {
+        caseItem: { findMany: caseItemFindMany },
+        evidenceItem: { findFirst: vi.fn(async () => ({ id: ITEM_A })) },
+        evidenceRelationship: { findMany: vi.fn(async () => [familyRel()]) },
+      },
+      store,
+    );
+    const result = await service.family(makeAuth([TenantRole.reviewer]), ITEM_A);
+    expect(result.items.map((row) => row.item.id)).toEqual([CHILD]);
+    // Reviewers are tenant-wide; filtering related ids by case membership
+    // would hide attachments they are allowed to open by id.
+    expect(caseItemFindMany).not.toHaveBeenCalled();
   });
 });

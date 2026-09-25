@@ -24,7 +24,7 @@ import type { CursorQuery } from '../common/pagination.js';
 import { zodValidate } from '../common/zod-validate.js';
 import { chunk, expandFamilies, inOwnTx, queryInChunks } from '../common/families.js';
 import { enqueueReindex } from '../common/reindex.js';
-import { isCaseRestricted } from '../common/roles.js';
+import { isCaseRestricted, mayViewPrivileged } from '../common/roles.js';
 import { AuditService } from '../audit/audit.service.js';
 import { SelectionService } from '../search/selection.service.js';
 
@@ -766,7 +766,22 @@ export class CasesService {
         caseItems.map((c) => c.evidenceItemId),
         (batch) =>
           tx.tagAssignment.findMany({
-            where: { tenantId: auth.tenantId, evidenceItemId: { in: batch } },
+            where: {
+              tenantId: auth.tenantId,
+              evidenceItemId: { in: batch },
+              // Same privilege rule as search and the case item list: a
+              // reviewer must not learn that a privileged tag was applied, or
+              // how many times, from the tag panel after the items themselves
+              // are hidden.
+              ...(mayViewPrivileged(auth)
+                ? {}
+                : {
+                    tag: { isPrivileged: false },
+                    evidenceItem: {
+                      tagAssignments: { none: { tag: { isPrivileged: true } } },
+                    },
+                  }),
+            },
             include: { tag: true },
           }),
       );
