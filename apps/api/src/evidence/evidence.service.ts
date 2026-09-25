@@ -11,6 +11,7 @@ import {
   EvidenceKind,
   MalwareStatus,
   ParticipantRole,
+  RelationshipKind,
   TenantRole,
   withTenantContext,
   type PrismaClient,
@@ -29,6 +30,18 @@ import { mayReadImport } from '../imports/import-access.js';
 
 const PREVIEW_SAFETY_NOTE =
   'Previews are rendered offline and never load remote content (images, trackers, scripts).';
+
+/**
+ * Parent→child links whose native parent bytes can embed the child.
+ * Family / duplicate / version links do not put child bytes inside the parent
+ * object; container_member and attachments do (PST/ZIP members, MIME parts).
+ * Same concern productions flag as privileged_descendant_container.
+ */
+const NATIVE_CONTAINMENT_KINDS: readonly RelationshipKind[] = [
+  RelationshipKind.container_member,
+  RelationshipKind.attachment,
+  RelationshipKind.inline_attachment,
+];
 
 export interface AuditRecordDto {
   id: string;
@@ -152,6 +165,67 @@ export class EvidenceService {
       }
       return row;
     });
+  }
+
+  /**
+   * True when a descendant reached through a containment relationship carries
+   * a privileged tag. requireItem only looks at the requested id; native of a
+   * clean parent (PST, ZIP, forensic-import source, email with attachments)
+   * would otherwise hand out the privileged child's bytes inside the parent
+   * object. Walk is breadth-first and chunked — a container has no size cap.
+   */
+  private async hasPrivilegedContainedDescendant(
+    tx: TenantScopedTx,
+    tenantId: string,
+    rootId: string,
+  ): Promise<boolean> {
+    let frontier = [rootId];
+    const seen = new Set<string>([rootId]);
+    while (frontier.length > 0) {
+      const children: string[] = [];
+      for (const batch of chunk(frontier, FAMILY_QUERY_CHUNK)) {
+        const rels = await tx.evidenceRelationship.findMany({
+          where: {
+            tenantId,
+            parentId: { in: batch },
+            kind: { in: [...NATIVE_CONTAINMENT_KINDS] },
+          },
+          select: { childId: true },
+        });
+        for (const rel of rels) {
+          if (!seen.has(rel.childId)) {
+            seen.add(rel.childId);
+            children.push(rel.childId);
+          }
+        }
+      }
+      if (children.length === 0) return false;
+      for (const batch of chunk(children, FAMILY_QUERY_CHUNK)) {
+        const privileged = await tx.tagAssignment.count({
+          where: {
+            tenantId,
+            evidenceItemId: { in: batch },
+            tag: { isPrivileged: true },
+          },
+        });
+        if (privileged > 0) return true;
+      }
+      frontier = children;
+    }
+    return false;
+  }
+
+  /**
+   * Callers who may not see privileged material must not download a parent
+   * whose contained children include privileged items. Same 404 shape as
+   * requireItem so probing cannot tell "privileged child inside" from missing.
+   */
+  private async refuseNativeIfPrivilegedContents(auth: AuthContext, id: string): Promise<void> {
+    if (mayViewPrivileged(auth)) return;
+    const blocked = await withTenantContext(this.prisma, auth.tenantId, (tx) =>
+      this.hasPrivilegedContainedDescendant(tx, auth.tenantId, id),
+    );
+    if (blocked) throw new NotFoundException();
   }
 
   async detail(auth: AuthContext, id: string): Promise<EvidenceDetailDto> {
@@ -509,6 +583,9 @@ export class EvidenceService {
         include: { blob: { select: { objectKey: true, sha256: true } } },
       }),
     );
+    // After the item itself is allowed: a clean container still embeds every
+    // member. Refuse before signing a URL when a contained child is privileged.
+    await this.refuseNativeIfPrivilegedContents(auth, id);
     if (!item.blob) {
       throw new ConflictException('this item has no stored native content');
     }
