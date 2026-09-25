@@ -778,7 +778,22 @@ export class CasesService {
         caseItems.map((c) => c.evidenceItemId),
         (batch) =>
           tx.tagAssignment.findMany({
-            where: { tenantId: auth.tenantId, evidenceItemId: { in: batch } },
+            where: {
+              tenantId: auth.tenantId,
+              evidenceItemId: { in: batch },
+              // Same privilege rule as search and the case item list: a
+              // reviewer must not learn that a privileged tag was applied, or
+              // how many times, from the tag panel after the items themselves
+              // are hidden.
+              ...(mayViewPrivileged(auth)
+                ? {}
+                : {
+                    tag: { isPrivileged: false },
+                    evidenceItem: {
+                      tagAssignments: { none: { tag: { isPrivileged: true } } },
+                    },
+                  }),
+            },
             include: { tag: true },
           }),
       );
