@@ -122,6 +122,84 @@ describe('EvidenceService authorization', () => {
     expect(count).not.toHaveBeenCalled();
     expect(presignGet).toHaveBeenCalled();
   });
+
+  it('refuses native of a clean parent when a contained child is privileged', async () => {
+    // requireItem allows the PST/ZIP/email itself; the child emails or
+    // attachments are privileged. Downloading the parent would embed those
+    // bytes. Same shape as a direct privileged read: 404, no URL.
+    const { store, presignGet } = makeStore();
+    const tagCount = vi
+      .fn()
+      // First call: requireItem privileged check on the parent → clean.
+      .mockResolvedValueOnce(0)
+      // Second call: descendant walk finds a privileged child.
+      .mockResolvedValueOnce(1);
+    const { service } = makeService(
+      {
+        evidenceItem: {
+          findFirst: vi
+            .fn()
+            .mockResolvedValueOnce(baseItem({ name: 'mailbox.pst', kind: 'container' }))
+            .mockResolvedValueOnce({ forensicImport: null }),
+        },
+        tagAssignment: { count: tagCount },
+        evidenceRelationship: {
+          findMany: vi.fn(async () => [{ childId: ITEM_B }]),
+        },
+      },
+      store,
+    );
+    await expect(
+      service.native(makeAuth([TenantRole.reviewer]), ITEM_A, false, fakeRequest()),
+    ).rejects.toThrow(NotFoundException);
+    expect(presignGet).not.toHaveBeenCalled();
+  });
+
+  it('still lets a reviewer download a parent with no privileged contained children', async () => {
+    const { store, presignGet } = makeStore();
+    const { service } = makeService(
+      {
+        evidenceItem: {
+          findFirst: vi
+            .fn()
+            .mockResolvedValueOnce(baseItem())
+            .mockResolvedValueOnce({ forensicImport: null }),
+        },
+        tagAssignment: { count: vi.fn(async () => 0) },
+        evidenceRelationship: { findMany: vi.fn(async () => []) },
+      },
+      store,
+    );
+    const result = await service.native(
+      makeAuth([TenantRole.reviewer]),
+      ITEM_A,
+      false,
+      fakeRequest(),
+    );
+    expect(result.url).toContain('https://signed.example');
+    expect(presignGet).toHaveBeenCalled();
+  });
+
+  it('lets a case manager download a parent that contains privileged children', async () => {
+    const { store, presignGet } = makeStore();
+    const findMany = vi.fn();
+    const { service } = makeService(
+      {
+        evidenceItem: {
+          findFirst: vi
+            .fn()
+            .mockResolvedValueOnce(baseItem({ name: 'mailbox.pst', kind: 'container' }))
+            .mockResolvedValueOnce({ forensicImport: null }),
+        },
+        evidenceRelationship: { findMany },
+      },
+      store,
+    );
+    await service.native(makeAuth([TenantRole.case_manager]), ITEM_A, false, fakeRequest());
+    // mayViewPrivileged short-circuits — no descendant walk.
+    expect(findMany).not.toHaveBeenCalled();
+    expect(presignGet).toHaveBeenCalled();
+  });
 });
 
 describe('EvidenceService.native', () => {
@@ -534,7 +612,16 @@ describe('EvidenceService.family — case-restricted ACL on related items', () =
           count: vi.fn(async () => 1),
           findMany: caseItemFindMany,
         },
-        evidenceItem: { findFirst: vi.fn(async () => ({ id: ITEM_A })) },
+        evidenceItem: {
+          findFirst: vi
+            .fn()
+            .mockResolvedValueOnce({ id: ITEM_A })
+            .mockResolvedValueOnce({ forensicImport: null }),
+        },
+        tagAssignment: {
+          count: vi.fn(async () => 0),
+          findMany: vi.fn(async () => []),
+        },
         evidenceRelationship: { findMany: vi.fn(async () => [familyRel()]) },
       },
       store,
@@ -552,7 +639,16 @@ describe('EvidenceService.family — case-restricted ACL on related items', () =
           count: vi.fn(async () => 1),
           findMany: vi.fn(async () => [{ evidenceItemId: CHILD }]),
         },
-        evidenceItem: { findFirst: vi.fn(async () => ({ id: ITEM_A })) },
+        evidenceItem: {
+          findFirst: vi
+            .fn()
+            .mockResolvedValueOnce({ id: ITEM_A })
+            .mockResolvedValueOnce({ forensicImport: null }),
+        },
+        tagAssignment: {
+          count: vi.fn(async () => 0),
+          findMany: vi.fn(async () => []),
+        },
         evidenceRelationship: { findMany: vi.fn(async () => [familyRel()]) },
       },
       store,
@@ -568,7 +664,16 @@ describe('EvidenceService.family — case-restricted ACL on related items', () =
     const { service } = makeService(
       {
         caseItem: { findMany: caseItemFindMany },
-        evidenceItem: { findFirst: vi.fn(async () => ({ id: ITEM_A })) },
+        evidenceItem: {
+          findFirst: vi
+            .fn()
+            .mockResolvedValueOnce({ id: ITEM_A })
+            .mockResolvedValueOnce({ forensicImport: null }),
+        },
+        tagAssignment: {
+          count: vi.fn(async () => 0),
+          findMany: vi.fn(async () => []),
+        },
         evidenceRelationship: { findMany: vi.fn(async () => [familyRel()]) },
       },
       store,
