@@ -213,14 +213,6 @@ if ! "$REPO_ROOT/scripts/migrate.sh" "$TAG" "${MIGRATE_ARGS[@]}"; then
   exit 1
 fi
 
-echo "==> applying database migrations as cdfir_migrator"
-if ! compose run --rm --no-deps api sh -lc \
-  'cd /app && node_modules/.bin/prisma migrate deploy --schema packages/database/prisma/schema.prisma'; then
-  echo "error: database migration failed — application containers were not changed" >&2
-  [ -n "$PREVIOUS_TAG" ] && set_env_value CDFIR_IMAGE_TAG "$PREVIOUS_TAG"
-  exit 1
-fi
-
 echo "==> starting"
 if ! compose up -d "${SERVICES[@]}"; then
   echo "error: containers failed to start" >&2
