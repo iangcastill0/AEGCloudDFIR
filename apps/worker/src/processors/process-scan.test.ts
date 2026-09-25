@@ -132,6 +132,82 @@ describe('processScan', () => {
     );
   });
 
+  it('does not burn the analyze key when an import source scan fails', async () => {
+    const importId = '99999999-9999-4999-8999-999999999999';
+    const f = fakeCtx();
+    arm(f, { importId, sourceForImport: { id: importId } });
+    const broken: ClamAvClient = {
+      version: vi.fn().mockRejectedValue(new Error('ECONNREFUSED')),
+      scanStream: vi.fn(),
+    };
+
+    await processScan(f.ctx, payload, { clamFactory: () => broken });
+
+    expect(createManyRows(f.tx.outboxEvent).map((row) => row.topic)).not.toContain(
+      'import.analyze',
+    );
+    expect(f.tx.forensicImport.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { status: 'failed', error: 'source malware scan did not complete' },
+      }),
+    );
+  });
+
+  it('a later clean rescan of an import source still queues Crush analysis', async () => {
+    const importId = '99999999-9999-4999-8999-999999999999';
+    const f = fakeCtx();
+    arm(f, {
+      importId,
+      sourceForImport: { id: importId },
+      malwareScans: [{ id: 's1', result: 'scan_failed' }],
+    });
+
+    await processScan(f.ctx, payload, {
+      clamFactory: () => clam({ infected: false, signature: '' }),
+    });
+
+    expect(createManyRows(f.tx.outboxEvent)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          topic: 'import.analyze',
+          payload: { tenantId: TENANT, importId },
+        }),
+      ]),
+    );
+  });
+
+  it('still queues Crush analysis when ClamAV is off and the source records scan_failed', async () => {
+    const importId = '99999999-9999-4999-8999-999999999999';
+    const f = fakeCtx({ config: { CDFIR_CLAMAV_ENABLED: false } });
+    arm(f, { importId, sourceForImport: { id: importId } });
+
+    await processScan(f.ctx, payload);
+
+    expect(createManyRows(f.tx.outboxEvent)).toEqual(
+      expect.arrayContaining([expect.objectContaining({ topic: 'import.analyze' })]),
+    );
+  });
+
+  it('gives each import-source scan a fresh analyze key so Retry is not dropped', async () => {
+    const importId = '99999999-9999-4999-8999-999999999999';
+    const f = fakeCtx({ config: { CDFIR_CLAMAV_ENABLED: false } });
+    arm(f, { importId, sourceForImport: { id: importId } });
+    await processScan(f.ctx, payload);
+
+    arm(f, {
+      importId,
+      sourceForImport: { id: importId },
+      malwareScans: [{ id: 's1', result: 'scan_failed' }],
+    });
+    await processScan(f.ctx, payload);
+
+    const keys = createManyRows(f.tx.outboxEvent)
+      .filter((row) => row.topic === 'import.analyze')
+      .map((row) => row.dedupKey);
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).not.toEqual(keys[1]);
+  });
+
   it('queues member processing only after that extracted member scans clean', async () => {
     const f = fakeCtx();
     arm(f, {
