@@ -334,13 +334,15 @@ export class TenantsService {
         where: { tenantId_userId: { tenantId: found.id, userId } },
         select: { id: true, status: true },
       });
-      // The standing link is for people who are not in the org yet. It is
-      // copied onto the dashboard and Members page and pasted into Slack.
-      // Adding reviewer to someone who is already a member would let a
-      // read_only (or disabled) account promote itself by opening that URL.
+      // Standing links are for first-time join only. The URL is copied onto
+      // the dashboard and pasted into Slack. Re-running it must not add
+      // reviewer onto an existing membership, and must not re-activate a
+      // disabled member.
       if (existing) {
         if (existing.status !== MembershipStatus.active) {
-          throw new ForbiddenException('you no longer have access to this organization');
+          throw new ForbiddenException(
+            'your membership in this organization is disabled; ask an admin to restore access',
+          );
         }
         return { tenantId: found.id, name: found.name, slug: found.slug };
       }
