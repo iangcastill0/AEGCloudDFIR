@@ -559,14 +559,15 @@ export class ExportsService {
  * evidence sets together.
  */
 export function downloadFolderName(name: string, exportId: string): string {
+  // Letters, numbers, dot, underscore, hyphen only. Anything else — including
+  // $() and backticks — would run when a download script assigns this name.
   const safe = name
     .normalize('NFKD')
-    // Windows forbids \ / : * ? " < > | ; trailing dots and spaces break it too.
-    .replace(/[\\/:*?"<>|]+/g, '-')
-    .replace(/\s+/g, '-')
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
     .replace(/-+/g, '-')
-    .replace(/^[-.]+|[-.\s]+$/g, '')
+    .replace(/^[-.]+|[-.]+$/g, '')
     .slice(0, 60);
   const stem = safe === '' ? 'export' : safe;
-  return `${stem}-${exportId.slice(0, 8)}`;
+  const suffix = exportId.replace(/[^A-Za-z0-9]/g, '').slice(0, 8);
+  return `${stem}-${suffix === '' ? 'export' : suffix}`;
 }
