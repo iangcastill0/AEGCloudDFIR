@@ -232,7 +232,9 @@ export function keyClass(key: string): KeyClass {
  * than sniffed from bytes: the column is a fact, a guess is not.
  */
 export function archiveExtensionFor(kind: string): string {
-  return kind === 'pst' ? 'pst' : 'zip';
+  if (kind === 'pst') return 'pst';
+  if (kind === 'csv') return 'csv';
+  return 'zip';
 }
 
 /**
@@ -241,16 +243,26 @@ export function archiveExtensionFor(kind: string): string {
  * PST parts are kept apart from zip parts so an export cannot end up with both
  * under one prefix, which would make the "walk until a part is missing"
  * convention used by the API and the backfill script read the wrong files.
+ * CSV is a single object under `export-csv`, not a split archive; treating it
+ * as `archive` made download look for `export-part001.zip` and never offer
+ * the real `export.csv`.
  */
 export function derivativeTypeFor(kind: string): string {
-  return kind === 'pst' ? 'pst-archive' : 'archive';
+  if (kind === 'pst') return 'pst-archive';
+  if (kind === 'csv') return 'export-csv';
+  return 'archive';
 }
 
 /**
  * Part filenames are part of the contract, not cosmetics: a client writes them
  * into the download folder and `hashes.txt` names them, so every producer and
  * every consumer must agree. One function, used by all of them.
+ *
+ * A CSV export is one file, always named `export.csv`. Numbered zip/pst part
+ * names would not match the object the worker wrote, so download signed a
+ * URL for a file that does not exist.
  */
 export function archivePartFilename(kind: string, partNumber: number): string {
+  if (kind === 'csv') return 'export.csv';
   return `export-part${String(partNumber).padStart(3, '0')}.${archiveExtensionFor(kind)}`;
 }
