@@ -153,7 +153,7 @@ describe('TenantsService.createInvite', () => {
       fakeRequest(),
     );
     expect(result.email).toBe('pat@example.com');
-    expect(result.inviteUrl).toMatch(/^https:\/\/app\.ev\.test\/join\?token=/);
+    expect(result.inviteUrl).toMatch(/^https:\/\/app\.ev\.test\/signup\?token=/);
     const stored = create.mock.calls[0]?.[0] as { data: { tokenHash: string } };
     const token = new URL(result.inviteUrl).searchParams.get('token') ?? '';
     expect(stored.data.tokenHash).toBe(hashInviteToken(token));
@@ -317,7 +317,9 @@ describe('TenantsService join link', () => {
     });
     const result = await service.getOrCreateJoinLink(makeAuth([TenantRole.org_admin]));
     expect(result.role).toBe(TenantRole.reviewer);
-    expect(result.inviteUrl).toBe('https://app.ev.test/join?token=standing-token-value-32chars!!');
+    expect(result.inviteUrl).toBe(
+      'https://app.ev.test/signup?token=standing-token-value-32chars!!',
+    );
   });
 
   it('mints a token when the tenant has none yet', async () => {

@@ -127,7 +127,7 @@ export default function TenantPickerPage() {
             ) : null}
 
             <p style={{ marginTop: '1.5rem' }}>
-              <Link href="/join">I have a join link</Link>
+              <Link href="/signup">I have a sign-up link</Link>
             </p>
           </>
         )}

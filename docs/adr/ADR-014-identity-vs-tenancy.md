@@ -27,10 +27,11 @@ create users.
 with no memberships can create a tenant (`POST /api/v1/tenants`, behind
 `CDFIR_SELF_SERVE_SIGNUP`) and becomes that tenant’s `org_admin`, or redeem a
 standing org join link (`POST /auth/join`). Each tenant has one standing
-`joinToken`, shown on Members. Opening that URL and signing up (or in) adds
-the person as a reviewer. One-time email invites still exist as a secondary
-path. Bootstrap CLI remains the way to grant the first **platform**
-administrator and to recover an instance that has lost its last admin.
+`joinToken`, shown on Members. That URL is `{WEB}/signup?token=…` and opens
+the public sign-up page. After they create an account (or sign in), they are
+added as a reviewer. One-time email invites still exist as a secondary path.
+Bootstrap CLI remains the way to grant the first **platform** administrator
+and to recover an instance that has lost its last admin.
 
 The old “no first user becomes admin” rule still applies to the **server**. It
 does not apply to a new customer’s own tenant.

@@ -3,10 +3,24 @@ import Link from 'next/link';
 import { EmptyState, Notice, Table } from '@aeg-clouddfir/ui';
 import { QueryBoundary, StatusPill } from '@/components/shared';
 import { SignupLinkPanel } from '@/components/SignupLinkPanel';
+import { SignupView } from '@/components/SignupView';
 import { useCollections, useExports, useMe, useProductions, isCollectionActive } from '@/lib/hooks';
 import { formatDateTime } from '@/lib/format';
 
 export default function DashboardPage() {
+  const me = useMe();
+  if (me.isPending) {
+    return (
+      <p role="status" aria-live="polite">
+        Loading…
+      </p>
+    );
+  }
+  if (!me.data) return <SignupView />;
+  return <AuthenticatedDashboard />;
+}
+
+function AuthenticatedDashboard() {
   const me = useMe();
   const collections = useCollections();
   const exports = useExports();

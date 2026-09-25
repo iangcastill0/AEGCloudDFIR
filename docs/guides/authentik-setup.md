@@ -71,9 +71,10 @@ configure`). There is no confirmation email. AEG-CloudDFIR deliberately
 
 - `curl $CDFIR_OIDC_ISSUER.well-known/openid-configuration` returns metadata whose
   `issuer` exactly equals `CDFIR_OIDC_ISSUER` (trailing slash matters).
-- The Authentik login page shows a Sign up link. Completing enrollment (name,
-  email, password, then a TOTP app) returns to `{API}/auth/callback` as a
-  normal OIDC login.
+- The app’s public door is `{WEB}/signup`. The Authentik login page also shows
+  a Sign up link. Completing enrollment (name, email, password, then a TOTP
+  app) returns to `{API}/auth/callback` as a normal OIDC login. An org invite
+  is `{WEB}/signup?token=…` and lands on that same page.
 - Log in via the web app; `GET /api/v1/me` shows your identity; an
   `auth.tenant_selected` audit event appears after choosing a tenant. If
   `CDFIR_SELF_SERVE_SIGNUP=true`, a person with no memberships can create an
