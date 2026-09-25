@@ -514,4 +514,25 @@ describe('scripts/deploy-staging.sh gets the same treatment', () => {
     expect(source).toContain('--env-file "$ENV_FILE"');
     expect(source).not.toMatch(/--api-service api\s/);
   });
+
+  it('applies through migrate.sh once, and never compose-runs the live api box', () => {
+    // 2026-09-24: a leftover `compose run` after migrate.sh had no --name.
+    // Staging pins container_name: cdfir-staging-api, so that second run hit
+    // the live API box, exited 1, and rolled the tag back. Both deploys of
+    // d97edc9 died there after the new images were already on disk.
+    const leftover =
+      'cd /app && node_modules/.bin/prisma migrate deploy --schema packages/database/prisma/schema.prisma';
+    expect(readFileSync(DEPLOY_STAGING_SH, 'utf8')).not.toContain(leftover);
+    expect(readFileSync(DEPLOY_SH, 'utf8')).not.toContain(leftover);
+
+    const f = makeStagingFake();
+    const target = join(f.root, 'scripts', 'deploy-staging.sh');
+    writeStub(target, readFileSync(DEPLOY_STAGING_SH, 'utf8'));
+    writeStub(join(f.root, 'scripts', 'migrate.sh'), readFileSync(MIGRATE_SH, 'utf8'));
+    const r = run(target, ['sha-new11'], f);
+    expect(r.code).toBe(0);
+    const deploys = r.docker.filter((c) => c.includes('prisma migrate deploy'));
+    expect(deploys).toHaveLength(1);
+    expect(deploys[0]).toContain('--name');
+  });
 });
