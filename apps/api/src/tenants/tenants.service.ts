@@ -30,8 +30,9 @@ const TENANT_CREATE_COOLDOWN_MS = 15 * 60 * 1000;
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const STANDING_JOIN_ROLE = TenantRole.reviewer;
 
-function signupInviteUrl(webPublicUrl: string, token: string): string {
-  return `${webPublicUrl}/signup?token=${encodeURIComponent(token)}`;
+function signupInviteUrl(apiPublicUrl: string, token: string): string {
+  const next = `/signup?token=${encodeURIComponent(token)}`;
+  return `${apiPublicUrl}/auth/login?redirectTo=${encodeURIComponent(next)}`;
 }
 
 @Injectable()
@@ -177,7 +178,7 @@ export class TenantsService {
       return created;
     });
 
-    const inviteUrl = signupInviteUrl(this.config.CDFIR_WEB_PUBLIC_URL, token);
+    const inviteUrl = signupInviteUrl(this.config.CDFIR_API_PUBLIC_URL, token);
     return {
       inviteId: invite.id,
       email: invite.email,
@@ -202,7 +203,7 @@ export class TenantsService {
       return minted;
     });
     return {
-      inviteUrl: signupInviteUrl(this.config.CDFIR_WEB_PUBLIC_URL, token),
+      inviteUrl: signupInviteUrl(this.config.CDFIR_API_PUBLIC_URL, token),
       role: STANDING_JOIN_ROLE,
     };
   }
@@ -228,7 +229,7 @@ export class TenantsService {
       });
     });
     return {
-      inviteUrl: signupInviteUrl(this.config.CDFIR_WEB_PUBLIC_URL, token),
+      inviteUrl: signupInviteUrl(this.config.CDFIR_API_PUBLIC_URL, token),
       role: STANDING_JOIN_ROLE,
     };
   }
