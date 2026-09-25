@@ -28,6 +28,7 @@ import type { CursorQuery } from '../common/pagination.js';
 import { EVIDENCE_STORE, PRISMA } from '../common/tokens.js';
 import { zodValidate } from '../common/zod-validate.js';
 import { AuditService } from '../audit/audit.service.js';
+import { mayViewPrivileged } from '../common/roles.js';
 import { mayReadImport } from './import-access.js';
 
 const ATTACH_PAGE = 1000;
@@ -185,6 +186,32 @@ export class ImportsService {
     };
   }
 
+  /**
+   * Same privilege fence as evidence requireItem / search: callers who may not
+   * see privileged material must not read an artifact whose evidence item
+   * carries a privileged tag. Folders (no evidenceItemId) stay visible.
+   */
+  private artifactVisibilityWhere(auth: AuthContext):
+    | {
+        OR: [
+          { evidenceItemId: null },
+          { evidenceItem: { tagAssignments: { none: { tag: { isPrivileged: true } } } } },
+        ];
+      }
+    | Record<string, never> {
+    if (mayViewPrivileged(auth)) return {};
+    return {
+      OR: [
+        { evidenceItemId: null },
+        {
+          evidenceItem: {
+            tagAssignments: { none: { tag: { isPrivileged: true } } },
+          },
+        },
+      ],
+    };
+  }
+
   async upload(auth: AuthContext, request: FastifyRequest): Promise<ImportSummary> {
     if (!request.isMultipart()) {
       throw new BadRequestException('expected a multipart/form-data request with one file part');
@@ -329,7 +356,11 @@ export class ImportsService {
     return withTenantContext(this.prisma, auth.tenantId, async (tx) => {
       await this.requireImport(tx, auth, id);
       const rows = await tx.importArtifact.findMany({
-        where: { tenantId: auth.tenantId, importId: id },
+        where: {
+          tenantId: auth.tenantId,
+          importId: id,
+          ...this.artifactVisibilityWhere(auth),
+        },
         orderBy: { id: 'asc' },
         take: page.limit + 1,
         ...(page.cursor ? { cursor: { id: page.cursor }, skip: 1 } : {}),
@@ -364,15 +395,19 @@ export class ImportsService {
     return withTenantContext(this.prisma, auth.tenantId, async (tx) => {
       await this.requireImport(tx, auth, id);
       const literalQuery = escapeLikeQuery(input.q);
+      const matchClause = {
+        OR: [
+          { name: { contains: literalQuery, mode: 'insensitive' as const } },
+          { path: { contains: literalQuery, mode: 'insensitive' as const } },
+          { textIndex: { contains: literalQuery, mode: 'insensitive' as const } },
+        ],
+      };
+      const visibility = this.artifactVisibilityWhere(auth);
       const rows = await tx.importArtifact.findMany({
         where: {
           tenantId: auth.tenantId,
           importId: id,
-          OR: [
-            { name: { contains: literalQuery, mode: 'insensitive' } },
-            { path: { contains: literalQuery, mode: 'insensitive' } },
-            { textIndex: { contains: literalQuery, mode: 'insensitive' } },
-          ],
+          ...('OR' in visibility ? { AND: [visibility, matchClause] } : matchClause),
         },
         orderBy: { id: 'asc' },
         take: input.limit + 1,
@@ -405,7 +440,12 @@ export class ImportsService {
     const row = await withTenantContext(this.prisma, auth.tenantId, async (tx) => {
       await this.requireImport(tx, auth, id);
       const found = await tx.importArtifact.findFirst({
-        where: { id: artifactId, importId: id, tenantId: auth.tenantId },
+        where: {
+          id: artifactId,
+          importId: id,
+          tenantId: auth.tenantId,
+          ...this.artifactVisibilityWhere(auth),
+        },
       });
       if (found === null) throw new NotFoundException();
       return found;

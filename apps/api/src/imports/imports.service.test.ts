@@ -471,3 +471,75 @@ describe('ImportsService', () => {
     expect(artifactFindMany).not.toHaveBeenCalled();
   });
 });
+
+describe('ImportsService privileged artifact fence', () => {
+  const importId = '99999999-9999-4999-8999-999999999999';
+  const artifactId = 'aaaa1111-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+
+  function memberImport() {
+    return {
+      id: importId,
+      createdById: '88888888-8888-4888-8888-888888888888',
+      cases: [
+        {
+          caseId: CASE_ID,
+          case: { members: [{ membershipId: MEMBERSHIP_ID }] },
+        },
+      ],
+    };
+  }
+
+  it('hides privileged artifacts from a reviewer on list, search, and detail', async () => {
+    const artifactFindMany = vi.fn().mockResolvedValue([]);
+    const artifactFindFirst = vi.fn().mockResolvedValue(null);
+    const getStream = vi.fn();
+    const service = new ImportsService(
+      fakePrisma({
+        forensicImport: { findFirst: vi.fn().mockResolvedValue(memberImport()) },
+        importArtifact: { findMany: artifactFindMany, findFirst: artifactFindFirst },
+      }),
+      { ...store(), getStream } as never,
+      fakeAudit().service,
+    );
+    const auth = makeAuth([TenantRole.reviewer]);
+
+    await service.artifacts(auth, importId, { limit: 50 });
+    await service.search(auth, importId, { q: 'secret', limit: 50 });
+    await expect(service.artifact(auth, importId, artifactId)).rejects.toThrow(NotFoundException);
+
+    const visibility = {
+      OR: [
+        { evidenceItemId: null },
+        {
+          evidenceItem: {
+            tagAssignments: { none: { tag: { isPrivileged: true } } },
+          },
+        },
+      ],
+    };
+    expect(artifactFindMany.mock.calls[0]?.[0]?.where).toMatchObject(visibility);
+    expect(artifactFindMany.mock.calls[1]?.[0]?.where).toMatchObject({
+      AND: expect.arrayContaining([expect.objectContaining(visibility)]),
+    });
+    expect(artifactFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining(visibility) }),
+    );
+    expect(getStream).not.toHaveBeenCalled();
+  });
+
+  it('does not filter privileged artifacts for a case manager', async () => {
+    const artifactFindMany = vi.fn().mockResolvedValue([]);
+    const service = new ImportsService(
+      fakePrisma({
+        forensicImport: { findFirst: vi.fn().mockResolvedValue(memberImport()) },
+        importArtifact: { findMany: artifactFindMany },
+      }),
+      store() as never,
+      fakeAudit().service,
+    );
+
+    await service.artifacts(makeAuth([TenantRole.case_manager]), importId, { limit: 50 });
+    const where = artifactFindMany.mock.calls[0]?.[0]?.where as Record<string, unknown>;
+    expect(where).not.toHaveProperty('OR');
+  });
+});
