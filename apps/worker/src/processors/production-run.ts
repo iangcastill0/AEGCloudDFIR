@@ -31,6 +31,7 @@ import {
   type SortableProductionItem,
 } from '@aeg-clouddfir/production';
 import { sanitizeError, type WorkerContext } from '../context.js';
+import { chunkIds, queryInChunks } from '../chunked.js';
 import { readAllCapped } from '../streams.js';
 import type { ProductionRunPayload } from './payloads.js';
 
@@ -190,21 +191,28 @@ export async function processProductionRun(
       throw new Error('production run has no bates reservation');
     }
 
-    const items = await withTenantContext(ctx.prisma, tenantId, (tx) =>
-      tx.evidenceItem.findMany({
-        where: { id: { in: params.selectionItemIds } },
-        include: {
-          blob: true,
-          custodian: { select: { email: true } },
-          emailMetadata: true,
-          participants: true,
-          extractedTexts: true,
-          redactions: { where: { stage: 'final' } },
-          tagAssignments: { select: { tagId: true, tag: { select: { name: true } } } },
-          childRelationships: { select: { parentId: true, kind: true } },
-          parentRelationships: { select: { childId: true, kind: true } },
-        },
-      }),
+    // selectionItemIds is frozen from a case/tag/search with no ceiling — a
+    // 43,379-item collection already overshoots Prisma's 32,767 bind limit if
+    // loaded in one `in:` list. The API side of this path was chunked; the
+    // worker was not. Bates is reserved before this runs, so an unchunked load
+    // fails the run after the range is spent and never retries (status=failed).
+    const items = await queryInChunks(params.selectionItemIds, (batch) =>
+      withTenantContext(ctx.prisma, tenantId, (tx) =>
+        tx.evidenceItem.findMany({
+          where: { id: { in: batch } },
+          include: {
+            blob: true,
+            custodian: { select: { email: true } },
+            emailMetadata: true,
+            participants: true,
+            extractedTexts: true,
+            redactions: { where: { stage: 'final' } },
+            tagAssignments: { select: { tagId: true, tag: { select: { name: true } } } },
+            childRelationships: { select: { parentId: true, kind: true } },
+            parentRelationships: { select: { childId: true, kind: true } },
+          },
+        }),
+      ),
     );
 
     const sortable: (SortableProductionItem & { loaded: LoadedItem })[] = items.map((item) => {
@@ -633,10 +641,12 @@ export async function processProductionRun(
         }),
       );
     }
-    if (exceptions.length > 0) {
+    // Same bind ceiling as the item load: each row is several parameters, so a
+    // large failure set in one createMany dies after the production is rendered.
+    for (const batch of chunkIds(exceptions, BATCH)) {
       await withTenantContext(ctx.prisma, tenantId, (tx) =>
         tx.productionException.createMany({
-          data: exceptions.map((e) => ({
+          data: batch.map((e) => ({
             tenantId,
             productionRunId,
             evidenceItemId: e.evidenceItemId,

@@ -6,6 +6,7 @@ import { pgText, pgTextList } from '../pg-text.js';
 import { incrementProgress, recordException } from '../progress.js';
 import { QUEUES, dedupKeys } from '../queues.js';
 import { PayloadTooLargeError, readAllCapped } from '../streams.js';
+import { isObjectNotFoundError, recordMissingObject } from './missing-object.js';
 import {
   loadEmailParser,
   type EmailParser,
@@ -88,16 +89,31 @@ export async function processParse(
   if (DONE_STATUSES.has(item.processingStatus)) return; // already parsed
   if (item.blob === null) return;
 
+  const bucket =
+    item.blob.storageClass === 'quarantine' ? ('quarantine' as const) : ('evidence' as const);
+
   let raw: Buffer;
   try {
-    const stream = await ctx.store.getStream(
-      item.blob.storageClass === 'quarantine' ? 'quarantine' : 'evidence',
-      item.blob.objectKey,
-    );
+    const stream = await ctx.store.getStream(bucket, item.blob.objectKey);
     raw = await readAllCapped(stream, MAX_EMAIL_BYTES);
   } catch (err) {
     if (err instanceof PayloadTooLargeError) {
       await markException(ctx, item, payload, 'unsupported_item', sanitizeError(err));
+      return;
+    }
+    // Parse is the primary reader of email bytes. Scan/extract/ocr/preview all
+    // name a missing object, but this path still rethrew into BullMQ retries —
+    // so with ClamAV off (scan never opens the object) a vanished .eml stayed a
+    // generic job failure and never reached the exceptions ledger.
+    if (isObjectNotFoundError(err)) {
+      await recordMissingObject(ctx, {
+        tenantId,
+        item,
+        version,
+        stage: 'parse',
+        bucket,
+        objectKey: item.blob.objectKey,
+      });
       return;
     }
     throw err;

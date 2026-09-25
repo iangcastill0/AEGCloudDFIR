@@ -103,7 +103,14 @@ function arm(f: FakeCtx, frozen: Record<string, unknown>, items: Record<string, 
       { id: 'br-1', prefix: 'ABC', suffix: '', digits: 6, startNumber: 1n, endNumber: 1000n },
     ],
   });
-  f.tx.evidenceItem.findMany.mockResolvedValue(items);
+  // Honour the `in:` batch. queryInChunks calls findMany once per chunk; a
+  // mock that always returns the full list would invent duplicates and hide a
+  // regression that stopped chunking.
+  const byId = new Map(items.map((row) => [row['id'] as string, row]));
+  f.tx.evidenceItem.findMany.mockImplementation((args: Record<string, unknown>) => {
+    const ids = (args['where'] as { id: { in: string[] } }).id.in;
+    return Promise.resolve(ids.map((id) => byId.get(id)).filter((row) => row !== undefined));
+  });
 }
 
 function createdProductionItems(f: FakeCtx): Record<string, unknown>[] {
@@ -239,6 +246,76 @@ describe('processProductionRun', () => {
       data: Record<string, unknown>;
     };
     expect(finalUpdate.data['status']).toBe('failed');
+  });
+
+  it('loads the frozen selection in chunks under the Prisma bind ceiling', async () => {
+    // 12,000 ids is past one QUERY_ID_CHUNK (5,000) and well under the 32,767
+    // ceiling, so an unchunked load would still "work" in a unit test that
+    // never hits Prisma — counting findMany calls is what catches the skip.
+    const count = 12_000;
+    const ids = Array.from(
+      { length: count },
+      (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`,
+    );
+    const f = fakeCtx();
+    // Bates end must cover the run; default reservation only goes to 1000.
+    f.tx.productionRun.findUnique.mockResolvedValue({
+      id: RUN_ID,
+      productionId: PRODUCTION_ID,
+      status: 'queued',
+      startedAt: null,
+      frozenParameters: params({ selectionItemIds: ids }),
+      production: { id: PRODUCTION_ID },
+      batesReservations: [
+        {
+          id: 'br-1',
+          prefix: 'ABC',
+          suffix: '',
+          digits: 6,
+          startNumber: 1n,
+          endNumber: BigInt(count * 3),
+        },
+      ],
+    });
+    const seen: number[] = [];
+    f.tx.evidenceItem.findMany.mockImplementation((args: Record<string, unknown>) => {
+      const batch = (args['where'] as { id: { in: string[] } }).id.in;
+      seen.push(batch.length);
+      return Promise.resolve(
+        batch.map((id) => ({
+          id,
+          kind: 'file',
+          name: id,
+          extension: 'pdf',
+          mimeType: 'application/pdf',
+          size: 1n,
+          sha256: '',
+          sourcePath: '',
+          primaryDate: null,
+          sourceCreatedAt: null,
+          sourceModifiedAt: null,
+          blob: null,
+          custodian: { email: 'user@example.com' },
+          emailMetadata: null,
+          participants: [],
+          extractedTexts: [],
+          redactions: [],
+          tagAssignments: [],
+          childRelationships: [],
+          parentRelationships: [],
+        })),
+      );
+    });
+
+    await processProductionRun(f.ctx, payload, deps());
+
+    expect(seen.length).toBeGreaterThan(1);
+    expect(Math.max(...seen)).toBeLessThanOrEqual(5_000);
+    expect(seen.reduce((a, b) => a + b, 0)).toBe(count);
+    const finalUpdate = f.tx.productionRun.update.mock.calls.at(-1)?.[0] as {
+      data: Record<string, unknown>;
+    };
+    expect(finalUpdate.data['status']).toBe('ready');
   });
 });
 

@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
-import { CollectionStatus, ConnectorStatus, TenantRole } from '@aeg-clouddfir/database';
+import {
+  CollectionStatus,
+  ConnectorStatus,
+  MalwareStatus,
+  ProcessingStatus,
+  TenantRole,
+} from '@aeg-clouddfir/database';
 import {
   collectionPhaseProgress,
   collectionThroughputPace,
@@ -796,15 +802,73 @@ describe('CollectionsService.action — retry covers processing exceptions', () 
     const { service, deleteMany } = retryService({
       exceptedItems: [{ id: EXCEPTED_ID, version: 1 }],
       ledger: [
-        { id: 'exc-mine', detail: { evidenceItemId: EXCEPTED_ID } },
-        { id: 'exc-other', detail: { evidenceItemId: ITEM_A } },
-        { id: 'exc-legacy', detail: {} },
+        { id: 'exc-mine', kind: 'unsupported_item', detail: { evidenceItemId: EXCEPTED_ID } },
+        { id: 'exc-other', kind: 'unsupported_item', detail: { evidenceItemId: ITEM_A } },
+        { id: 'exc-legacy', kind: 'other', detail: {} },
       ],
     });
     await service.action(auth, COLLECTION_ID, 'retry', fakeRequest());
     // An unrelated item's exception, and a legacy row that cannot be matched,
     // must survive: silently dropping them would understate the exceptions.
     expect(deleteMany).toHaveBeenCalledWith({ where: { id: { in: ['exc-mine'] } } });
+  });
+
+  it('leaves object_missing items alone — extract cannot restore absent bytes', async () => {
+    // PR #13 marks vanished natives as processingStatus=exception. The Retry
+    // button used to re-queue extract for every exception, clear the ledger,
+    // and leave emails (and already-extracted files) pending forever. Absent
+    // bytes must stay named in the ledger until an operator acts on them.
+    const findMany = vi.fn(async () => []);
+    const outboxCreateMany = vi.fn(async () => ({}));
+    const updateMany = vi.fn(async () => ({}));
+    const deleteMany = vi.fn(async () => ({}));
+    const { service } = makeService({
+      collection: {
+        findFirst: vi.fn(async () => ({
+          id: COLLECTION_ID,
+          status: CollectionStatus.completed,
+        })),
+        update: vi.fn(async () => ({})),
+      },
+      collectionItem: {
+        findMany: vi.fn(async () => []),
+        updateMany: vi.fn(async () => ({ count: 0 })),
+      },
+      evidenceItem: { findMany, updateMany },
+      collectionException: { findMany: vi.fn(async () => []), deleteMany },
+      outboxEvent: { createMany: outboxCreateMany },
+    });
+
+    const result = await service.action(auth, COLLECTION_ID, 'retry', fakeRequest());
+
+    expect(result.retriedProcessing).toBe(0);
+    expect(outboxCreateMany).not.toHaveBeenCalled();
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(deleteMany).not.toHaveBeenCalled();
+    // The query itself must refuse object_missing, not rely on post-filtering.
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          processingStatus: ProcessingStatus.exception,
+          malwareStatus: { not: MalwareStatus.object_missing },
+          NOT: { processingDetail: { startsWith: 'evidence object is MISSING' } },
+        }),
+      }),
+    );
+  });
+
+  it('never deletes an object_missing ledger row even when clearing siblings', async () => {
+    const { service, deleteMany } = retryService({
+      exceptedItems: [{ id: EXCEPTED_ID, version: 1 }],
+      ledger: [
+        { id: 'exc-extract', kind: 'unsupported_item', detail: { evidenceItemId: EXCEPTED_ID } },
+        // Same evidence item also has an object_missing row (scan and extract
+        // both noticed). Clearing it would erase the only honest record.
+        { id: 'exc-missing', kind: 'object_missing', detail: { evidenceItemId: EXCEPTED_ID } },
+      ],
+    });
+    await service.action(auth, COLLECTION_ID, 'retry', fakeRequest());
+    expect(deleteMany).toHaveBeenCalledWith({ where: { id: { in: ['exc-extract'] } } });
   });
 
   it('does not touch the ledger when there is nothing to retry', async () => {

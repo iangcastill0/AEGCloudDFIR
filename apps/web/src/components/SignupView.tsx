@@ -14,28 +14,40 @@ export function SignupView() {
   const me = useMe();
   const join = useJoinTenant();
   const [token, setToken] = useState('');
+  // URL token is read in an effect (window is unavailable during SSR). Until
+  // that runs, a cached `me` must not redirect — otherwise /signup?token=…
+  // for a signed-in user loses the invite and never calls /auth/join.
+  const [tokenReady, setTokenReady] = useState(false);
   const [autoTried, setAutoTried] = useState(false);
   const mutate = join.mutate;
   const joinPending = join.isPending;
   const joinSuccess = join.isSuccess;
 
   useEffect(() => {
-    const fromUrl = tokenFromWindow();
-    if (fromUrl) setToken(fromUrl);
+    setToken(tokenFromWindow());
+    setTokenReady(true);
   }, []);
 
   useEffect(() => {
-    if (!me.data || token) return;
+    if (!tokenReady || !me.data || token) return;
     window.location.assign(me.data.tenant ? '/' : '/auth/tenant');
-  }, [me.data, token]);
+  }, [tokenReady, me.data, token]);
 
   useEffect(() => {
-    if (autoTried || !token || me.isPending || !me.data || joinPending || joinSuccess) {
+    if (
+      !tokenReady ||
+      autoTried ||
+      !token ||
+      me.isPending ||
+      !me.data ||
+      joinPending ||
+      joinSuccess
+    ) {
       return;
     }
     setAutoTried(true);
     mutate(token, { onSuccess: () => window.location.assign('/') });
-  }, [autoTried, token, me.isPending, me.data, joinPending, joinSuccess, mutate]);
+  }, [tokenReady, autoTried, token, me.isPending, me.data, joinPending, joinSuccess, mutate]);
 
   if (me.isPending) {
     return (
