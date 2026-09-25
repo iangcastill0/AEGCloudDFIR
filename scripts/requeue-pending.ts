@@ -69,10 +69,10 @@ function nextStage(status: string, kind: string, mimeType = ''): Stage | null {
     case 'parsed':
       // Only emails reach 'parsed', and their text is already written.
       return { topic: 'search.index', stage: 'index' };
-    case 'extracted': // Same cost-class split as process-extract's ocrOutboxRows: images belong
+    // Same cost-class split as process-extract's ocrOutboxRows: images belong
     // on the image lane. Routing them onto process.ocr recreates the blockage
     // the split removed (tens of thousands of images in front of PDFs).
-    {
+    case 'extracted': {
       const mime = (mimeType.split(';')[0] ?? '').trim().toLowerCase();
       return mime.startsWith('image/')
         ? { topic: 'process.ocr.image', stage: 'ocr' }
