@@ -1158,7 +1158,6 @@ export class CollectionsService {
           custodianId: true,
           source: true,
           providerItemId: true,
-          attempts: true,
           evidenceItemId: true,
         },
         orderBy: { id: 'asc' },
@@ -1172,14 +1171,22 @@ export class CollectionsService {
       // Only items with nothing preserved go back to the provider, and those
       // keep the original per-round cap: each one is a real API call.
       const failedItems = allFailed.filter((item) => !hasEvidence(item)).slice(0, RETRY_ITEM_CAP);
-      // Worker payload/dedup contract: item:{coll}:{cust}:{source}:{provId}
-      // plus an :a{attempts} suffix so a retry round gets a fresh dedup key.
+      // A dedup key works once, ever. The stall sweeper already wrote
+      // :a{attempts} for these items when it recovered them, and a first
+      // fetch-page used :a0. Reusing :a{attempts} here is dropped by
+      // skipDuplicates, the API still reports retriedItems, and nothing
+      // is queued.
+      //
+      // Finalize only waits on discovered/fetching/preserved. Leaving the
+      // rows 'failed' lets it seal as soon as status goes back to fetching.
+      // fetch-item then sees a non-fetching collection and drops the job.
+      const fetchRound = Date.now();
       for (const batch of chunk(failedItems, RETRY_BATCH_SIZE)) {
         await tx.outboxEvent.createMany({
           data: batch.map((item) => ({
             tenantId: auth.tenantId,
             topic: 'collection.fetch-item',
-            dedupKey: `item:${id}:${item.custodianId}:${item.source}:${item.providerItemId}:a${item.attempts}`,
+            dedupKey: `item:${id}:${item.custodianId}:${item.source}:${item.providerItemId}:retry${String(fetchRound)}`,
             payload: {
               tenantId: auth.tenantId,
               collectionId: id,
@@ -1190,6 +1197,44 @@ export class CollectionsService {
           })),
           skipDuplicates: true,
         });
+      }
+      if (failedItems.length > 0) {
+        for (const batch of chunk(
+          failedItems.map((item) => item.id),
+          RETRY_BATCH_SIZE,
+        )) {
+          await tx.collectionItem.updateMany({
+            where: { id: { in: batch } },
+            data: { state: CollectionItemState.discovered, lastError: '' },
+          });
+        }
+        // The signed manifest is built from this ledger. A stall give-up
+        // already wrote an api_error row; if the re-fetch works, that old
+        // row would still be signed in as a failure of an item we hold.
+        const retriedFetch = new Set(
+          failedItems.map((item) => `${item.custodianId}:${item.source}:${item.providerItemId}`),
+        );
+        const openFetchRows = await tx.collectionException.findMany({
+          where: { tenantId: auth.tenantId, collectionId: id },
+          select: {
+            id: true,
+            kind: true,
+            custodianId: true,
+            source: true,
+            providerItemId: true,
+          },
+        });
+        const fetchToClear = openFetchRows
+          .filter((row) => {
+            if (row.kind === 'object_missing') return false;
+            return retriedFetch.has(
+              `${row.custodianId ?? ''}:${row.source ?? ''}:${row.providerItemId}`,
+            );
+          })
+          .map((row) => row.id);
+        if (fetchToClear.length > 0) {
+          await tx.collectionException.deleteMany({ where: { id: { in: fetchToClear } } });
+        }
       }
       // Re-index the ones that only failed to reach the search index. No
       // provider call: the bytes never left.

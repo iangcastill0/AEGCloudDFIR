@@ -461,7 +461,9 @@ describe('CollectionsService.action', () => {
     const rows = (outboxCreateMany.mock.calls[0]?.[0] as { data: Record<string, unknown>[] }).data;
     expect(rows).toHaveLength(1);
     expect(rows[0]?.topic).toBe('collection.fetch-item');
-    expect(rows[0]?.dedupKey).toBe(`item:${COLLECTION_ID}:${CUSTODIAN_ID}:email:msg-1:a2`);
+    expect(rows[0]?.dedupKey).toMatch(
+      new RegExp(`^item:${COLLECTION_ID}:${CUSTODIAN_ID}:email:msg-1:retry\\d+$`),
+    );
     expect(rows[0]?.payload).toEqual({
       tenantId: TENANT_ID,
       collectionId: COLLECTION_ID,
@@ -1083,11 +1085,15 @@ describe('retry recovers indexing failures without re-downloading', () => {
       evidenceItemId: null,
     }));
 
-  function retryService(items: Record<string, unknown>[]) {
+  function retryService(
+    items: Record<string, unknown>[],
+    exceptions: Record<string, unknown>[] = [],
+  ) {
     const outboxCreateMany = vi.fn(async () => ({ count: 0 }));
     const itemUpdateMany = vi.fn(async (args: { where: { id: { in: string[] } } }) => ({
       count: args.where.id.in.length,
     }));
+    const exceptionDeleteMany = vi.fn(async () => ({}));
     const { service } = makeService({
       collection: {
         findFirst: vi.fn(async () => ({ id: COLLECTION_ID, status: CollectionStatus.failed })),
@@ -1100,10 +1106,13 @@ describe('retry recovers indexing failures without re-downloading', () => {
         ),
         updateMany: vi.fn(async () => ({})),
       },
-      collectionException: { findMany: vi.fn(async () => []), deleteMany: vi.fn(async () => ({})) },
+      collectionException: {
+        findMany: vi.fn(async () => exceptions),
+        deleteMany: exceptionDeleteMany,
+      },
       outboxEvent: { createMany: outboxCreateMany },
     });
-    return { service, outboxCreateMany, itemUpdateMany };
+    return { service, outboxCreateMany, itemUpdateMany, exceptionDeleteMany };
   }
 
   /** Every outbox row the retry wrote, flattened. */
@@ -1134,6 +1143,53 @@ describe('retry recovers indexing failures without re-downloading', () => {
     expect(result.retriedItems).toBe(2);
     expect(result.retriedIndexing).toBe(0);
     expect(topics(outboxCreateMany)).toContain('collection.fetch-item');
+  });
+
+  it('gives the re-fetch a fresh dedup key, not the stall-sweeper :a{attempts} key', async () => {
+    // Stall recovery writes item:…:a{attempts}. Reusing that key is dropped
+    // by skipDuplicates, Retry reports success, and the item never moves.
+    const { service, outboxCreateMany } = retryService(notCollected(1));
+    await service.action(auth, COLLECTION_ID, 'retry', fakeRequest());
+    const keys = outboxCreateMany.mock.calls.flatMap((c) =>
+      (c[0] as { data: { topic: string; dedupKey: string }[] }).data
+        .filter((d) => d.topic === 'collection.fetch-item')
+        .map((d) => d.dedupKey),
+    );
+    expect(keys[0]).toMatch(/:retry\d+$/);
+    expect(keys[0]).not.toMatch(/:a\d+$/);
+  });
+
+  it('moves fetch-failed items back to discovered so finalize waits', async () => {
+    // Finalize only waits on discovered/fetching/preserved. Leaving these
+    // 'failed' lets it seal as soon as the collection goes back to fetching,
+    // and fetch-item then drops the job.
+    const { service, itemUpdateMany } = retryService(notCollected(2));
+    await service.action(auth, COLLECTION_ID, 'retry', fakeRequest());
+    const fetchState = itemUpdateMany.mock.calls
+      .map((c) => (c[0] as { data: { state?: string } }).data.state)
+      .find((state) => state === 'discovered');
+    expect(fetchState).toBe('discovered');
+  });
+
+  it('clears the stall-sweeper ledger row so a later manifest does not sign the old failure', async () => {
+    const { service, exceptionDeleteMany } = retryService(notCollected(1), [
+      {
+        id: 'ex-1',
+        kind: 'api_error',
+        custodianId: CUSTODIAN_ID,
+        source: 'email',
+        providerItemId: 'gone-0',
+      },
+      {
+        id: 'ex-other',
+        kind: 'api_error',
+        custodianId: CUSTODIAN_ID,
+        source: 'email',
+        providerItemId: 'other',
+      },
+    ]);
+    await service.action(auth, COLLECTION_ID, 'retry', fakeRequest());
+    expect(exceptionDeleteMany).toHaveBeenCalledWith({ where: { id: { in: ['ex-1'] } } });
   });
 
   it('splits a mixed batch, reporting each separately', async () => {
