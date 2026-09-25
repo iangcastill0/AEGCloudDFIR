@@ -175,6 +175,22 @@ export function buildReadme(input: DownloadPlanInput): string {
  * The token is a secret. It reaches this one export, read-only, and expires —
  * but while it lives, anyone holding the script can download this evidence.
  */
+/**
+ * Folder name safe to place in a shell script.
+ *
+ * The API already does this in downloadFolderName. Doing it again here means
+ * a name that skipped that helper still cannot become a command. Single
+ * quotes below do not expand, and this set cannot break out of them.
+ */
+function scriptFolderName(name: string): string {
+  const safe = name
+    .normalize('NFKD')
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^[-.]+|[-.]+$/g, '');
+  return safe === '' ? 'export' : safe;
+}
+
 export function buildBashScript(input: DownloadPlanInput): string {
   // filename<TAB>bytes, for every part whose size this product recorded. It is
   // what lets a re-run tell a finished part from a half one.
@@ -209,7 +225,7 @@ set -euo pipefail
 API="${input.apiBaseUrl}"
 EXPORT_ID="${input.exportId}"
 TOKEN="${input.downloadToken}"
-DIR="${input.folderName}"
+DIR='${scriptFolderName(input.folderName)}'
 LIST=".cdfir-urls.tsv"
 
 command -v curl >/dev/null || { echo "curl is required" >&2; exit 1; }
@@ -321,7 +337,7 @@ $ErrorActionPreference = "Stop"
 $Api      = "${input.apiBaseUrl}"
 $ExportId = "${input.exportId}"
 $Token    = "${input.downloadToken}"
-$Dir      = "${input.folderName}"
+$Dir      = '${scriptFolderName(input.folderName)}'
 
 New-Item -ItemType Directory -Force -Path $Dir | Out-Null
 Set-Location $Dir

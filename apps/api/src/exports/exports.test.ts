@@ -320,10 +320,28 @@ describe('ExportsService.download', () => {
 
     const result = await service.download(auth, EXPORT_ID, fakeRequest());
 
-    expect(result.folderName).not.toMatch(/[\\/:*?"<>|]/);
+    expect(result.folderName).toMatch(/^[A-Za-z0-9._-]+$/);
     // The id suffix matters: two exports of one case often share a name, and
     // merging them into one folder would mix two evidence sets.
     expect(result.folderName).toContain(EXPORT_ID.slice(0, 8));
+  });
+
+  it('drops shell syntax from the folder name', async () => {
+    const { store } = makeStore();
+    const { service } = makeService(
+      {
+        export: {
+          findFirst: vi.fn(async () => exportRow({ name: '$(id)`whoami`${IFS}' })),
+        },
+        ...recordedParts(1),
+      },
+      store,
+    );
+
+    const result = await service.download(auth, EXPORT_ID, fakeRequest());
+
+    expect(result.folderName).toBe(`id-whoami-IFS-${EXPORT_ID.slice(0, 8)}`);
+    expect(result.folderName).not.toMatch(/[$`{}()]/);
   });
 
   it('issues a download token scoped to this export', async () => {
@@ -340,6 +358,62 @@ describe('ExportsService.download', () => {
     // The token is never audited, for the same reason presigned URLs are not.
     const summary = JSON.stringify(result.downloadToken);
     expect(summary).not.toContain(testConfig().CDFIR_SESSION_SECRET);
+  });
+
+  it('presigns the CSV file, not a zip part that was never written', async () => {
+    const { store, presignGet } = makeStore();
+    const csvKey = `tenants/${TENANT_ID}/derivatives/${EXPORT_ID}/export-csv/1/export.csv`;
+    const { service } = makeService(
+      {
+        export: { findFirst: vi.fn(async () => exportRow({ kind: 'csv' })) },
+        exportPart: {
+          findMany: vi.fn(async () => [
+            {
+              partNumber: 1,
+              objectKey: csvKey,
+              sha256: 'c'.repeat(64),
+              sizeBytes: 88n,
+            },
+          ]),
+        },
+      },
+      store,
+    );
+
+    const result = await service.download(auth, EXPORT_ID, fakeRequest());
+
+    expect(result.parts).toHaveLength(1);
+    expect(result.parts[0]?.filename).toBe('export.csv');
+    expect(result.parts[0]?.sha256).toBe('c'.repeat(64));
+    expect(result.parts[0]?.url).toContain(csvKey);
+    expect(result.archiveUrls[0]).toContain('export.csv');
+    expect(JSON.stringify(result.parts)).not.toContain('export-part001.zip');
+    expect(presignGet).toHaveBeenCalledWith(
+      TENANT_ID,
+      csvKey,
+      expect.objectContaining({ downloadFilename: 'export.csv' }),
+    );
+  });
+
+  it('rebuilds the CSV object key when an old export has no export_parts rows', async () => {
+    // CSV exports written before the part row existed stored export.csv under
+    // export-csv and never wrote a zip. The archive fallback used to invent
+    // export-part001.zip under archive/, which is a file that is not there.
+    const { store } = makeStore();
+    const { service } = makeService(
+      {
+        export: { findFirst: vi.fn(async () => exportRow({ kind: 'csv' })) },
+        ...noRecordedParts,
+      },
+      store,
+    );
+
+    const result = await service.download(auth, EXPORT_ID, fakeRequest());
+
+    expect(result.parts).toHaveLength(1);
+    expect(result.parts[0]?.filename).toBe('export.csv');
+    expect(result.parts[0]?.url).toContain(`/export-csv/1/export.csv`);
+    expect(result.parts[0]?.sha256).toBeNull();
   });
 });
 

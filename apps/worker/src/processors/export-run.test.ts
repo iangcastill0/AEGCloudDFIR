@@ -7,7 +7,10 @@ import {
   expandFamilies,
   exportStatusDetail,
   loadItemsInBatches,
+  partitionPstSelection,
   processExportRun,
+  PST_NOT_EMAIL_EXCEPTION,
+  pstExportStatusDetail,
   shouldStartNewArchive,
   type ArchiveWriterLike,
 } from './export-run.js';
@@ -189,6 +192,18 @@ describe('exportStatusDetail', () => {
     expect(exportStatusDetail(0, 0)).not.toBe('');
   });
 
+  it('does not call a total verification failure an empty selection', () => {
+    // itemCount is delivered items (written + inline). When every selected
+    // item fails hash or storage checks, delivered is 0 and failedCount is N.
+    // The old branch treated that like "tag had no items" and pointed operators
+    // at the wrong cause while exceptions.csv held the integrity failures.
+    const detail = exportStatusDetail(0, 32);
+    expect(detail).toContain('32 item(s) failed verification');
+    expect(detail).toMatch(/exceptions\.csv/);
+    expect(detail).not.toContain('No items matched');
+    expect(detail).not.toMatch(/tag, case or search/);
+  });
+
   it('explains the difference between items and files when attachments are inline', () => {
     // The real shape: winder 3, 434,878 items, 185,091 files on disk. A
     // reviewer who counts the files and is told nothing has every reason to
@@ -204,6 +219,103 @@ describe('exportStatusDetail', () => {
     const detail = exportStatusDetail(100, 3, 40);
     expect(detail).toContain('60 file(s)');
     expect(detail).toContain('3 item(s) failed verification');
+  });
+});
+
+describe('native export status when every item fails verification', () => {
+  it('says verification failed, not that the selection was empty', async () => {
+    // Same shape as the path-naming arm: every item has blob: null, so each
+    // lands in exceptions.csv and delivered itemCount is 0. Ready + the empty
+    // selection sentence would have told an operator to re-pick the tag.
+    const f = fakeCtx();
+    armGenerated(f, 5);
+    await processExportRun(f.ctx, payload, { createArchive: () => silentWriter() });
+
+    const final = f.tx.export.update.mock.calls.at(-1)?.[0] as { data: Record<string, unknown> };
+    expect(final.data['status']).toBe('ready');
+    expect(final.data['itemCount']).toBe(0);
+    const detail = String(final.data['statusDetail']);
+    expect(detail).toContain('5 item(s) failed verification');
+    expect(detail).not.toContain('No items matched');
+  });
+});
+
+describe('partitionPstSelection', () => {
+  const email = {
+    id: 'mail-1',
+    kind: 'email',
+    childRelationships: [] as { parentId: string; kind: string }[],
+  };
+  const attachedPdf = {
+    id: 'att-1',
+    kind: 'file',
+    childRelationships: [{ parentId: 'mail-1', kind: 'attachment' }],
+  };
+  const loosePdf = {
+    id: 'file-1',
+    kind: 'file',
+    childRelationships: [] as { parentId: string; kind: string }[],
+  };
+  const orphanAttachment = {
+    id: 'att-orphan',
+    kind: 'file',
+    childRelationships: [{ parentId: 'mail-missing', kind: 'attachment' }],
+  };
+
+  it('names a loose non-email in exceptions, not as a verification failure', () => {
+    const split = partitionPstSelection([email, loosePdf]);
+    expect(split.emailIds).toEqual(['mail-1']);
+    expect(split.inlineCount).toBe(0);
+    expect(split.omitted).toEqual([{ evidenceItemId: 'file-1', error: PST_NOT_EMAIL_EXCEPTION }]);
+  });
+
+  it('does not list an attachment whose parent email is in the PST', () => {
+    // The bytes are already inside the message. Calling that "left out" would
+    // be the same lie the zip path used to tell about inline attachments.
+    const split = partitionPstSelection([attachedPdf, email]);
+    expect(split.omitted).toEqual([]);
+    expect(split.inlineCount).toBe(1);
+  });
+
+  it('lists an attachment whose parent email is not in this export', () => {
+    const split = partitionPstSelection([orphanAttachment, email]);
+    expect(split.omitted).toEqual([
+      { evidenceItemId: 'att-orphan', error: PST_NOT_EMAIL_EXCEPTION },
+    ]);
+    expect(split.inlineCount).toBe(0);
+  });
+
+  it('treats a family-linked file as omitted, not as inside the message', () => {
+    const related = {
+      id: 'related-1',
+      kind: 'file',
+      childRelationships: [{ parentId: 'mail-1', kind: 'family' }],
+    };
+    const split = partitionPstSelection([email, related]);
+    expect(split.inlineCount).toBe(0);
+    expect(split.omitted).toEqual([
+      { evidenceItemId: 'related-1', error: PST_NOT_EMAIL_EXCEPTION },
+    ]);
+  });
+});
+
+describe('pstExportStatusDetail', () => {
+  it('does not call omitted items failed verification', () => {
+    const detail = pstExportStatusDetail(10, 0, 0, 4);
+    expect(detail).toContain('4 non-email item(s) were left out of the PST');
+    expect(detail).toContain('exceptions.csv');
+    expect(detail).not.toMatch(/failed verification/);
+  });
+
+  it('says attachments stayed inside the messages, without naming a zip file', () => {
+    const detail = pstExportStatusDetail(10, 0, 40, 0);
+    expect(detail).toContain('10 email(s) in the PST');
+    expect(detail).toContain('40 attachment(s) already inside those messages');
+    expect(detail).not.toContain('inline-attachments.csv');
+  });
+
+  it('still reports real hash failures', () => {
+    expect(pstExportStatusDetail(10, 2, 0, 1)).toContain('2 item(s) failed verification');
   });
 });
 
@@ -422,7 +534,7 @@ describe('native export records a digest for each archive part', () => {
     expect(rows[0]?.sizeBytes).toBe(4096n);
   });
 
-  it('records nothing for a CSV export, which has no archive parts', async () => {
+  it('records the CSV object as the single downloadable part, plus a sidecar manifest', async () => {
     const f = fakeCtx();
     const { writer } = arm(f);
     f.tx.export.findUnique.mockResolvedValue({
@@ -433,12 +545,41 @@ describe('native export records a digest for each archive part', () => {
         selection: { kind: 'items', evidenceItemIds: [GOOD_ID] },
         includeFamilies: false,
         archiveSplitMb: 2048,
+        csv: { columns: ['evidence_id', 'name'], delimiter: ',' },
       },
     });
+    f.store.putDerivative.mockImplementation(
+      (_t: string, _e: string, type: string, version: number, filename: string) =>
+        Promise.resolve({
+          objectKey: `key/${type}/${String(version)}/${filename}`,
+          sha256: `${type}`.padEnd(64, '0'),
+          size: type === 'export-csv' ? 88 : 32,
+        }),
+    );
 
     await processExportRun(f.ctx, payload, { createArchive: () => writer });
 
-    expect(f.tx.exportPart.createMany).not.toHaveBeenCalled();
+    const puts = f.store.putDerivative.mock.calls as unknown as [
+      string,
+      string,
+      string,
+      number,
+      string,
+    ][];
+    expect(puts.some((c) => c[2] === 'export-csv' && c[4] === 'export.csv')).toBe(true);
+    expect(puts.some((c) => c[2] === 'export-manifest' && c[4] === 'manifest.json')).toBe(true);
+
+    expect(f.tx.exportPart.createMany).toHaveBeenCalledTimes(1);
+    const rows = (
+      f.tx.exportPart.createMany.mock.calls[0]?.[0] as {
+        data: { partNumber: number; objectKey: string; sha256: string; sizeBytes: bigint }[];
+      }
+    ).data;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.partNumber).toBe(1);
+    expect(rows[0]?.objectKey).toBe('key/export-csv/1/export.csv');
+    expect(rows[0]?.sha256).toBe('export-csv'.padEnd(64, '0'));
+    expect(rows[0]?.sizeBytes).toBe(88n);
   });
 });
 
