@@ -1,4 +1,10 @@
-import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { z } from 'zod';
 import {
   Prisma,
@@ -16,6 +22,7 @@ import type { CursorQuery } from '../common/pagination.js';
 import { zodValidate } from '../common/zod-validate.js';
 import { chunk, expandDescendants, expandFamilies, onTx } from '../common/families.js';
 import { enqueueReindex } from '../common/reindex.js';
+import { mayViewPrivileged } from '../common/roles.js';
 import { AuditService } from '../audit/audit.service.js';
 
 const BULK_CHUNK_SIZE = 500;
@@ -228,6 +235,9 @@ export class TagsService {
     return withTenantContext(this.prisma, auth.tenantId, async (tx) => {
       const tag = await tx.tag.findFirst({ where: { id: input.tagId, tenantId: auth.tenantId } });
       if (!tag) throw new NotFoundException();
+      if (tag.isPrivileged && !mayViewPrivileged(auth)) {
+        throw new ForbiddenException('privileged tags can only be changed by a case manager');
+      }
       if (input.expectedTagVersion !== undefined && tag.version !== input.expectedTagVersion) {
         throw new ConflictException('tag definition changed concurrently; reload and retry');
       }

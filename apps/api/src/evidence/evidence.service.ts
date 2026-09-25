@@ -22,7 +22,7 @@ import type { FastifyRequest } from 'fastify';
 import '../common/http.js';
 import type { AuthContext } from '../common/http.js';
 import { APP_CONFIG, EVIDENCE_STORE, PRISMA } from '../common/tokens.js';
-import { isCaseRestricted } from '../common/roles.js';
+import { isCaseRestricted, mayViewPrivileged } from '../common/roles.js';
 import { AuditService } from '../audit/audit.service.js';
 import { mayReadImport } from '../imports/import-access.js';
 
@@ -86,8 +86,11 @@ export class EvidenceService {
 
   /**
    * Load an item, enforcing tenant scope and — for case-restricted callers —
-   * membership of at least one assigned case. Both misses are a plain 404 so
-   * cross-tenant probing is indistinguishable from a missing id.
+   * membership of at least one assigned case. Callers who may not see
+   * privileged material (the same rule search uses) are refused when any tag
+   * on the item has isPrivileged. Every miss is a plain 404 so probing cannot
+   * tell a hidden item from a missing id. This runs before the loader, so a
+   * download URL is never issued for a hidden item.
    */
   private async requireItem<T>(
     auth: AuthContext,
@@ -104,6 +107,16 @@ export class EvidenceService {
           },
         });
         if (visible === 0) throw new NotFoundException();
+      }
+      if (!mayViewPrivileged(auth)) {
+        const privileged = await tx.tagAssignment.count({
+          where: {
+            tenantId: auth.tenantId,
+            evidenceItemId: id,
+            tag: { isPrivileged: true },
+          },
+        });
+        if (privileged > 0) throw new NotFoundException();
       }
       const row = await loader(tx);
       if (row === null) throw new NotFoundException();
@@ -303,15 +316,31 @@ export class EvidenceService {
     await this.requireItem(auth, id, (tx) =>
       tx.evidenceItem.findFirst({ where: { id, tenantId: auth.tenantId }, select: { id: true } }),
     );
-    const rels = await withTenantContext(this.prisma, auth.tenantId, (tx) =>
-      tx.evidenceRelationship.findMany({
+    const rels = await withTenantContext(this.prisma, auth.tenantId, async (tx) => {
+      const rows = await tx.evidenceRelationship.findMany({
         where: { tenantId: auth.tenantId, OR: [{ parentId: id }, { childId: id }] },
         include: {
           parent: { select: { id: true, kind: true, name: true, size: true, sha256: true } },
           child: { select: { id: true, kind: true, name: true, size: true, sha256: true } },
         },
-      }),
-    );
+      });
+      if (mayViewPrivileged(auth)) return rows;
+      const otherIds = rows.map((rel) => (rel.parentId === id ? rel.childId : rel.parentId));
+      if (otherIds.length === 0) return rows;
+      const hidden = await tx.tagAssignment.findMany({
+        where: {
+          tenantId: auth.tenantId,
+          evidenceItemId: { in: otherIds },
+          tag: { isPrivileged: true },
+        },
+        select: { evidenceItemId: true },
+      });
+      const hiddenIds = new Set(hidden.map((row) => row.evidenceItemId));
+      return rows.filter((rel) => {
+        const otherId = rel.parentId === id ? rel.childId : rel.parentId;
+        return !hiddenIds.has(otherId);
+      });
+    });
     return {
       items: rels.map((rel) => {
         const other = rel.parentId === id ? rel.child : rel.parent;

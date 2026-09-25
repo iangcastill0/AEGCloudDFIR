@@ -8,7 +8,13 @@ import {
   withTenantContext,
   type Prisma,
 } from '@aeg-clouddfir/database';
-import { Sha256Stream, canonicalJson, sanitizeFilename } from '@aeg-clouddfir/evidence';
+import {
+  Sha256Stream,
+  archivePartFilename,
+  canonicalJson,
+  derivativeTypeFor,
+  sanitizeFilename,
+} from '@aeg-clouddfir/evidence';
 import { ProductionArchiveWriter, csvEscape } from '@aeg-clouddfir/production';
 import { AUDIT_CSV_COLUMNS, auditRowsFor } from './audit-csv.js';
 import {
@@ -584,11 +590,15 @@ export async function processExportRun(
           totalBytes: BigInt(result.totalBytes),
           outputPrefix: result.outputPrefix,
           manifestSha256: result.manifestSha256,
-          statusDetail: exportStatusDetail(
-            result.itemCount,
-            result.failedCount,
-            result.inlineCount,
-          ),
+          statusDetail:
+            exportRow.kind === 'pst'
+              ? pstExportStatusDetail(
+                  result.itemCount,
+                  result.failedCount,
+                  result.inlineCount,
+                  result.omittedCount,
+                )
+              : exportStatusDetail(result.itemCount, result.failedCount, result.inlineCount),
         },
       });
       await appendAuditEvent(tx, {
@@ -602,6 +612,7 @@ export async function processExportRun(
           itemCount: result.itemCount,
           inlineAttachmentCount: result.inlineCount,
           failedCount: result.failedCount,
+          omittedCount: result.omittedCount,
           totalBytes: result.totalBytes,
           archiveParts: result.archiveParts,
           manifestSha256: result.manifestSha256,
@@ -648,12 +659,60 @@ interface ExportResult {
   /** Attachments left inside a parent native rather than written as files. */
   inlineCount: number;
   failedCount: number;
+  /**
+   * Selected items a PST cannot hold (non-emails whose parent email is not
+   * in this export). Named in exceptions.csv. Zero for csv/native.
+   */
+  omittedCount: number;
   totalBytes: number;
   outputPrefix: string;
   manifestSha256: string;
   archiveParts: number;
-  /** Empty for a CSV export, which produces no archive parts. */
+  /** One row per downloadable object. CSV is a single `export.csv` part. */
   parts: ExportPartDigest[];
+}
+
+/** Why a selected non-email is named in a PST export's exceptions.csv. */
+export const PST_NOT_EMAIL_EXCEPTION =
+  'not an email; a PST is a mailbox file and cannot hold this item';
+
+/**
+ * Split a PST selection into mail, attachments that already live inside that
+ * mail, and everything else.
+ *
+ * A PST can only hold messages. An attachment of an email that IS going into
+ * the PST is already inside that message, so listing it as "left out" would
+ * be a lie. A loose PDF or Drive file has nowhere to go and must be named.
+ *
+ * Exported so a test can cover the split without running the PST writer.
+ * The parent email may arrive in a later batch than the attachment, so the
+ * caller must pass the whole selection, not one page.
+ */
+export function partitionPstSelection(
+  items: readonly {
+    id: string;
+    kind: string;
+    childRelationships: readonly { parentId: string; kind: string }[];
+  }[],
+): {
+  emailIds: string[];
+  omitted: { evidenceItemId: string; error: string }[];
+  inlineCount: number;
+} {
+  const emailIds = items.filter((item) => item.kind === 'email').map((item) => item.id);
+  const inPst = new Set(emailIds);
+  const omitted: { evidenceItemId: string; error: string }[] = [];
+  let inlineCount = 0;
+  for (const item of items) {
+    if (item.kind === 'email') continue;
+    const rel = item.childRelationships.find((r) => isAttachmentKind(r.kind));
+    if (rel !== undefined && inPst.has(rel.parentId)) {
+      inlineCount += 1;
+      continue;
+    }
+    omitted.push({ evidenceItemId: item.id, error: PST_NOT_EMAIL_EXCEPTION });
+  }
+  return { emailIds, omitted, inlineCount };
 }
 
 /**
@@ -677,13 +736,19 @@ async function runPstExportKind(
   batches: AsyncIterable<LoadedExportItem[]>,
 ): Promise<ExportResult> {
   const items: PstExportItem[] = [];
-  const skipped: string[] = [];
+  const loaded: {
+    id: string;
+    kind: string;
+    childRelationships: { parentId: string; kind: string }[];
+  }[] = [];
   for await (const batch of batches) {
     for (const item of batch) {
-      if (item.kind !== 'email') {
-        skipped.push(item.id);
-        continue;
-      }
+      loaded.push({
+        id: item.id,
+        kind: item.kind,
+        childRelationships: item.childRelationships,
+      });
+      if (item.kind !== 'email') continue;
       items.push({
         evidenceItemId: item.id,
         sha256: item.sha256,
@@ -706,17 +771,18 @@ async function runPstExportKind(
     }
   }
 
+  const split = partitionPstSelection(loaded);
   if (items.length === 0) {
     throw new Error(
-      skipped.length > 0
+      split.omitted.length > 0
         ? `this selection has no email items, so there is nothing to put in a PST ` +
-            `(${String(skipped.length)} non-email item(s) were selected)`
+            `(${String(split.omitted.length)} non-email item(s) were selected)`
         : 'this selection is empty, so there is nothing to put in a PST',
     );
   }
-  if (skipped.length > 0) {
+  if (split.omitted.length > 0) {
     ctx.log.warn(
-      { exportId, skipped: skipped.length },
+      { exportId, skipped: split.omitted.length },
       'pst export: non-email items cannot go in a mailbox file; they are listed as exceptions',
     );
   }
@@ -728,15 +794,16 @@ async function runPstExportKind(
     spoolThresholdBytes: ctx.config.CDFIR_PSTB_SPOOL_THRESHOLD_BYTES,
     partBytes: params.pstPartMb * 1024 * 1024,
     storeDisplayName: pstStoreDisplayName(exportName),
+    extraExceptions: split.omitted,
   });
 
   return {
     itemCount: outcome.itemCount,
-    // A PST has no "inline attachment" concept to report: attachments live
-    // inside their message in MAPI form, which is not the same question the zip
-    // path's inline count answers.
-    inlineCount: 0,
-    failedCount: outcome.failedCount + skipped.length,
+    // Attachments of emails in this PST already live inside those messages.
+    // Counted so the status line can say they were not dropped.
+    inlineCount: split.inlineCount,
+    failedCount: outcome.failedCount,
+    omittedCount: split.omitted.length,
     totalBytes: outcome.totalBytes,
     outputPrefix: outcome.outputPrefix,
     manifestSha256: outcome.manifestSha256,
@@ -781,26 +848,57 @@ async function runCsvExport(
     }
   }
   const csv = Buffer.from(lines.join('\r\n') + '\r\n', 'utf8');
+  const filename = archivePartFilename('csv', 1);
   const put = await ctx.store.putDerivative(
     tenantId,
     exportId,
-    'export-csv',
+    derivativeTypeFor('csv'),
     1,
-    'export.csv',
+    filename,
     csv,
     'text/csv; charset=utf-8',
+  );
+  // Sidecar next to the CSV, same as zip/PST: download always fetches
+  // manifest.json, and hashes.txt names it. Using the CSV's own digest as the
+  // "manifest" hash made verification look at a file that was never written.
+  const manifestJson = canonicalJson({
+    schema: 'cdfir.export.csv.manifest.v1',
+    exportId,
+    generatedAt: new Date().toISOString(),
+    kind: 'csv',
+    itemCount,
+    filename,
+    sha256: put.sha256,
+    sizeBytes: put.size,
+    items: [{ archivePart: 1, filename, sha256: put.sha256, sizeBytes: put.size }],
+  });
+  const manifestPut = await ctx.store.putDerivative(
+    tenantId,
+    exportId,
+    'export-manifest',
+    1,
+    'manifest.json',
+    Buffer.from(manifestJson, 'utf8'),
+    'application/json',
   );
   return {
     itemCount,
     // A CSV export has one row per item regardless of where the bytes live.
     inlineCount: 0,
     failedCount: 0,
+    omittedCount: 0,
     totalBytes: csv.byteLength,
     outputPrefix: put.objectKey,
-    manifestSha256: put.sha256,
-    archiveParts: 0,
-    // A CSV export is one object, not a split archive.
-    parts: [],
+    manifestSha256: manifestPut.sha256,
+    archiveParts: 1,
+    parts: [
+      {
+        partNumber: 1,
+        objectKey: put.objectKey,
+        sha256: put.sha256,
+        sizeBytes: put.size,
+      },
+    ],
   };
 }
 
@@ -846,6 +944,38 @@ export function exportStatusDetail(
       `${n(itemCount)} items: ${n(itemCount - inlineCount)} file(s) in the archive, plus ` +
         `${n(inlineCount)} attachment(s) left inside the parent emails that already contain them. ` +
         `Every one is listed in manifest.json; inline-attachments.csv names the file each is in.`,
+    );
+  }
+  if (failedCount > 0) said.push(`${String(failedCount)} item(s) failed verification`);
+  return said.join(' ');
+}
+
+/**
+ * What the operator is told about a finished PST export.
+ *
+ * The zip status line talks about files in an archive and inline-attachments.csv.
+ * A PST has neither. Reusing it would tell a reviewer to open a file that does
+ * not exist, and would call omitted PDFs "failed verification".
+ */
+export function pstExportStatusDetail(
+  itemCount: number,
+  failedCount: number,
+  attachmentsInMessages = 0,
+  omittedCount = 0,
+): string {
+  if (itemCount === 0) {
+    return 'No items matched this selection, so the export is empty. Check that the tag, case or search you chose still contains items.';
+  }
+  const n = (v: number): string => v.toLocaleString('en-US');
+  const said: string[] = [];
+  if (attachmentsInMessages > 0) {
+    said.push(
+      `${n(itemCount)} email(s) in the PST, plus ${n(attachmentsInMessages)} attachment(s) already inside those messages.`,
+    );
+  }
+  if (omittedCount > 0) {
+    said.push(
+      `${n(omittedCount)} non-email item(s) were left out of the PST and listed in exceptions.csv`,
     );
   }
   if (failedCount > 0) said.push(`${String(failedCount)} item(s) failed verification`);
@@ -1309,6 +1439,7 @@ async function runNativeExport(
     itemCount: written + inlineCount,
     inlineCount,
     failedCount,
+    omittedCount: 0,
     totalBytes,
     outputPrefix,
     manifestSha256: manifestPut.sha256,
