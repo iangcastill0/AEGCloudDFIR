@@ -314,6 +314,106 @@ describe('TenantsService.redeemInvite', () => {
       }),
     );
   });
+
+  it('does not add reviewer to someone who is already a member', async () => {
+    // The standing URL lives on the dashboard. A read_only member who opens
+    // it used to gain reviewer, which lifts the case-only read fence.
+    const membershipCreate = vi.fn(async () => ({ id: 'mem-1' }));
+    const membershipUpdate = vi.fn(async () => ({ id: 'mem-1' }));
+    const roleCreate = vi.fn(async () => ({ id: 'role-1' }));
+    const { service, audit } = makeService({
+      tenantInvite: { findUnique: vi.fn(async () => null) },
+      tenant: {
+        findFirst: vi.fn(async () => ({
+          id: TENANT_ID,
+          name: 'Acme',
+          slug: 'acme',
+          status: 'active',
+        })),
+      },
+      user: { findUnique: vi.fn(async () => ({ id: USER_ID })) },
+      membership: {
+        findUnique: vi.fn(async () => ({ id: 'mem-existing', status: 'active' })),
+        create: membershipCreate,
+        update: membershipUpdate,
+      },
+      roleAssignment: { findUnique: vi.fn(async () => null), create: roleCreate },
+    });
+
+    const result = await service.redeemInvite(USER_ID, token, fakeRequest());
+    expect(result).toEqual({ tenantId: TENANT_ID, name: 'Acme', slug: 'acme' });
+    expect(membershipCreate).not.toHaveBeenCalled();
+    expect(membershipUpdate).not.toHaveBeenCalled();
+    expect(roleCreate).not.toHaveBeenCalled();
+    expect(audit.appendTx).not.toHaveBeenCalled();
+  });
+
+  it('does not let a disabled member rejoin through the standing link', async () => {
+    const roleCreate = vi.fn(async () => ({ id: 'role-1' }));
+    const membershipUpdate = vi.fn(async () => ({ id: 'mem-1' }));
+    const { service } = makeService({
+      tenantInvite: { findUnique: vi.fn(async () => null) },
+      tenant: {
+        findFirst: vi.fn(async () => ({
+          id: TENANT_ID,
+          name: 'Acme',
+          slug: 'acme',
+          status: 'active',
+        })),
+      },
+      user: { findUnique: vi.fn(async () => ({ id: USER_ID })) },
+      membership: {
+        findUnique: vi.fn(async () => ({ id: 'mem-1', status: 'disabled' })),
+        update: membershipUpdate,
+      },
+      roleAssignment: { create: roleCreate },
+    });
+
+    await expect(service.redeemInvite(USER_ID, token, fakeRequest())).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    expect(roleCreate).not.toHaveBeenCalled();
+    expect(membershipUpdate).not.toHaveBeenCalled();
+  });
+
+  it('still grants the invited role on a one-time invite to an existing member', async () => {
+    // A named invite is an admin choosing that role. That is a promotion,
+    // not a leaked Slack URL.
+    const roleCreate = vi.fn(async () => ({ id: 'role-1' }));
+    const { service } = makeService({
+      tenantInvite: {
+        findUnique: vi.fn(async () => ({
+          id: 'inv-1',
+          tenantId: TENANT_ID,
+          email: 'pat@example.com',
+          role: TenantRole.reviewer,
+          expiresAt: future,
+          usedAt: null,
+        })),
+        update: vi.fn(async () => ({ id: 'inv-1' })),
+      },
+      user: { findUnique: vi.fn(async () => ({ id: USER_ID, email: 'pat@example.com' })) },
+      tenant: {
+        findUnique: vi.fn(async () => ({
+          id: TENANT_ID,
+          name: 'Acme',
+          slug: 'acme',
+          status: 'active',
+        })),
+      },
+      membership: {
+        findUnique: vi.fn(async () => ({ id: 'mem-1', status: 'active' })),
+      },
+      roleAssignment: { findUnique: vi.fn(async () => null), create: roleCreate },
+    });
+
+    await service.redeemInvite(USER_ID, token, fakeRequest());
+    expect(roleCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ role: TenantRole.reviewer }),
+      }),
+    );
+  });
 });
 
 describe('TenantsService join link', () => {
