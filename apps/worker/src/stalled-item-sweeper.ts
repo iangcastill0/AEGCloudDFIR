@@ -3,6 +3,7 @@ import type { DispatcherLogger } from './outbox/dispatcher.js';
 import { QUEUES, dedupKeys } from './queues.js';
 import {
   MAX_RECOVERY_ATTEMPTS,
+  PARSE_RECOVERY_KINDS,
   STALL_AFTER_MS,
   pageWalkPlan,
   recoveryPlan,
@@ -78,7 +79,21 @@ export class StalledItemSweeper {
           let localGaveUp = 0;
           const touchedCollections = new Set<string>();
 
+          const evidenceIds = items
+            .map((item) => item.evidenceItemId)
+            .filter((id): id is string => id !== null);
+          const kindRows =
+            evidenceIds.length === 0
+              ? []
+              : await tx.evidenceItem.findMany({
+                  where: { id: { in: evidenceIds } },
+                  select: { id: true, kind: true },
+                });
+          const kindById = new Map(kindRows.map((row) => [row.id, row.kind]));
+
           for (const item of items) {
+            const evidenceKind =
+              item.evidenceItemId === null ? undefined : kindById.get(item.evidenceItemId);
             const plan = recoveryPlan({
               state: item.state as ItemState,
               source: item.source,
@@ -86,6 +101,7 @@ export class StalledItemSweeper {
               updatedAt: item.updatedAt,
               evidenceItemId: item.evidenceItemId,
               now,
+              evidenceKind,
             });
             if (plan.kind === 'wait') continue;
             touchedCollections.add(item.collectionId);
@@ -95,6 +111,15 @@ export class StalledItemSweeper {
                 where: { id: item.id },
                 data: { state: 'failed', lastError: plan.reason },
               });
+              // Finalize also waits on container evidence still `pending`.
+              // Marking only the ledger row left those collections stuck; the
+              // parse-recovery path used to do this, and skipped containers.
+              if (evidenceKind === 'container' && item.evidenceItemId !== null) {
+                await tx.evidenceItem.update({
+                  where: { id: item.evidenceItemId },
+                  data: { processingStatus: 'exception' },
+                });
+              }
               // An exception row is the part a reviewer sees. A collection that
               // closes with unexplained gaps is worse than one that never closed.
               await tx.collectionException.create({
@@ -121,14 +146,13 @@ export class StalledItemSweeper {
             // are kept and (topic, dedupKey) is unique, so a repeated key is
             // silently dropped and the item would never move.
             const attempt = item.attempts + 1;
+            const extractId = item.evidenceItemId ?? item.id;
             const dedupKey =
               plan.stage === 'fetch'
                 ? `${dedupKeys.collectionFetchItem(item.collectionId, item.custodianId, item.source, item.providerItemId)}:a${String(attempt)}`
-                : dedupKeys.searchIndex(
-                    item.evidenceItemId ?? item.id,
-                    1,
-                    `recover${String(attempt)}`,
-                  );
+                : plan.stage === 'extract'
+                  ? `${dedupKeys.pstExtract(item.collectionId, extractId)}:recover${String(attempt)}`
+                  : dedupKeys.searchIndex(extractId, 1, `recover${String(attempt)}`);
 
             await tx.collectionItem.update({
               where: { id: item.id },
@@ -149,11 +173,18 @@ export class StalledItemSweeper {
                           source: item.source,
                           providerItemId: item.providerItemId,
                         }
-                      : {
-                          tenantId: tenant.id,
-                          evidenceItemId: item.evidenceItemId,
-                          version: 1,
-                        },
+                      : plan.stage === 'extract'
+                        ? {
+                            tenantId: tenant.id,
+                            collectionId: item.collectionId,
+                            custodianId: item.custodianId,
+                            evidenceItemId: extractId,
+                          }
+                        : {
+                            tenantId: tenant.id,
+                            evidenceItemId: item.evidenceItemId,
+                            version: 1,
+                          },
                 },
               ],
               skipDuplicates: true,
@@ -244,6 +275,7 @@ export class StalledItemSweeper {
           // --- parents still awaiting parse ---------------------------------
           // Parse creates attachment children, so finalize gates on this
           // directly: sealing the manifest first would omit them.
+          // Containers are not parsed: recoveryPlan requeues pst.extract.
           const activeCollections = await tx.collection.findMany({
             where: { status: { in: ['fetching', 'cancelling', 'finalizing'] } },
             select: { id: true },
@@ -255,7 +287,7 @@ export class StalledItemSweeper {
               where: {
                 collectionId: { in: activeIds },
                 processingStatus: 'pending',
-                kind: { in: ['email', 'container'] },
+                kind: { in: [...PARSE_RECOVERY_KINDS] },
                 updatedAt: { lt: new Date(now.getTime() - STALL_AFTER_MS) },
               },
               select: { id: true, collectionId: true, updatedAt: true, version: true },

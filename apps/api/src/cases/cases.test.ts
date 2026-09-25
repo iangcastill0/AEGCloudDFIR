@@ -700,6 +700,46 @@ describe('CasesService.tags — only tags present in the matter', () => {
     const service = makeService({ case: { findFirst: vi.fn(async () => null) } }).service;
     await expect(service.tags(auth, CASE_ID)).rejects.toThrow(NotFoundException);
   });
+
+  it('hides privileged tags from a reviewer', async () => {
+    const findMany = vi.fn(async () => [{ tagId: 't-hot', tag: hot }]);
+    const service = makeService({
+      case: { findFirst: vi.fn(async () => ({ id: CASE_ID })) },
+      caseMember: { count: vi.fn(async () => 1) },
+      caseItem: { findMany: vi.fn(async () => [{ evidenceItemId: ITEM_A }]) },
+      tagAssignment: { findMany },
+    }).service;
+    const page = await service.tags(makeAuth([TenantRole.reviewer]), CASE_ID);
+    expect(page.items).toEqual([{ id: 't-hot', name: 'Hot', color: '#f00', itemCount: 1 }]);
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          tag: { isPrivileged: false },
+          evidenceItem: {
+            tagAssignments: { none: { tag: { isPrivileged: true } } },
+          },
+        }),
+      }),
+    );
+  });
+
+  it('does not privilege-filter the tag panel for a case manager', async () => {
+    const findMany = vi.fn(async () => [
+      { tagId: 't-hot', tag: hot },
+      { tagId: 't-priv', tag: priv },
+    ]);
+    const service = makeService({
+      case: { findFirst: vi.fn(async () => ({ id: CASE_ID })) },
+      caseMember: { count: vi.fn(async () => 1) },
+      caseItem: { findMany: vi.fn(async () => [{ evidenceItemId: ITEM_A }]) },
+      tagAssignment: { findMany },
+    }).service;
+    const page = await service.tags(auth, CASE_ID);
+    expect(page.items.map((t) => t.name)).toEqual(['Hot', 'Privileged']);
+    const where = findMany.mock.calls[0]?.[0]?.where as Record<string, unknown>;
+    expect(where.tag).toBeUndefined();
+    expect(where.evidenceItem).toBeUndefined();
+  });
 });
 
 const COLLECTION_ID = '00000000-0000-4000-8000-0000000000c1';

@@ -136,6 +136,40 @@ h2 {
   margin-top: 0;
 }
 
+.paywall {
+  max-width: 64rem;
+}
+
+.paywall-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: var(--space-4);
+  align-items: stretch;
+  margin-top: var(--space-5);
+}
+
+.paywall-tier {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.paywall-tier--pro {
+  border-color: var(--color-accent);
+  border-width: 2px;
+}
+
+.paywall-tier__pending {
+  color: var(--color-text-muted);
+  margin: 0;
+  flex: 1;
+}
+
+.paywall-tier .cdfir-button {
+  margin-top: auto;
+  align-self: flex-start;
+}
+
 .pill {
   display: inline-block;
   border: 1px solid var(--color-border-strong);

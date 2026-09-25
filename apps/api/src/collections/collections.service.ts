@@ -232,6 +232,63 @@ function readCounters(progress: unknown, source: string): ProgressCounters {
   };
 }
 
+/**
+ * Retry of a processing exception must re-queue the stage that actually reads
+ * that kind. `process.extract` returns immediately for emails (they go through
+ * `process.parse`) and would run Tika on a PST instead of reconstructing
+ * messages. Either path left the item `pending` with its ledger row deleted.
+ */
+function processingRetryOutbox(
+  tenantId: string,
+  collectionId: string,
+  item: {
+    id: string;
+    version: number;
+    kind?: string | null;
+    custodianId?: string | null;
+  },
+  round: number,
+): {
+  evidenceItemId: string;
+  tenantId: string;
+  topic: string;
+  dedupKey: string;
+  payload: Record<string, unknown>;
+} | null {
+  const retry = String(round);
+  if (item.kind === 'email') {
+    return {
+      evidenceItemId: item.id,
+      tenantId,
+      topic: 'process.parse',
+      dedupKey: `parse:${item.id}:v${String(item.version)}:retry${retry}`,
+      payload: { tenantId, evidenceItemId: item.id, version: item.version },
+    };
+  }
+  if (item.kind === 'container') {
+    if (item.custodianId === null || item.custodianId === undefined) return null;
+    return {
+      evidenceItemId: item.id,
+      tenantId,
+      topic: 'pst.extract',
+      dedupKey: `pst:${collectionId}:${item.id}:retry${retry}`,
+      payload: {
+        tenantId,
+        collectionId,
+        custodianId: item.custodianId,
+        evidenceItemId: item.id,
+      },
+    };
+  }
+  return {
+    evidenceItemId: item.id,
+    tenantId,
+    topic: 'process.extract',
+    dedupKey: `extract:${item.id}:v${String(item.version)}:retry${retry}`,
+    payload: { tenantId, evidenceItemId: item.id, version: item.version },
+  };
+}
+
 @Injectable()
 export class CollectionsService {
   constructor(
@@ -1197,30 +1254,34 @@ export class CollectionsService {
           malwareStatus: { not: MalwareStatus.object_missing },
           NOT: { processingDetail: { startsWith: 'evidence object is MISSING' } },
         },
-        select: { id: true, version: true },
+        select: { id: true, version: true, kind: true, custodianId: true },
         orderBy: { id: 'asc' },
         take: RETRY_ITEM_CAP,
       });
 
-      for (const batch of chunk(stuckItems, RETRY_BATCH_SIZE)) {
+      const processingRound = Date.now();
+      const processingJobs = stuckItems
+        .map((item) => processingRetryOutbox(auth.tenantId, id, item, processingRound))
+        .filter((row): row is NonNullable<typeof row> => row !== null);
+
+      for (const batch of chunk(processingJobs, RETRY_BATCH_SIZE)) {
         await tx.outboxEvent.createMany({
-          data: batch.map((item) => ({
-            tenantId: auth.tenantId,
-            topic: 'process.extract',
-            // A retry round needs a fresh dedup key, or the outbox would treat
-            // it as the already-dispatched original and drop it silently.
-            dedupKey: `extract:${item.id}:v${String(item.version)}:retry${String(Date.now())}`,
-            payload: { tenantId: auth.tenantId, evidenceItemId: item.id, version: item.version },
+          data: batch.map((row) => ({
+            tenantId: row.tenantId,
+            topic: row.topic,
+            dedupKey: row.dedupKey,
+            payload: row.payload,
           })),
           skipDuplicates: true,
         });
       }
 
-      if (stuckItems.length > 0) {
+      if (processingJobs.length > 0) {
         // Move them off 'exception' so the UI reflects that work is queued.
-        // If extraction fails again the processor puts them straight back.
+        // If the stage fails again the processor puts them straight back.
+        const retried = new Set(processingJobs.map((row) => row.evidenceItemId));
         await tx.evidenceItem.updateMany({
-          where: { id: { in: stuckItems.map((i) => i.id) } },
+          where: { id: { in: [...retried] } },
           data: { processingStatus: ProcessingStatus.pending },
         });
 
@@ -1235,7 +1296,6 @@ export class CollectionsService {
           where: { tenantId: auth.tenantId, collectionId: id },
           select: { id: true, kind: true, detail: true },
         });
-        const retried = new Set(stuckItems.map((i) => i.id));
         const toClear = openRows
           .filter((row) => {
             if (row.kind === 'object_missing') return false;
@@ -1261,7 +1321,7 @@ export class CollectionsService {
         'collection.retried',
         {
           retriedItems: failedItems.length,
-          retriedProcessing: stuckItems.length,
+          retriedProcessing: processingJobs.length,
           retriedIndexing: reindexed,
         },
         request,
@@ -1270,7 +1330,7 @@ export class CollectionsService {
         id,
         status: failedItems.length > 0 ? CollectionStatus.fetching : collection.status,
         retriedItems: failedItems.length,
-        retriedProcessing: stuckItems.length,
+        retriedProcessing: processingJobs.length,
         retriedIndexing: reindexed,
       };
     });

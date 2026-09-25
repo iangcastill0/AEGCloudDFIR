@@ -60,6 +60,7 @@ export const meResponse = z.object({
   user: z.object({ id: z.string(), email: z.string(), displayName: z.string() }),
   tenant: z.object({ id: z.string(), name: z.string(), slug: z.string() }).nullable(),
   roles: z.array(z.string()),
+  invited: z.boolean(),
   memberships: z.array(
     z.object({ tenantId: z.string(), tenantName: z.string(), roles: z.array(z.string()) }),
   ),

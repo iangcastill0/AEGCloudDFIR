@@ -45,6 +45,24 @@ class MessageCapReached extends Error {
 
 const TERMINAL_ITEM_STATES = new Set(['preserved', 'processed', 'indexed']);
 
+/** How often a live extract bumps the container ledger so the stall sweeper waits. */
+export const PST_EXTRACT_HEARTBEAT_MS = 60_000;
+
+async function touchContainerLedger(
+  ctx: WorkerContext,
+  tenantId: string,
+  collectionId: string,
+  custodianId: string,
+  providerItemId: string,
+): Promise<void> {
+  await withTenantContext(ctx.prisma, tenantId, (tx) =>
+    tx.collectionItem.updateMany({
+      where: { collectionId, custodianId, providerItemId },
+      data: { updatedAt: new Date() },
+    }),
+  );
+}
+
 function containerMemberId(containerId: string, descriptorNodeId: string): string {
   return `pst:${containerId}:${descriptorNodeId}`;
 }
@@ -156,6 +174,12 @@ export async function processPstExtract(
   const container = loaded.container;
   const containerBlob = container.blob;
   if (containerBlob === null) return;
+
+  // Download + walk of a large PST routinely exceeds the 15-minute stall
+  // window. Touch the ledger now (and again during the walk) so the sweeper
+  // does not treat a live extract as abandoned.
+  await touchContainerLedger(ctx, tenantId, collectionId, custodianId, containerProviderItemId);
+
   const alreadyPreserved = new Set(
     loaded.existingMembers
       .filter((m) => TERMINAL_ITEM_STATES.has(m.state))
@@ -177,6 +201,7 @@ export async function processPstExtract(
       containerBlob.objectKey,
     );
     await pipeline(blobStream, createWriteStream(tempFile));
+    await touchContainerLedger(ctx, tenantId, collectionId, custodianId, containerProviderItemId);
 
     try {
       archive = reader.open(tempFile);
@@ -233,8 +258,19 @@ export async function processPstExtract(
     }
 
     const openArchive = archive;
+    let lastHeartbeat = Date.now();
     try {
       await openArchive.walk(async (msg, folderPath) => {
+        if (Date.now() - lastHeartbeat >= PST_EXTRACT_HEARTBEAT_MS) {
+          await touchContainerLedger(
+            ctx,
+            tenantId,
+            collectionId,
+            custodianId,
+            containerProviderItemId,
+          );
+          lastHeartbeat = Date.now();
+        }
         if (extracted >= maxMessages) {
           capExceeded = true;
           throw new MessageCapReached();

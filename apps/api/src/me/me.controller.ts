@@ -10,6 +10,7 @@ export interface MeResponse {
   user: { id: string; email: string; displayName: string };
   tenant: { id: string; name: string; slug: string } | null;
   roles: string[];
+  invited: boolean;
   memberships: Array<{ tenantId: string; tenantName: string; roles: string[] }>;
 }
 
@@ -43,6 +44,7 @@ export class MeController {
         ? { id: active.tenant.id, name: active.tenant.name, slug: active.tenant.slug }
         : null,
       roles: active ? active.roles.map((r) => r.role) : [],
+      invited: memberships.some((m) => m.invited),
       memberships: memberships.map((m) => ({
         tenantId: m.tenantId,
         tenantName: m.tenant.name,
