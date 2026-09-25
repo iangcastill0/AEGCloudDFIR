@@ -30,9 +30,12 @@ const TENANT_CREATE_COOLDOWN_MS = 15 * 60 * 1000;
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const STANDING_JOIN_ROLE = TenantRole.reviewer;
 
-function signupInviteUrl(apiPublicUrl: string, token: string): string {
-  const next = `/signup?token=${encodeURIComponent(token)}`;
-  return `${apiPublicUrl}/auth/login?redirectTo=${encodeURIComponent(next)}`;
+function signupInviteUrl(webPublicUrl: string, token: string): string {
+  // Stay on the app host. Sending this through /auth/login put the token in
+  // the API access log (nested inside redirectTo, which logSafeUrl missed)
+  // and started OIDC immediately, so a leftover Authentik session was adopted
+  // with no Sign-in click. /signup shows the door; they click through after.
+  return `${webPublicUrl}/signup?token=${encodeURIComponent(token)}`;
 }
 
 @Injectable()
@@ -178,7 +181,7 @@ export class TenantsService {
       return created;
     });
 
-    const inviteUrl = signupInviteUrl(this.config.CDFIR_API_PUBLIC_URL, token);
+    const inviteUrl = signupInviteUrl(this.config.CDFIR_WEB_PUBLIC_URL, token);
     return {
       inviteId: invite.id,
       email: invite.email,
@@ -203,7 +206,7 @@ export class TenantsService {
       return minted;
     });
     return {
-      inviteUrl: signupInviteUrl(this.config.CDFIR_API_PUBLIC_URL, token),
+      inviteUrl: signupInviteUrl(this.config.CDFIR_WEB_PUBLIC_URL, token),
       role: STANDING_JOIN_ROLE,
     };
   }
@@ -229,7 +232,7 @@ export class TenantsService {
       });
     });
     return {
-      inviteUrl: signupInviteUrl(this.config.CDFIR_API_PUBLIC_URL, token),
+      inviteUrl: signupInviteUrl(this.config.CDFIR_WEB_PUBLIC_URL, token),
       role: STANDING_JOIN_ROLE,
     };
   }
