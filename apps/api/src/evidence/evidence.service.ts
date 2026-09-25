@@ -23,6 +23,7 @@ import '../common/http.js';
 import type { AuthContext } from '../common/http.js';
 import { APP_CONFIG, EVIDENCE_STORE, PRISMA } from '../common/tokens.js';
 import { isCaseRestricted, mayViewPrivileged } from '../common/roles.js';
+import { chunk, FAMILY_QUERY_CHUNK } from '../common/families.js';
 import { AuditService } from '../audit/audit.service.js';
 import { mayReadImport } from '../imports/import-access.js';
 
@@ -313,40 +314,61 @@ export class EvidenceService {
       item: { id: string; kind: string; name: string; size: string; sha256: string };
     }[];
   }> {
+    // requireItem gates the requested id. Related rows are a second read: a
+    // case-restricted caller who may open a parent must not learn the name,
+    // size or hash of an attachment that was never filed into one of their
+    // cases. The detail panel always fetches this list (useEvidence), so the
+    // leak fired on every item open — not only when someone clicked Family.
     await this.requireItem(auth, id, (tx) =>
       tx.evidenceItem.findFirst({ where: { id, tenantId: auth.tenantId }, select: { id: true } }),
     );
-    const rels = await withTenantContext(this.prisma, auth.tenantId, async (tx) => {
-      const rows = await tx.evidenceRelationship.findMany({
+    const items = await withTenantContext(this.prisma, auth.tenantId, async (tx) => {
+      let rels = await tx.evidenceRelationship.findMany({
         where: { tenantId: auth.tenantId, OR: [{ parentId: id }, { childId: id }] },
         include: {
           parent: { select: { id: true, kind: true, name: true, size: true, sha256: true } },
           child: { select: { id: true, kind: true, name: true, size: true, sha256: true } },
         },
       });
-      if (mayViewPrivileged(auth)) return rows;
-      const otherIds = rows.map((rel) => (rel.parentId === id ? rel.childId : rel.parentId));
-      if (otherIds.length === 0) return rows;
-      const hidden = await tx.tagAssignment.findMany({
-        where: {
-          tenantId: auth.tenantId,
-          evidenceItemId: { in: otherIds },
-          tag: { isPrivileged: true },
-        },
-        select: { evidenceItemId: true },
-      });
-      const hiddenIds = new Set(hidden.map((row) => row.evidenceItemId));
-      return rows.filter((rel) => {
-        const otherId = rel.parentId === id ? rel.childId : rel.parentId;
-        return !hiddenIds.has(otherId);
-      });
-    });
-    return {
-      items: rels.map((rel) => {
+      const otherIdOf = (rel: (typeof rels)[number]) =>
+        rel.parentId === id ? rel.childId : rel.parentId;
+
+      if (!mayViewPrivileged(auth) && rels.length > 0) {
+        const otherIds = rels.map(otherIdOf);
+        const hidden = await tx.tagAssignment.findMany({
+          where: {
+            tenantId: auth.tenantId,
+            evidenceItemId: { in: otherIds },
+            tag: { isPrivileged: true },
+          },
+          select: { evidenceItemId: true },
+        });
+        const hiddenIds = new Set(hidden.map((row) => row.evidenceItemId));
+        rels = rels.filter((rel) => !hiddenIds.has(otherIdOf(rel)));
+      }
+
+      if (isCaseRestricted(auth) && rels.length > 0) {
+        const otherIds = [...new Set(rels.map(otherIdOf))];
+        const visible = new Set<string>();
+        for (const batch of chunk(otherIds, FAMILY_QUERY_CHUNK)) {
+          const rows = await tx.caseItem.findMany({
+            where: {
+              tenantId: auth.tenantId,
+              evidenceItemId: { in: batch },
+              case: { members: { some: { membershipId: auth.membershipId } } },
+            },
+            select: { evidenceItemId: true },
+            distinct: ['evidenceItemId'],
+          });
+          for (const row of rows) visible.add(row.evidenceItemId);
+        }
+        rels = rels.filter((rel) => visible.has(otherIdOf(rel)));
+      }
+
+      return rels.map((rel) => {
         const other = rel.parentId === id ? rel.child : rel.parent;
         return {
           relationship: rel.kind,
-          // Direction is relative to the requested item.
           direction: rel.parentId === id ? ('child' as const) : ('parent' as const),
           detail: rel.detail,
           item: {
@@ -357,8 +379,9 @@ export class EvidenceService {
             sha256: other.sha256,
           },
         };
-      }),
-    };
+      });
+    });
+    return { items };
   }
 
   /** Chain-of-custody: acquisition facts + every audit event for this item. */
