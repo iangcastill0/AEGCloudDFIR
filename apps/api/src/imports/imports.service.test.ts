@@ -6,6 +6,7 @@ import { ImportsService } from './imports.service.js';
 import {
   CASE_ID,
   ITEM_A,
+  ITEM_B,
   MEMBERSHIP_ID,
   TENANT_ID,
   USER_ID,
@@ -189,8 +190,9 @@ describe('ImportsService', () => {
       },
       evidenceItem: {
         findUniqueOrThrow: vi.fn().mockResolvedValue({ malwareStatus: 'scan_failed', version: 1 }),
+        findMany: vi.fn().mockResolvedValue([]),
       },
-      outboxEvent: { create: outboxCreate },
+      outboxEvent: { create: outboxCreate, createMany: vi.fn() },
     });
     const audit = fakeAudit();
     const service = new ImportsService(prisma, store() as never, audit.service);
@@ -203,6 +205,134 @@ describe('ImportsService', () => {
           topic: 'process.scan',
           payload: { tenantId: TENANT_ID, evidenceItemId: ITEM_A, version: 1 },
         }),
+      }),
+    );
+  });
+
+  it('re-scans extracted members that failed after Crush already wrote them', async () => {
+    // Analyze skips existing paths. Member scan keys are once-ever. Retry used
+    // to complete the import again while those files stayed scan_failed, never
+    // extracted, and never showed in Review.
+    const importId = '99999999-9999-4999-8999-999999999999';
+    const outboxCreate = vi.fn().mockResolvedValue({ id: 'event-1' });
+    const outboxCreateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const prisma = fakePrisma({
+      forensicImport: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: importId,
+          name: 'sample.zip',
+          status: 'failed',
+          sourceEvidenceItemId: ITEM_A,
+          createdById: USER_ID,
+          parserVersion: 'crush@abc',
+          artifactCount: 1,
+          error: 'an extracted member malware scan did not complete',
+          createdAt: new Date('2026-09-24T12:00:00Z'),
+          updatedAt: new Date('2026-09-24T12:00:00Z'),
+          cases: [],
+        }),
+        update: vi.fn(),
+      },
+      evidenceItem: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({ malwareStatus: 'clean', version: 1 }),
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: ITEM_B,
+            version: 1,
+            malwareStatus: 'scan_failed',
+            processingStatus: 'pending',
+          },
+        ]),
+      },
+      outboxEvent: { create: outboxCreate, createMany: outboxCreateMany },
+    });
+    const audit = fakeAudit();
+    const service = new ImportsService(prisma, store() as never, audit.service);
+
+    await service.retry(makeAuth([TenantRole.case_manager]), importId, fakeRequest());
+
+    expect(outboxCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ topic: 'import.analyze' }),
+      }),
+    );
+    const memberRows = (
+      outboxCreateMany.mock.calls[0]?.[0] as {
+        data: { topic: string; dedupKey: string; payload: { evidenceItemId: string } }[];
+      }
+    ).data;
+    expect(memberRows).toEqual([
+      expect.objectContaining({
+        topic: 'process.scan',
+        payload: { tenantId: TENANT_ID, evidenceItemId: ITEM_B, version: 1 },
+      }),
+    ]);
+    expect(memberRows[0]?.dedupKey).toMatch(new RegExp(`^scan:${ITEM_B}:v1:retry`));
+    expect(memberRows[0]?.dedupKey).not.toBe(`scan:${ITEM_B}:v1`);
+    expect(audit.appendTx).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        summary: { retriedMemberScans: 1, retriedMemberExtracts: 0 },
+      }),
+    );
+  });
+
+  it('re-extracts members whose text stage failed, with a fresh extract key', async () => {
+    const importId = '99999999-9999-4999-8999-999999999999';
+    const outboxCreateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const updateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const prisma = fakePrisma({
+      forensicImport: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: importId,
+          name: 'sample.zip',
+          status: 'completed',
+          sourceEvidenceItemId: ITEM_A,
+          createdById: USER_ID,
+          parserVersion: 'crush@abc',
+          artifactCount: 1,
+          error: '',
+          createdAt: new Date('2026-09-24T12:00:00Z'),
+          updatedAt: new Date('2026-09-24T12:00:00Z'),
+          cases: [],
+        }),
+        update: vi.fn(),
+      },
+      evidenceItem: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({ malwareStatus: 'clean', version: 1 }),
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: ITEM_B,
+            version: 1,
+            malwareStatus: 'clean',
+            processingStatus: 'exception',
+          },
+        ]),
+        updateMany,
+      },
+      outboxEvent: {
+        create: vi.fn().mockResolvedValue({ id: 'event-1' }),
+        createMany: outboxCreateMany,
+      },
+    });
+    const service = new ImportsService(prisma, store() as never, fakeAudit().service);
+
+    await service.retry(makeAuth([TenantRole.case_manager]), importId, fakeRequest());
+
+    const memberRows = (
+      outboxCreateMany.mock.calls[0]?.[0] as { data: { topic: string; dedupKey: string }[] }
+    ).data;
+    expect(memberRows).toEqual([
+      expect.objectContaining({
+        topic: 'process.extract',
+        payload: { tenantId: TENANT_ID, evidenceItemId: ITEM_B, version: 1 },
+      }),
+    ]);
+    expect(memberRows[0]?.dedupKey).toMatch(new RegExp(`^extract:${ITEM_B}:v1:retry`));
+    expect(updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: { in: [ITEM_B] } },
+        data: { processingStatus: 'pending' },
       }),
     );
   });
