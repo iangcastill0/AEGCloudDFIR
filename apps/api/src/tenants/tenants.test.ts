@@ -310,8 +310,9 @@ describe('TenantsService.redeemInvite', () => {
   it('does not add reviewer to someone who is already a member', async () => {
     // The standing URL lives on the dashboard. A read_only member who opens
     // it used to gain reviewer, which lifts the case-only read fence.
-    const roleCreate = vi.fn(async () => ({ id: 'role-1' }));
+    const membershipCreate = vi.fn(async () => ({ id: 'mem-1' }));
     const membershipUpdate = vi.fn(async () => ({ id: 'mem-1' }));
+    const roleCreate = vi.fn(async () => ({ id: 'role-1' }));
     const { service, audit } = makeService({
       tenantInvite: { findUnique: vi.fn(async () => null) },
       tenant: {
@@ -324,7 +325,8 @@ describe('TenantsService.redeemInvite', () => {
       },
       user: { findUnique: vi.fn(async () => ({ id: USER_ID })) },
       membership: {
-        findUnique: vi.fn(async () => ({ id: 'mem-1', status: 'active' })),
+        findUnique: vi.fn(async () => ({ id: 'mem-existing', status: 'active' })),
+        create: membershipCreate,
         update: membershipUpdate,
       },
       roleAssignment: { findUnique: vi.fn(async () => null), create: roleCreate },
@@ -332,8 +334,9 @@ describe('TenantsService.redeemInvite', () => {
 
     const result = await service.redeemInvite(USER_ID, token, fakeRequest());
     expect(result).toEqual({ tenantId: TENANT_ID, name: 'Acme', slug: 'acme' });
-    expect(roleCreate).not.toHaveBeenCalled();
+    expect(membershipCreate).not.toHaveBeenCalled();
     expect(membershipUpdate).not.toHaveBeenCalled();
+    expect(roleCreate).not.toHaveBeenCalled();
     expect(audit.appendTx).not.toHaveBeenCalled();
   });
 

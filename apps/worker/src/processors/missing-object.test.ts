@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { COLLECTION, EVIDENCE, TENANT, fakeCtx, silentLog } from '../testing/fakes.js';
-import { recordMissingObject, type MissingObjectItem } from './missing-object.js';
+import {
+  recordMissingObject,
+  isMissingObjectDetail,
+  type MissingObjectItem,
+} from './missing-object.js';
 
 const KEY = `tenants/${TENANT}/originals/sha256/aa/${'a'.repeat(64)}`;
 
@@ -156,5 +160,16 @@ describe('recordMissingObject', () => {
       'evidence object is MISSING from object storage',
     );
     expect(silentLog.warn).not.toHaveBeenCalled();
+  });
+});
+
+describe('isMissingObjectDetail', () => {
+  it('recognises the detail recordMissingObject writes', () => {
+    expect(
+      isMissingObjectDetail(
+        `evidence object is MISSING from evidence object storage (key ${KEY}).`,
+      ),
+    ).toBe(true);
+    expect(isMissingObjectDetail('Tika returned 422')).toBe(false);
   });
 });

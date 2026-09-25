@@ -8,6 +8,7 @@ import {
 import {
   CollectionItemState,
   CollectionStatus,
+  MalwareStatus,
   ProcessingStatus,
   ConnectorStatus,
   Prisma,
@@ -1220,11 +1221,21 @@ export class CollectionsService {
       // bytes were collected fine, but a later stage (text extraction, OCR)
       // could not read them. Retrying only fetch failures left these stuck
       // forever, which is what made the button appear to do nothing.
+      //
+      // Absent bytes are different again. PR #13's object_missing path sets
+      // processingStatus to exception so the ledger names them, but extract
+      // cannot put the bytes back. Re-queueing extract for those items cleared
+      // the ledger and left the item pending forever: emails skip extract by
+      // kind, and anything that already has extracted text returns as a no-op.
+      // Prefix matches apps/worker/.../missing-object.ts `missingObjectMessage`
+      // (duplicated: api does not depend on worker).
       const stuckItems = await tx.evidenceItem.findMany({
         where: {
           tenantId: auth.tenantId,
           collectionId: id,
           processingStatus: ProcessingStatus.exception,
+          malwareStatus: { not: MalwareStatus.object_missing },
+          NOT: { processingDetail: { startsWith: 'evidence object is MISSING' } },
         },
         select: { id: true, version: true, kind: true, custodianId: true },
         orderBy: { id: 'asc' },
@@ -1257,17 +1268,20 @@ export class CollectionsService {
           data: { processingStatus: ProcessingStatus.pending },
         });
 
-        // Clear the ledger rows for exactly these items. The exceptions list is
-        // the set of OUTSTANDING problems and feeds disclosure; leaving an entry
-        // for an item that has since been read would misstate the collection.
-        // The permanent record lives in the append-only audit chain below, which
-        // records the retry and its count.
+        // Clear the ledger rows for exactly these items — never object_missing.
+        // The exceptions list is the set of OUTSTANDING problems and feeds
+        // disclosure; leaving an entry for an item that has since been read
+        // would misstate the collection. Erasing an object_missing row would
+        // be worse: the bytes are still gone and retry cannot restore them.
+        // The permanent record lives in the append-only audit chain below,
+        // which records the retry and its count.
         const openRows = await tx.collectionException.findMany({
           where: { tenantId: auth.tenantId, collectionId: id },
-          select: { id: true, detail: true },
+          select: { id: true, kind: true, detail: true },
         });
         const toClear = openRows
           .filter((row) => {
+            if (row.kind === 'object_missing') return false;
             const d = (row.detail ?? {}) as { evidenceItemId?: unknown };
             return typeof d.evidenceItemId === 'string' && retried.has(d.evidenceItemId);
           })

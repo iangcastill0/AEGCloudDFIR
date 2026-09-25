@@ -3,13 +3,15 @@
  *
  * Why this file exists
  * --------------------
- * Four processors read evidence bytes (scan, extract, ocr, preview) and every
+ * Five processors read evidence bytes (scan, extract, ocr, preview, parse) and every
  * one of them used to fold a missing object into some other, calmer outcome:
  *
  *   process.scan     -> malwareStatus 'scan_failed', logged 'clamav unavailable'
  *   process.extract  -> rethrown, so BullMQ retried a permanently absent object
  *   process.ocr      -> same
  *   process.preview  -> exception kind 'other', "The stored file could not be read"
+ *   process.parse    -> rethrown (same as extract); the primary reader of email
+ *                       bytes, and with ClamAV off the ONLY one that opens them
  *
  * So the worst thing that can happen to a forensic platform — collected
  * evidence that is no longer there — was reported in the words of a transient
@@ -19,7 +21,7 @@
  * A missing object is different in kind from every other failure here. It is
  * not retryable by the pipeline, nothing downstream can fix it, and it changes
  * what the product may honestly claim about a collection. So it gets its own
- * enum value in two places, its own log line, and one shared writer so the four
+ * enum value in two places, its own log line, and one shared writer so the
  * stages cannot drift apart again.
  */
 import { withTenantContext } from '@aeg-clouddfir/database';
@@ -31,7 +33,7 @@ import { QUEUES, dedupKeys } from '../queues.js';
 export { isObjectNotFoundError };
 
 /** The stage that noticed. Appears in the log, the ledger and the dedup key. */
-export type MissingObjectStage = 'scan' | 'extract' | 'ocr' | 'preview';
+export type MissingObjectStage = 'scan' | 'extract' | 'ocr' | 'preview' | 'parse';
 
 /** The item fields the recorder needs; every caller already loads these. */
 export interface MissingObjectItem {
@@ -68,6 +70,17 @@ export function missingObjectMessage(bucket: string, objectKey: string): string 
     'cannot be scanned, extracted, previewed, produced or exported. This is not a ' +
     'processing failure and retrying will not fix it.'
   );
+}
+
+/**
+ * True when an evidence item's processingDetail was written by recordMissingObject.
+ *
+ * Used by the collection Retry button so it does not treat absent bytes as an
+ * extract failure: re-queueing extract clears the ledger and leaves emails
+ * (and already-extracted files) pending forever.
+ */
+export function isMissingObjectDetail(processingDetail: string): boolean {
+  return processingDetail.startsWith('evidence object is MISSING');
 }
 
 /**
