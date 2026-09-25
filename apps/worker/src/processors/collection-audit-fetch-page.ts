@@ -9,10 +9,22 @@ import {
   type AuditConnectorBundle,
 } from '../audit.js';
 import { incrementProgress, recordException } from '../progress.js';
+import { chunkIds } from '../chunked.js';
 import { QUEUES, dedupKeys } from '../queues.js';
 import { cursorHash } from './collection-fetch-page.js';
 import { dateRangeToInstants, parseCollectionScope } from '../scope.js';
 import type { FetchPagePayload } from './payloads.js';
+
+/**
+ * Rows per `auditRecord.createMany`. Each row is 17 bind variables, and Prisma
+ * dies at 32,767 (`too many bind variables in prepared statement`). 1,000 rows
+ * is 17,000 binds.
+ *
+ * Google Reports pages 1,000 activities, and each activity can flatten to more
+ * than one event — 1,000 × 2 already overshoots 1,927 (32,767 / 17). A
+ * Microsoft Management Activity content blob has no page size at all.
+ */
+export const AUDIT_RECORD_INSERT_CHUNK = 1_000;
 
 function parseDate(value: string | undefined): Date | null {
   if (value === undefined || value === '') return null;
@@ -24,7 +36,7 @@ function parseDate(value: string | undefined): Date | null {
  * collection.fetch-page (source='audit'): fetch one provider page of audit
  * batches for a scope, preserve each batch's raw bytes as an audit_batch
  * evidence item, insert the parsed AuditRecord rows (idempotent via the unique
- * [tenantId, system, providerRecordId]), and advance the checkpoint — all under
+ * [tenantId, collectionId, system, providerRecordId]), and advance the checkpoint — all under
  * a single version-guarded tenant transaction so a crash or a racing worker can
  * never double-persist or skip a page. A per-scope 403 (auditing not enabled /
  * insufficient permission) is recorded as a permission_denied exception and
@@ -228,28 +240,31 @@ export async function processAuditFetchPage(
       });
 
       if (batch.records.length > 0) {
-        await tx.auditRecord.createMany({
-          data: batch.records.map((record) => ({
-            tenantId,
-            evidenceItemId: evidence.id,
-            collectionId,
-            provider: provider ?? 'microsoft',
-            system: record.system,
-            providerRecordId: record.providerRecordId,
-            workload: record.workload ?? '',
-            operation: record.operation ?? '',
-            recordType: record.recordType ?? '',
-            actorId: record.actorId ?? '',
-            actorEmail: record.actorEmail ?? '',
-            actorIp: record.actorIp ?? '',
-            targetId: record.targetId ?? '',
-            targetType: record.targetType ?? '',
-            resultStatus: record.resultStatus ?? '',
-            occurredAt: parseDate(record.occurredAt),
-            raw: (record.raw ?? {}) as Prisma.InputJsonValue,
-          })),
-          skipDuplicates: true,
-        });
+        const rows = batch.records.map((record) => ({
+          tenantId,
+          evidenceItemId: evidence.id,
+          collectionId,
+          provider: provider ?? 'microsoft',
+          system: record.system,
+          providerRecordId: record.providerRecordId,
+          workload: record.workload ?? '',
+          operation: record.operation ?? '',
+          recordType: record.recordType ?? '',
+          actorId: record.actorId ?? '',
+          actorEmail: record.actorEmail ?? '',
+          actorIp: record.actorIp ?? '',
+          targetId: record.targetId ?? '',
+          targetType: record.targetType ?? '',
+          resultStatus: record.resultStatus ?? '',
+          occurredAt: parseDate(record.occurredAt),
+          raw: (record.raw ?? {}) as Prisma.InputJsonValue,
+        }));
+        for (const chunk of chunkIds(rows, AUDIT_RECORD_INSERT_CHUNK)) {
+          await tx.auditRecord.createMany({
+            data: chunk,
+            skipDuplicates: true,
+          });
+        }
       }
 
       await tx.collectionItem.update({
