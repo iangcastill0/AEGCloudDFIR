@@ -1,7 +1,7 @@
+import { randomUUID } from 'node:crypto';
 import { appendAuditEvent, withTenantContext } from '@aeg-clouddfir/database';
 import { sanitizeError, type WorkerContext } from '../context.js';
-import { chunkIds } from '../chunked.js';
-import { QUEUES, dedupKeys } from '../queues.js';
+import { QUEUES } from '../queues.js';
 
 /**
  * File a finished collection's evidence into its case.
@@ -15,10 +15,37 @@ import { QUEUES, dedupKeys } from '../queues.js';
  * once for the whole collection instead of 43,379 times, and by finalize every
  * attachment child exists — filing as items arrived would have added parents
  * and missed the children that parse creates afterwards.
+ *
+ * Scale
+ * -----
+ * The first version loaded every evidence id into Node, inserted case_items in
+ * chunks of 1,000, and queued one `search.index` per item. That is the same
+ * shape the API used to use, and it was measured on a 434,910-item collection:
+ * ~1,400 database round trips and 10-25 hours of re-index queue, all to append
+ * one string to one search field. Finalize then also swallowed a timeout on the
+ * initial `findMany` of every id, so a large collection could finish with an
+ * empty case and only a log line saying so.
+ *
+ * Membership is now one INSERT ... SELECT per page (same SQL as the API's
+ * addWholeCollection), and the index is told once via `search.case-collection`.
+ * Postgres stays the source of truth; the engine-side stamp only shortens the
+ * wait for documents that are already indexed.
  */
 
-/** Rows per insert. Matches the API's case-item insert size. */
-const CASE_ITEM_CHUNK = 1_000;
+/**
+ * Rows per statement. Matches the API's collection-to-case page size: nothing
+ * crosses into Node, so a page is one short statement rather than a thousand.
+ */
+const COLLECTION_INSERT_CHUNK = 25_000;
+
+/** Sorts before every real uuid, so the first page needs no special case. */
+const UUID_ZERO = '00000000-0000-0000-0000-000000000000';
+
+interface CollectionInsertPage {
+  inserted: number;
+  scanned: number;
+  lastId: string | null;
+}
 
 export interface FiledIntoCase {
   caseId: string;
@@ -36,61 +63,76 @@ export async function fileCollectionIntoCase(
   if (caseId === null) return null;
 
   try {
-    const itemIds = await withTenantContext(ctx.prisma, tenantId, async (tx) => {
-      const rows = await tx.evidenceItem.findMany({
-        where: { collectionId },
-        select: { id: true },
-        orderBy: { id: 'asc' },
-      });
-      return rows.map((r) => r.id);
-    });
-    if (itemIds.length === 0) return { caseId, added: 0 };
-
     let added = 0;
-    for (const batch of chunkIds(itemIds, CASE_ITEM_CHUNK)) {
-      added += await withTenantContext(ctx.prisma, tenantId, async (tx) => {
-        const result = await tx.caseItem.createMany({
-          data: batch.map((evidenceItemId) => ({
-            tenantId,
-            caseId,
-            evidenceItemId,
-            // No actor: the worker filed these, not a person. A user id here
-            // would claim someone chose each item individually.
-            addedVia: 'collection',
-          })),
-          skipDuplicates: true,
-        });
+    let requested = 0;
+    let cursor = UUID_ZERO;
 
-        // Case membership lives in the SEARCH document, built from the
-        // database at index time — so an item joins a case and the case filter
-        // in Review still finds nothing until it is re-indexed. See the outbox
-        // note in CLAUDE.md: the dedup key must not collide with the indexing
-        // this item already had, which is why it carries its own stage name.
-        await tx.outboxEvent.createMany({
-          data: batch.map((evidenceItemId) => ({
-            tenantId,
-            topic: QUEUES.searchIndex,
-            dedupKey: dedupKeys.searchIndex(evidenceItemId, 1, 'case-auto'),
-            payload: { tenantId, evidenceItemId, version: 1 },
-          })),
-          skipDuplicates: true,
-        });
-        return result.count;
+    for (;;) {
+      const page = await withTenantContext(ctx.prisma, tenantId, async (tx) => {
+        const rows = await tx.$queryRaw<CollectionInsertPage[]>`
+          WITH batch AS (
+            SELECT e."id", e."tenantId"
+              FROM evidence_items e
+             WHERE e."tenantId" = ${tenantId}::uuid
+               AND e."collectionId" = ${collectionId}::uuid
+               AND e."id" > ${cursor}::uuid
+             ORDER BY e."id"
+             LIMIT ${COLLECTION_INSERT_CHUNK}
+          ), inserted AS (
+            INSERT INTO case_items ("id", "tenantId", "caseId", "evidenceItemId", "addedVia")
+            SELECT gen_random_uuid(), b."tenantId", ${caseId}::uuid, b."id", 'collection'
+              FROM batch b
+            ON CONFLICT ("caseId", "evidenceItemId") DO NOTHING
+            RETURNING 1
+          )
+          SELECT (SELECT count(*) FROM inserted)::int AS "inserted",
+                 (SELECT count(*) FROM batch)::int    AS "scanned",
+                 (SELECT max(b."id") FROM batch b)    AS "lastId"`;
+        return rows[0] ?? { inserted: 0, scanned: 0, lastId: null };
       });
+
+      added += page.inserted;
+      requested += page.scanned;
+      // A short page is the end. `lastId` is null only on an empty page, and
+      // without a cursor the next statement would repeat this one forever.
+      if (page.scanned < COLLECTION_INSERT_CHUNK || page.lastId === null) break;
+      cursor = page.lastId;
     }
 
-    await withTenantContext(ctx.prisma, tenantId, (tx) =>
-      appendAuditEvent(tx, {
+    // One job, not one per item. Queued AFTER the rows are committed so the
+    // worker stamps documents from the collection id while case_items already
+    // agree — anything re-indexed later rebuilds caseIds from those rows.
+    await withTenantContext(ctx.prisma, tenantId, async (tx) => {
+      if (requested > 0) {
+        await tx.outboxEvent.createMany({
+          data: [
+            {
+              tenantId,
+              topic: QUEUES.searchCaseCollection,
+              // Fresh token: a key of only case+collection would work once ever
+              // and every later auto-file of the same pair would be dropped.
+              dedupKey: `case-collection:${caseId}:${collectionId}:${randomUUID()}`,
+              payload: { tenantId, caseId, collectionId },
+            },
+          ],
+          skipDuplicates: true,
+        });
+      }
+
+      await appendAuditEvent(tx, {
         tenantId,
         action: 'case.items_added',
         targetType: 'case',
         targetId: caseId,
         actorDisplay: 'worker',
-        summary: { addedVia: 'collection', collectionId, requested: itemIds.length, added },
-      }),
-    );
+        summary: { addedVia: 'collection', collectionId, requested, added },
+      });
+    });
 
-    ctx.log.info({ collectionId, caseId, added }, 'finalize: filed collection into its case');
+    ctx.log.info(
+      { collectionId, caseId, added, requested },
+      'finalize: filed collection into its case',
+    );
     return { caseId, added };
   } catch (err) {
     // Filing is the last step and must never undo a finished collection. The

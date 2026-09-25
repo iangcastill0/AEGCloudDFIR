@@ -85,6 +85,14 @@ export interface PstExportOptions {
    * nothing exercises is a comment.
    */
   buildDigestCsvFn?: (items: readonly PstExportItem[]) => string;
+  /**
+   * Items that never went into the PST for a reason other than a bad native
+   * hash — typically a selected PDF or Drive file, which a mailbox file cannot
+   * hold. They are merged into exceptions.csv / manifest.exceptions so a
+   * recipient can see what was left out. Hash-verification failures are still
+   * recorded separately inside this function.
+   */
+  extraExceptions?: readonly { evidenceItemId: string; error: string }[];
 }
 
 export interface PstExportOutcome {
@@ -192,6 +200,9 @@ export function buildPstReadme(
     '     selection: those files hash to the values in native-digests.csv.',
     '  3. manifest.json is canonical JSON and lists every message, its native',
     '     digest, and which PST file it went into.',
+    '  4. exceptions.csv lists any selected item that is not in the PST: a',
+    '     native that failed hash verification, or a non-email (a mailbox file',
+    '     cannot hold a PDF or a Drive file).',
     '',
     'What you CANNOT verify',
     '----------------------',
@@ -385,6 +396,7 @@ export async function runPstExport(
     }
 
     // --- the paperwork ----------------------------------------------------
+    const exceptions = [...(opts.extraExceptions ?? []), ...failures];
     const manifestJson = canonicalJson({
       schema: 'cdfir.export.pst.manifest.v1',
       exportId,
@@ -407,7 +419,7 @@ export async function runPstExport(
       ],
       notice: TRUTHFULNESS_NOTICES.pstExport,
       itemCount: staged.length,
-      failedCount: failures.length,
+      failedCount: exceptions.length,
       parts: uploaded.map((p) => ({
         partNumber: p.partNumber,
         filename: pstPartFilename(p.partNumber),
@@ -425,7 +437,7 @@ export async function runPstExport(
         custodianEmail: i.custodianEmail,
         collectionId: i.collectionId,
       })),
-      exceptions: failures,
+      exceptions,
     });
 
     const readme = buildPstReadme(
@@ -435,7 +447,7 @@ export async function runPstExport(
     );
     const exceptionsCsv = [
       ['evidenceItemId', 'error'].map((c) => csvEscape(c)).join(','),
-      ...failures.map((f) => [f.evidenceItemId, f.error].map((v) => csvEscape(v)).join(',')),
+      ...exceptions.map((f) => [f.evidenceItemId, f.error].map((v) => csvEscape(v)).join(',')),
     ].join('\r\n');
 
     // Sidecars go to object storage beside the parts, so the download plumbing
