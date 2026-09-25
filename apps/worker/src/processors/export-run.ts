@@ -911,18 +911,31 @@ async function runCsvExport(
  * the zero. In a product whose failure mode is "reports success, silently
  * broken", an empty archive must say so out loud.
  *
- * `inlineCount` exists for the same reason. With attachments left inside their
- * parent emails, a 434,878-item export unzips to 185,091 files. A reviewer who
- * counts them and is told nothing has every reason to think evidence went
- * missing, so the difference is stated up front rather than left to be found.
+ * `itemCount` here is DELIVERED items (written files + inline attachments),
+ * not selected items. So "everything failed verification" also lands as
+ * itemCount 0 — and must NOT reuse the "selection was empty" sentence. That
+ * wording sent operators to re-pick the tag while exceptions.csv held the
+ * real answer (missing objects, hash mismatches, no preserved natives).
+ *
+ * `inlineCount` exists for the same reason as the empty warning. With
+ * attachments left inside their parent emails, a 434,878-item export unzips
+ * to 185,091 files. A reviewer who counts them and is told nothing has every
+ * reason to think evidence went missing, so the difference is stated up front
+ * rather than left to be found.
  */
 export function exportStatusDetail(
   itemCount: number,
   failedCount: number,
   inlineCount = 0,
 ): string {
-  if (itemCount === 0) {
+  if (itemCount === 0 && failedCount === 0) {
     return 'No items matched this selection, so the export is empty. Check that the tag, case or search you chose still contains items.';
+  }
+  if (itemCount === 0 && failedCount > 0) {
+    return (
+      `${String(failedCount)} item(s) failed verification; nothing was written into the archive. ` +
+      'Open the export and read exceptions.csv — the selection matched items, but every one failed hash or storage checks.'
+    );
   }
   const said: string[] = [];
   if (inlineCount > 0) {

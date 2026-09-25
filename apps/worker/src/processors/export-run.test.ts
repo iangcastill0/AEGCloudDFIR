@@ -192,6 +192,18 @@ describe('exportStatusDetail', () => {
     expect(exportStatusDetail(0, 0)).not.toBe('');
   });
 
+  it('does not call a total verification failure an empty selection', () => {
+    // itemCount is delivered items (written + inline). When every selected
+    // item fails hash or storage checks, delivered is 0 and failedCount is N.
+    // The old branch treated that like "tag had no items" and pointed operators
+    // at the wrong cause while exceptions.csv held the integrity failures.
+    const detail = exportStatusDetail(0, 32);
+    expect(detail).toContain('32 item(s) failed verification');
+    expect(detail).toMatch(/exceptions\.csv/);
+    expect(detail).not.toContain('No items matched');
+    expect(detail).not.toMatch(/tag, case or search/);
+  });
+
   it('explains the difference between items and files when attachments are inline', () => {
     // The real shape: winder 3, 434,878 items, 185,091 files on disk. A
     // reviewer who counts the files and is told nothing has every reason to
@@ -207,6 +219,24 @@ describe('exportStatusDetail', () => {
     const detail = exportStatusDetail(100, 3, 40);
     expect(detail).toContain('60 file(s)');
     expect(detail).toContain('3 item(s) failed verification');
+  });
+});
+
+describe('native export status when every item fails verification', () => {
+  it('says verification failed, not that the selection was empty', async () => {
+    // Same shape as the path-naming arm: every item has blob: null, so each
+    // lands in exceptions.csv and delivered itemCount is 0. Ready + the empty
+    // selection sentence would have told an operator to re-pick the tag.
+    const f = fakeCtx();
+    armGenerated(f, 5);
+    await processExportRun(f.ctx, payload, { createArchive: () => silentWriter() });
+
+    const final = f.tx.export.update.mock.calls.at(-1)?.[0] as { data: Record<string, unknown> };
+    expect(final.data['status']).toBe('ready');
+    expect(final.data['itemCount']).toBe(0);
+    const detail = String(final.data['statusDetail']);
+    expect(detail).toContain('5 item(s) failed verification');
+    expect(detail).not.toContain('No items matched');
   });
 });
 
