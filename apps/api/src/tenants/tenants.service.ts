@@ -327,6 +327,23 @@ export class TenantsService {
     if (!user) throw new ForbiddenException('user no longer exists');
 
     return withTenantContext(this.prisma, found.id, async (tx) => {
+      const existing = await tx.membership.findUnique({
+        where: { tenantId_userId: { tenantId: found.id, userId } },
+        select: { id: true, status: true },
+      });
+      // Standing links are for first-time join only. Re-running them must not
+      // add reviewer (or any role) onto an existing membership — that would
+      // escalate read_only / auditor into tenant-wide evidence access — and
+      // must not silently re-activate a disabled member.
+      if (existing) {
+        if (existing.status !== MembershipStatus.active) {
+          throw new ForbiddenException(
+            'your membership in this organization is disabled; ask an admin to restore access',
+          );
+        }
+        return { tenantId: found.id, name: found.name, slug: found.slug };
+      }
+
       await this.ensureMembership(tx, found.id, userId, STANDING_JOIN_ROLE);
       await this.audit.appendTx(tx, {
         tenantId: found.id,

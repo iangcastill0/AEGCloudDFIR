@@ -307,6 +307,54 @@ describe('TenantsService.redeemInvite', () => {
       }),
     );
   });
+
+  it('does not add reviewer onto an existing lower-privilege membership via standing join', async () => {
+    const membershipCreate = vi.fn(async () => ({ id: 'mem-1' }));
+    const roleCreate = vi.fn(async () => ({ id: 'role-1' }));
+    const { service, audit } = makeService({
+      tenantInvite: { findUnique: vi.fn(async () => null) },
+      tenant: {
+        findFirst: vi.fn(async () => ({
+          id: TENANT_ID,
+          name: 'Acme',
+          slug: 'acme',
+          status: 'active',
+        })),
+      },
+      user: { findUnique: vi.fn(async () => ({ id: USER_ID })) },
+      membership: {
+        findUnique: vi.fn(async () => ({ id: 'mem-existing', status: 'active' })),
+        create: membershipCreate,
+      },
+      roleAssignment: { findUnique: vi.fn(async () => null), create: roleCreate },
+    });
+
+    const result = await service.redeemInvite(USER_ID, token, fakeRequest());
+    expect(result).toEqual({ tenantId: TENANT_ID, name: 'Acme', slug: 'acme' });
+    expect(membershipCreate).not.toHaveBeenCalled();
+    expect(roleCreate).not.toHaveBeenCalled();
+    expect(audit.appendTx).not.toHaveBeenCalled();
+  });
+
+  it('refuses to re-activate a disabled membership via standing join', async () => {
+    const { service } = makeService({
+      tenantInvite: { findUnique: vi.fn(async () => null) },
+      tenant: {
+        findFirst: vi.fn(async () => ({
+          id: TENANT_ID,
+          name: 'Acme',
+          slug: 'acme',
+          status: 'active',
+        })),
+      },
+      user: { findUnique: vi.fn(async () => ({ id: USER_ID })) },
+      membership: {
+        findUnique: vi.fn(async () => ({ id: 'mem-disabled', status: 'disabled' })),
+      },
+    });
+
+    await expect(service.redeemInvite(USER_ID, token)).rejects.toBeInstanceOf(ForbiddenException);
+  });
 });
 
 describe('TenantsService join link', () => {
