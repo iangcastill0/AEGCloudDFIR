@@ -20,14 +20,15 @@
  * just as well: we do not have one.
  */
 import { ensureOk, providerFetch, type FetchLike } from '../http.js';
-import type {
-  AuditBatch,
-  AuditConnector,
-  AuditListPage,
-  AuditRecordRaw,
-  FetchAuditPageOptions,
-  RateLimitObserver,
-  TokenProvider,
+import {
+  AuditConfigError,
+  type AuditBatch,
+  type AuditConnector,
+  type AuditListPage,
+  type AuditRecordRaw,
+  type FetchAuditPageOptions,
+  type RateLimitObserver,
+  type TokenProvider,
 } from '../types.js';
 
 /** The single scope this source exposes: the team's whole event stream. */
@@ -62,9 +63,15 @@ export function teamLogRequest(opts: FetchAuditPageOptions): Record<string, unkn
   if (opts.until !== undefined && opts.until !== '') time.end_time = opts.until;
   if (Object.keys(time).length > 0) body.time = time;
 
-  // One actor can be expressed; several cannot. Applying just the first would
-  // under-collect while still reporting success, so the filter is dropped and
-  // everything is collected instead.
+  // One actor can be expressed; several cannot. Dropping the filter and
+  // collecting everyone used to look like success while over-collecting. Fail
+  // closed so the worker records a misconfigured scope instead.
+  if (opts.actorFilter !== undefined && opts.actorFilter.length > 1) {
+    throw new AuditConfigError(
+      'dropbox team log actorFilter supports at most one actor per collection; ' +
+        'run separate collections per actor, or leave the filter blank for all users',
+    );
+  }
   if (opts.actorFilter !== undefined && opts.actorFilter.length === 1) {
     body.account_id = opts.actorFilter[0];
   }

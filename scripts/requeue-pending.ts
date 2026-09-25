@@ -58,7 +58,7 @@ interface Stage {
  * on status alone and would have fired 4,535 no-op extract jobs at emails on
  * staging: every one would have completed successfully and moved nothing.
  */
-function nextStage(status: string, kind: string): Stage | null {
+function nextStage(status: string, kind: string, mimeType = ''): Stage | null {
   switch (status) {
     case 'pending':
       // Emails are containers: parse reads them and creates their attachments.
@@ -69,9 +69,15 @@ function nextStage(status: string, kind: string): Stage | null {
     case 'parsed':
       // Only emails reach 'parsed', and their text is already written.
       return { topic: 'search.index', stage: 'index' };
-    case 'extracted':
-      // ocr-policy decides whether there is anything to do; a skip is cheap.
-      return { topic: 'process.ocr', stage: 'ocr' };
+    case 'extracted': // Same cost-class split as process-extract's ocrOutboxRows: images belong
+    // on the image lane. Routing them onto process.ocr recreates the blockage
+    // the split removed (tens of thousands of images in front of PDFs).
+    {
+      const mime = (mimeType.split(';')[0] ?? '').trim().toLowerCase();
+      return mime.startsWith('image/')
+        ? { topic: 'process.ocr.image', stage: 'ocr' }
+        : { topic: 'process.ocr', stage: 'ocr' };
+    }
     case 'ocr_complete':
     case 'preview_ready':
       return { topic: 'search.index', stage: 'index' };
@@ -125,7 +131,7 @@ async function main(): Promise<void> {
       const page = await withTenantContext(prisma, tenantId, (tx) =>
         tx.evidenceItem.findMany({
           where: { processingStatus: { in: statuses as never } },
-          select: { id: true, processingStatus: true, kind: true },
+          select: { id: true, processingStatus: true, kind: true, mimeType: true },
           take: Math.min(PAGE, limit - seen),
           ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
           orderBy: { id: 'asc' },
@@ -138,7 +144,7 @@ async function main(): Promise<void> {
       const rows = page.flatMap((item) => {
         const status = String(item.processingStatus);
         const kind = String(item.kind);
-        const next = nextStage(status, kind);
+        const next = nextStage(status, kind, String(item.mimeType ?? ''));
         if (next === null) return [];
         totals[`${status} (${kind})`] = (totals[`${status} (${kind})`] ?? 0) + 1;
         return [

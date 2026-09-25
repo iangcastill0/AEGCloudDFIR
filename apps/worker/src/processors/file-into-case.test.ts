@@ -1,94 +1,95 @@
 import { describe, expect, it } from 'vitest';
 import { TENANT, fakeCtx, type FakeCtx } from '../testing/fakes.js';
+import { QUEUES } from '../queues.js';
 import { fileCollectionIntoCase } from './file-into-case.js';
 
 const COLLECTION = '00000000-0000-4000-8000-0000000000c1';
 const CASE = '00000000-0000-4000-8000-0000000000ca';
+const ITEM_A = '00000000-0000-4000-8000-0000000000a1';
+const ITEM_B = '00000000-0000-4000-8000-0000000000a2';
 
-function itemIds(n: number): { id: string }[] {
-  return Array.from({ length: n }, (_, i) => ({
-    id: `00000000-0000-4000-8000-${i.toString(16).padStart(12, '0')}`,
-  }));
+/** One SQL page: inserted/scanned counts and the cursor for the next page. */
+function page(inserted: number, scanned: number, lastId: string | null): unknown[] {
+  return [{ inserted, scanned, lastId }];
 }
 
-function arm(f: FakeCtx, count: number): void {
-  f.tx.evidenceItem.findMany.mockResolvedValue(itemIds(count));
-  f.tx.caseItem.createMany.mockImplementation((args: { data: unknown[] }) =>
-    Promise.resolve({ count: args.data.length }),
-  );
-  f.tx.outboxEvent.createMany.mockResolvedValue({ count: 0 });
-}
-
-/** Every row the run tried to insert into case_items. */
-function caseRows(f: FakeCtx): Record<string, unknown>[] {
-  return f.tx.caseItem.createMany.mock.calls.flatMap(
-    (c) => (c[0] as { data: Record<string, unknown>[] }).data,
-  );
+function armPages(f: FakeCtx, pages: unknown[][]): void {
+  let i = 0;
+  f.tx.$queryRaw.mockImplementation(() => {
+    const next = pages[i] ?? page(0, 0, null);
+    i += 1;
+    return Promise.resolve(next);
+  });
+  f.tx.outboxEvent.createMany.mockResolvedValue({ count: 1 });
 }
 
 describe('fileCollectionIntoCase', () => {
-  it('files every item of the collection into the case', async () => {
+  it('files every item of the collection into the case via INSERT ... SELECT', async () => {
     const f = fakeCtx();
-    arm(f, 3);
+    armPages(f, [page(3, 3, ITEM_A)]);
     const result = await fileCollectionIntoCase(f.ctx, TENANT, COLLECTION, CASE);
     expect(result).toEqual({ caseId: CASE, added: 3 });
-    expect(caseRows(f)).toHaveLength(3);
-    expect(caseRows(f)[0]).toMatchObject({ caseId: CASE, addedVia: 'collection' });
+    expect(f.tx.$queryRaw).toHaveBeenCalled();
+    // No id list ever enters Node — that was the path that timed out at 434k.
+    expect(f.tx.evidenceItem.findMany).not.toHaveBeenCalled();
+    expect(f.tx.caseItem.createMany).not.toHaveBeenCalled();
   });
 
-  it('re-indexes what it filed, or the case filter finds nothing', async () => {
-    // Case membership is read from the SEARCH document, which is built from
-    // the database at index time. Items joined a case and Review's case filter
-    // matched none of them, because caseIds never reached the document.
+  it('re-indexes with one case-collection job, not one search.index per item', async () => {
+    // Case membership is read from the SEARCH document. The old path queued
+    // one full re-index per item (10-25 hours on a 434,910-item collection)
+    // to append one string. One engine-side update is enough.
     const f = fakeCtx();
-    arm(f, 2);
+    armPages(f, [page(2, 2, ITEM_A)]);
     await fileCollectionIntoCase(f.ctx, TENANT, COLLECTION, CASE);
     const events = f.tx.outboxEvent.createMany.mock.calls.flatMap(
       (c) => (c[0] as { data: Record<string, unknown>[] }).data,
     );
-    expect(events).toHaveLength(2);
-    expect(events[0]).toMatchObject({ topic: 'search.index' });
-    // Its own stage name, so it cannot collide with the indexing the item
-    // already had — a dedup key works once, ever.
-    expect(String(events[0]?.['dedupKey'])).toContain('case-auto');
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      topic: QUEUES.searchCaseCollection,
+      payload: { tenantId: TENANT, caseId: CASE, collectionId: COLLECTION },
+    });
+    expect(String(events[0]?.['dedupKey'])).toContain(`case-collection:${CASE}:${COLLECTION}:`);
   });
 
-  it('claims no actor — a person did not pick these items', async () => {
+  it('pages a large collection instead of one giant statement', async () => {
     const f = fakeCtx();
-    arm(f, 1);
-    await fileCollectionIntoCase(f.ctx, TENANT, COLLECTION, CASE);
-    expect(caseRows(f)[0]).not.toHaveProperty('addedById');
-  });
-
-  it('chunks a large collection instead of one giant insert', async () => {
-    // A collection has no upper bound: a real one held 43,379 items.
-    const f = fakeCtx();
-    arm(f, 2_500);
-    await fileCollectionIntoCase(f.ctx, TENANT, COLLECTION, CASE);
-    expect(f.tx.caseItem.createMany.mock.calls.length).toBeGreaterThan(1);
-    for (const call of f.tx.caseItem.createMany.mock.calls) {
-      expect((call[0] as { data: unknown[] }).data.length).toBeLessThanOrEqual(1_000);
-    }
-    expect(caseRows(f)).toHaveLength(2_500);
+    // Two full 25,000-row pages then a short one — mirrors the API path.
+    armPages(f, [
+      page(25_000, 25_000, ITEM_A),
+      page(25_000, 25_000, ITEM_B),
+      page(100, 100, '00000000-0000-4000-8000-0000000000a3'),
+    ]);
+    const result = await fileCollectionIntoCase(f.ctx, TENANT, COLLECTION, CASE);
+    expect(result).toEqual({ caseId: CASE, added: 50_100 });
+    expect(f.tx.$queryRaw).toHaveBeenCalledTimes(3);
+    // Still exactly one index job for the whole collection.
+    const events = f.tx.outboxEvent.createMany.mock.calls.flatMap(
+      (c) => (c[0] as { data: Record<string, unknown>[] }).data,
+    );
+    expect(events).toHaveLength(1);
   });
 
   it('does nothing for a collection made before cases were automatic', async () => {
     // Inventing a case for an old collection would fabricate a record of a
     // decision nobody made.
     const f = fakeCtx();
-    arm(f, 5);
+    armPages(f, [page(5, 5, ITEM_A)]);
     expect(await fileCollectionIntoCase(f.ctx, TENANT, COLLECTION, null)).toBeNull();
-    expect(f.tx.caseItem.createMany).not.toHaveBeenCalled();
+    expect(f.tx.$queryRaw).not.toHaveBeenCalled();
   });
 
   it('handles a collection that preserved nothing', async () => {
     const f = fakeCtx();
-    arm(f, 0);
+    armPages(f, [page(0, 0, null)]);
     expect(await fileCollectionIntoCase(f.ctx, TENANT, COLLECTION, CASE)).toEqual({
       caseId: CASE,
       added: 0,
     });
-    expect(f.tx.caseItem.createMany).not.toHaveBeenCalled();
+    // No index job for an empty filing — nothing to stamp.
+    expect(f.tx.outboxEvent.createMany).not.toHaveBeenCalled();
+    expect(f.tx.auditEvent.create).toHaveBeenCalled();
   });
 
   it('never lets a filing failure undo a finished collection', async () => {
@@ -96,15 +97,14 @@ describe('fileCollectionIntoCase', () => {
     // re-run finalize and re-sign it; a missing case membership is recoverable
     // by adding the collection to the case by hand.
     const f = fakeCtx();
-    arm(f, 2);
-    f.tx.caseItem.createMany.mockRejectedValue(new Error('database went away'));
+    f.tx.$queryRaw.mockRejectedValue(new Error('database went away'));
     await expect(fileCollectionIntoCase(f.ctx, TENANT, COLLECTION, CASE)).resolves.toBeNull();
     expect(f.ctx.log.error).toHaveBeenCalled();
   });
 
   it('records the filing in the audit log', async () => {
     const f = fakeCtx();
-    arm(f, 4);
+    armPages(f, [page(4, 4, ITEM_A)]);
     await fileCollectionIntoCase(f.ctx, TENANT, COLLECTION, CASE);
     expect(f.tx.auditEvent.create).toHaveBeenCalled();
   });

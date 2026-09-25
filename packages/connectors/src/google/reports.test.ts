@@ -74,7 +74,7 @@ describe('GoogleReportsConnector.fetchAuditPage', () => {
     expect(req).toBeDefined();
   });
 
-  it('uses a single actor as the userKey, otherwise "all"', async () => {
+  it('uses a single actor as the userKey; rejects two-or-more instead of widening to all', async () => {
     const c = connector();
     await c.fetchAuditPage('login', { actorFilter: ['avery.chen@example.com'] });
     expect(
@@ -84,10 +84,12 @@ describe('GoogleReportsConnector.fetchAuditPage', () => {
     ).toBe(true);
 
     server.reset();
-    await c.fetchAuditPage('login', { actorFilter: ['a@example.com', 'b@example.com'] });
-    expect(server.requests.some((r) => r.path.includes('/users/all/applications/login'))).toBe(
-      true,
-    );
+    // Two actors must NOT quietly widen to "all" — that over-collected the
+    // whole domain when the operator meant a restrict list.
+    await expect(
+      c.fetchAuditPage('login', { actorFilter: ['a@example.com', 'b@example.com'] }),
+    ).rejects.toThrow(/at most one actor/);
+    expect(server.requests.some((r) => r.path.includes('/applications/login'))).toBe(false);
 
     server.reset();
     await c.fetchAuditPage('login', {});

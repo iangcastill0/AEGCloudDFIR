@@ -402,4 +402,55 @@ describe('runPstExport', () => {
       expect(sawWritable).toBe(true);
     });
   });
+
+  it('names extraExceptions in exceptions.csv and the manifest', async () => {
+    // The caller (a mixed PST selection) already decided a PDF cannot go in a
+    // mailbox file. If that id never reaches this file, the export still says
+    // ready and the recipient has no list of what was left out.
+    await withScratch(async (scratch) => {
+      const puts: Put[] = [];
+      const ctx = fakeContext(puts, () => NATIVE_BYTES);
+      const { createHash } = await import('node:crypto');
+      const realSha = createHash('sha256').update(NATIVE_BYTES).digest('hex');
+      const leftOut = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+      const outcome = await runPstExport(ctx, 't', 'e7', [item({ sha256: realSha })], {
+        binPath: '/unused',
+        scratchRoot: scratch,
+        timeoutMs: 1000,
+        spoolThresholdBytes: 1024,
+        partBytes: 1024 * 1024,
+        storeDisplayName: 'test',
+        extraExceptions: [
+          {
+            evidenceItemId: leftOut,
+            error: 'not an email; a PST is a mailbox file and cannot hold this item',
+          },
+        ],
+        runPst: async (jobPath) => {
+          const job = JSON.parse(await readFile(jobPath, 'utf8')) as {
+            outPath: string;
+            messages: unknown[];
+          };
+          await writeFile(job.outPath, Buffer.alloc(8, 1));
+          return {
+            ok: true,
+            messagesAdded: job.messages.length,
+            spooledAttachments: 0,
+            peakWorkingSetMiB: 1,
+            seconds: 1,
+            parts: [{ path: job.outPath, name: 'export.pst', bytes: 8 }],
+          };
+        },
+      });
+      expect(outcome.failedCount).toBe(0);
+      const csv = puts.find((p) => p.filename === 'exceptions.csv')?.body.toString('utf8') ?? '';
+      expect(csv).toContain(leftOut);
+      expect(csv).toContain('not an email');
+      const manifest = JSON.parse(
+        puts.find((p) => p.filename === 'manifest.json')?.body.toString('utf8') ?? '{}',
+      ) as { exceptions: { evidenceItemId: string }[]; failedCount: number };
+      expect(manifest.exceptions.map((e) => e.evidenceItemId)).toContain(leftOut);
+      expect(manifest.failedCount).toBe(1);
+    });
+  });
 });

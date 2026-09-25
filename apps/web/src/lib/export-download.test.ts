@@ -164,7 +164,20 @@ describe('generated scripts', () => {
   it('creates the folder and works from inside it', () => {
     const sh = buildBashScript(plan);
     expect(sh).toContain('mkdir -p "$DIR"');
-    expect(sh).toContain('DIR="winder-3-5007e931"');
+    expect(sh).toContain("DIR='winder-3-5007e931'");
+  });
+
+  it('does not put an export name where the shell would run it', () => {
+    const hostile = {
+      ...plan,
+      folderName: '$(id)`whoami`${IFS}',
+    };
+    const sh = buildBashScript(hostile);
+    const ps = buildPowerShellScript(hostile);
+    const dirLine = sh.split('\n').find((line) => line.startsWith('DIR='));
+    const psDirLine = ps.split('\n').find((line) => line.includes('$Dir'));
+    expect(dirLine).toBe("DIR='id-whoami-IFS'");
+    expect(psDirLine).toBe("$Dir      = 'id-whoami-IFS'");
   });
 
   it('warns that the script holds a credential', () => {

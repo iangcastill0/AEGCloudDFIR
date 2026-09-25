@@ -316,7 +316,17 @@ export class GoogleReportsConnector implements AuditConnector {
       gmailWindow = { start: windowStart, end: windowEnd, overallEnd };
     }
 
-    // A single actor narrows the report to one user; otherwise all users.
+    // The Reports API accepts one userKey or "all" — never a list. A single
+    // actor narrows the report. Zero actors means the whole domain. Two or
+    // more used to fall through to "all", which silently over-collected every
+    // user in the Workspace when the operator had typed a restrict list. Fail
+    // closed instead: the worker records this as a misconfigured scope.
+    if (opts.actorFilter !== undefined && opts.actorFilter.length > 1) {
+      throw new AuditConfigError(
+        'google reports actorFilter supports at most one actor per collection; ' +
+          'run separate collections per actor, or leave the filter blank for all users',
+      );
+    }
     const userKey =
       opts.actorFilter !== undefined && opts.actorFilter.length === 1
         ? (opts.actorFilter[0] as string)
