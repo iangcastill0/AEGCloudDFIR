@@ -49,6 +49,15 @@ export interface EvidenceItemTarget {
   kind: 'evidence-item';
   tenantId: string;
   evidenceItemId: string;
+  /**
+   * process.extract has no stall-sweeper recovery. A death leaves the item
+   * `pending`, finalize does not wait on file extract, and Retry only
+   * reindexes collection items that already have bytes — so the once-ever
+   * extract key stays burned and the file never becomes searchable.
+   * Mark exception so Retry re-queues extract. process.parse must stay
+   * pending so the unparsed-parent sweeper can still recover emails.
+   */
+  markProcessingException: boolean;
 }
 
 export interface ForensicImportTarget {
@@ -104,7 +113,12 @@ export function failureTargetFor(
   if (queue === QUEUES.processParse || queue === QUEUES.processExtract) {
     const evidenceItemId = str(data, 'evidenceItemId');
     if (evidenceItemId === null) return null;
-    return { kind: 'evidence-item', tenantId, evidenceItemId };
+    return {
+      kind: 'evidence-item',
+      tenantId,
+      evidenceItemId,
+      markProcessingException: queue === QUEUES.processExtract,
+    };
   }
 
   if (queue === QUEUES.importAnalyze) {
@@ -221,6 +235,50 @@ export async function recordTerminalFailure(
         },
         data: { state: 'failed', lastError: message },
       });
+      if (!target.markProcessingException) return;
+
+      const item = await tx.evidenceItem.findFirst({
+        where: { id: target.evidenceItemId, tenantId: target.tenantId },
+        select: {
+          id: true,
+          collectionId: true,
+          custodianId: true,
+          providerItemId: true,
+          name: true,
+          mimeType: true,
+          size: true,
+        },
+      });
+      // Only overwrite pending. If extract already wrote text, a later stall
+      // of a duplicate job must not hide a file that did complete.
+      await tx.evidenceItem.updateMany({
+        where: {
+          id: target.evidenceItemId,
+          tenantId: target.tenantId,
+          processingStatus: 'pending',
+        },
+        data: { processingStatus: 'exception', processingDetail: message.slice(0, 500) },
+      });
+      // Attachments often have no collection_items row. Without a ledger
+      // entry the exceptions list stays empty, Retry looks like it has
+      // nothing to do, and the missing text is invisible.
+      if (item !== null && item.collectionId !== null) {
+        await recordException(tx, {
+          tenantId: target.tenantId,
+          collectionId: item.collectionId,
+          custodianId: item.custodianId ?? undefined,
+          providerItemId: item.providerItemId,
+          kind: 'api_error',
+          message,
+          detail: {
+            recoveredBy: 'job-failure-handler',
+            evidenceItemId: item.id,
+            name: item.name,
+            mimeType: item.mimeType,
+            sizeBytes: Number(item.size),
+          },
+        });
+      }
     });
     ctx.log.warn(
       { evidenceItemId: target.evidenceItemId, reason },

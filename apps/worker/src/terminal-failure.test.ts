@@ -68,6 +68,24 @@ describe('failureTargetFor', () => {
       kind: 'evidence-item',
       tenantId: TENANT,
       evidenceItemId: '00000000-0000-4000-8000-0000000000dd',
+      markProcessingException: false,
+    });
+  });
+
+  it('marks extract stalls as processing exceptions so Retry can re-queue them', () => {
+    // Parse stays pending: the unparsed-parent sweeper recovers emails.
+    // Extract has no such sweeper. Finalize does not wait on file extract, so
+    // a stalled PDF seals with pending text and Retry used to only reindex.
+    expect(
+      failureTargetFor('process.extract', {
+        tenantId: TENANT,
+        evidenceItemId: '00000000-0000-4000-8000-0000000000dd',
+      }),
+    ).toEqual({
+      kind: 'evidence-item',
+      tenantId: TENANT,
+      evidenceItemId: '00000000-0000-4000-8000-0000000000dd',
+      markProcessingException: true,
     });
   });
 
@@ -117,15 +135,28 @@ interface Recorded {
   findFirst: ReturnType<typeof vi.fn>;
   progress: ReturnType<typeof vi.fn>;
   exception: ReturnType<typeof vi.fn>;
+  evidenceUpdateMany: ReturnType<typeof vi.fn>;
 }
 
-function fakeCtx(itemRow: Record<string, unknown> | null = { id: 'item-1' }) {
+function fakeCtx(
+  itemRow: Record<string, unknown> | null = { id: 'item-1' },
+  evidenceRow: Record<string, unknown> | null = {
+    id: '00000000-0000-4000-8000-0000000000dd',
+    collectionId: COLLECTION,
+    custodianId: CUSTODIAN,
+    providerItemId: 'drive:file',
+    name: 'memo.pdf',
+    mimeType: 'application/pdf',
+    size: 4096,
+  },
+) {
   const recorded: Recorded = {
     update: vi.fn(async () => ({})),
     updateMany: vi.fn(async () => ({ count: 1 })),
     findFirst: vi.fn(async () => itemRow),
     progress: vi.fn(async () => ({})),
     exception: vi.fn(async () => ({})),
+    evidenceUpdateMany: vi.fn(async () => ({ count: 1 })),
   };
   const tx = {
     // withTenantContext and incrementProgress both go through $executeRaw.
@@ -141,8 +172,9 @@ function fakeCtx(itemRow: Record<string, unknown> | null = { id: 'item-1' }) {
     },
     collectionException: { create: recorded.exception },
     evidenceItem: {
+      findFirst: vi.fn(async () => evidenceRow),
       update: vi.fn(async () => ({})),
-      updateMany: vi.fn(async () => ({ count: 1 })),
+      updateMany: recorded.evidenceUpdateMany,
     },
   } as unknown as TenantScopedTx;
 
@@ -199,7 +231,9 @@ describe('recordTerminalFailure', () => {
     expect(recorded.update).not.toHaveBeenCalled();
   });
 
-  it('marks the evidence item failed when a parse job dies', async () => {
+  it('marks the collection item failed when a parse job dies, but leaves evidence pending', async () => {
+    // The unparsed-parent sweeper recovers emails still pending. Flipping them
+    // to exception here would hide them from that sweeper.
     const { ctx, recorded } = fakeCtx();
     await recordTerminalFailure(
       ctx,
@@ -207,11 +241,42 @@ describe('recordTerminalFailure', () => {
         kind: 'evidence-item',
         tenantId: TENANT,
         evidenceItemId: '00000000-0000-4000-8000-0000000000dd',
+        markProcessingException: false,
       },
       STALLED_REASON,
     );
 
     expect(recorded.updateMany).toHaveBeenCalled();
+    expect(recorded.evidenceUpdateMany).not.toHaveBeenCalled();
+    expect(recorded.exception).not.toHaveBeenCalled();
+  });
+
+  it('marks stalled extract as an exception so Retry re-queues text extraction', async () => {
+    const { ctx, recorded } = fakeCtx();
+    await recordTerminalFailure(
+      ctx,
+      {
+        kind: 'evidence-item',
+        tenantId: TENANT,
+        evidenceItemId: '00000000-0000-4000-8000-0000000000dd',
+        markProcessingException: true,
+      },
+      STALLED_REASON,
+    );
+
+    expect(recorded.updateMany).toHaveBeenCalled();
+    const evidenceArg = recorded.evidenceUpdateMany.mock.calls[0]?.[0] as {
+      data: Record<string, unknown>;
+      where: { processingStatus: string };
+    };
+    expect(evidenceArg.data['processingStatus']).toBe('exception');
+    expect(evidenceArg.where.processingStatus).toBe('pending');
+    expect(recorded.exception).toHaveBeenCalled();
+    const ledger = recorded.exception.mock.calls[0]?.[0] as {
+      data: { kind: string; detail: { evidenceItemId: string } };
+    };
+    expect(ledger.data.kind).toBe('api_error');
+    expect(ledger.data.detail.evidenceItemId).toBe('00000000-0000-4000-8000-0000000000dd');
   });
 
   it('marks the PST container failed and pending evidence an exception', async () => {
