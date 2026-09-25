@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { QUEUES } from './queues.js';
 import {
   MAX_RECOVERY_ATTEMPTS,
+  PARSE_RECOVERY_KINDS,
   STALL_AFTER_MS,
   pageWalkPlan,
   unparsedParentPlan,
@@ -77,5 +78,15 @@ describe('unparsedParentPlan', () => {
     const plan = unparsedParentPlan({ idleMs: STALE, priorAttempts: MAX_RECOVERY_ATTEMPTS });
     if (plan.kind !== 'give-up') throw new Error('expected give-up');
     expect(plan.reason).toMatch(/attachment|child/i);
+  });
+});
+
+describe('PARSE_RECOVERY_KINDS', () => {
+  it('does not treat a PST container as something parse can recover', () => {
+    // process.parse returns immediately for kind=container. Three recoveries
+    // used to fire within minutes (updatedAt never moved) and mark the PST
+    // an exception while pst.extract was still running.
+    expect(PARSE_RECOVERY_KINDS).toEqual(['email']);
+    expect(PARSE_RECOVERY_KINDS).not.toContain('container');
   });
 });

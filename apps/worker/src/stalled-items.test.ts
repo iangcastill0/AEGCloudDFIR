@@ -49,6 +49,23 @@ describe('recoveryPlan', () => {
     }
   });
 
+  it('re-extracts a preserved PST container, and never indexes it first', () => {
+    // Upload collections claim the PST as preserved and enqueue pst.extract.
+    // Indexing from preserved promotes the ledger to indexed while the
+    // container is still pending; finalize then seals with no messages.
+    const plan = item({
+      state: 'preserved',
+      source: 'email',
+      evidenceItemId: 'e1',
+      evidenceKind: 'container',
+    });
+    expect(plan).toEqual({
+      kind: 'requeue',
+      topic: QUEUES.pstExtract,
+      stage: 'extract',
+    });
+  });
+
   it('never re-parses a preserved item', () => {
     // Parse creates attachment children. Running it twice on stored bytes
     // duplicates evidence, which is far worse than a stuck collection.

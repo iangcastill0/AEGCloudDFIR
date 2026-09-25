@@ -36,7 +36,7 @@ export type ItemState =
 
 export type RecoveryAction =
   | { kind: 'wait' }
-  | { kind: 'requeue'; topic: string; stage: 'fetch' | 'index' | 'page' | 'parse' }
+  | { kind: 'requeue'; topic: string; stage: 'fetch' | 'index' | 'page' | 'parse' | 'extract' }
   | { kind: 'give-up'; reason: string };
 
 export interface StalledItemInput {
@@ -46,7 +46,19 @@ export interface StalledItemInput {
   updatedAt: Date;
   evidenceItemId: string | null;
   now: Date;
+  /** Evidence kind, when known. Containers are recovered by pst.extract, not index. */
+  evidenceKind?: string;
 }
+
+/**
+ * Parents finalize waits on that process.parse can actually move.
+ *
+ * Containers sit `pending` until `pst.extract` reconstructs their messages.
+ * Parse returns immediately for a non-email, so recovering them here used to
+ * no-op three times and then mark the container an exception — sealing the
+ * collection with no messages.
+ */
+export const PARSE_RECOVERY_KINDS = ['email'] as const;
 
 /** States finalize already counts as settled. Touching one duplicates evidence. */
 const IN_FLIGHT: ReadonlySet<ItemState> = new Set<ItemState>([
@@ -71,23 +83,30 @@ export function recoveryPlan(input: StalledItemInput): RecoveryAction {
   }
 
   if (input.state === 'preserved') {
-    // The bytes are stored, and indexing is the single step that settles the
-    // item (search-index.ts is the only writer of state 'indexed').
+    if (input.evidenceItemId === null) {
+      return {
+        kind: 'give-up',
+        // Retrying cannot help: there is nothing to index or extract.
+        reason:
+          'item was marked preserved but carries no evidence row to index, ' +
+          'so it cannot be recovered and is recorded as a failure',
+      };
+    }
+    // Upload collections claim the PST as preserved and enqueue pst.extract.
+    // Indexing is the wrong next step: search-index will promote the ledger
+    // row to indexed while the container is still pending, and finalize can
+    // then seal with no reconstructed messages. Re-queue extract.
+    if (input.evidenceKind === 'container') {
+      return { kind: 'requeue', topic: QUEUES.pstExtract, stage: 'extract' };
+    }
+    // The bytes are stored, and indexing is the single step that settles a
+    // fetched item (search-index.ts is the only writer of state 'indexed').
     //
     // Re-queueing parse instead was the first attempt, and it moved nothing on
     // staging: parse ran, emitted its index job under a dedup key it had
     // already used, and that job was dropped — a key works once, ever. Parse is
     // also the stage that creates attachment children, so running it twice
     // duplicates evidence. Index directly, with a fresh token.
-    if (input.evidenceItemId === null) {
-      return {
-        kind: 'give-up',
-        // Retrying cannot help: there is nothing to index.
-        reason:
-          'item was marked preserved but carries no evidence row to index, ' +
-          'so it cannot be recovered and is recorded as a failure',
-      };
-    }
     return { kind: 'requeue', topic: QUEUES.searchIndex, stage: 'index' };
   }
 
@@ -135,10 +154,15 @@ export function pageWalkPlan(input: StalledWorkInput): RecoveryAction {
 }
 
 /**
- * A parent evidence item still `pending`, meaning its parse never ran.
+ * A parent email still `pending`, meaning its parse never ran.
  *
  * Finalize gates on exactly this, and for a good reason: parse is what creates
  * attachment children, so sealing the manifest first omits them.
+ *
+ * Do not use this for containers. They are recovered by recoveryPlan via
+ * pst.extract. Parse returns immediately for a non-email and never bumps
+ * updatedAt, so three recoveries used to fire within minutes and mark the
+ * PST an exception while extract was still running.
  */
 export function unparsedParentPlan(input: StalledWorkInput): RecoveryAction {
   if (input.idleMs < STALL_AFTER_MS) return { kind: 'wait' };
