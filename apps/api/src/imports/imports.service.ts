@@ -8,6 +8,8 @@ import {
   PayloadTooLargeException,
 } from '@nestjs/common';
 import {
+  MalwareStatus,
+  ProcessingStatus,
   TenantRole,
   withTenantContext,
   type PrismaClient,
@@ -27,10 +29,14 @@ import type { AuthContext } from '../common/http.js';
 import type { CursorQuery } from '../common/pagination.js';
 import { EVIDENCE_STORE, PRISMA } from '../common/tokens.js';
 import { zodValidate } from '../common/zod-validate.js';
+import { chunk } from '../common/families.js';
 import { AuditService } from '../audit/audit.service.js';
 import { mayReadImport } from './import-access.js';
 
 const ATTACH_PAGE = 1000;
+/** Member retry is local work (scan/extract), not a provider call. */
+const RETRY_MEMBER_CAP = 50_000;
+const RETRY_BATCH_SIZE = 200;
 const PREVIEW_MAX_BYTES = 2 * 1024 * 1024;
 const ALLOWED_EXTENSIONS = new Set([
   '7z',
@@ -463,6 +469,72 @@ export class ImportsService {
             : { tenantId: auth.tenantId, importId: id },
         },
       });
+
+      // Crush members are a different failure from the source. Analyze
+      // skips paths it already wrote, and their scan/extract keys are
+      // once-ever, so Retry used to mark the import uploaded (then
+      // completed) while those files stayed scan_failed or exception.
+      // A clean rescan of a member still has the original extract key
+      // unused, so only scan_failed/not_scanned go back to scan; extract
+      // exceptions need a fresh extract key.
+      const stuckMembers = await tx.evidenceItem.findMany({
+        where: {
+          tenantId: auth.tenantId,
+          importId: id,
+          id: { not: current.sourceEvidenceItemId },
+          OR: [
+            { malwareStatus: { in: [MalwareStatus.scan_failed, MalwareStatus.not_scanned] } },
+            {
+              processingStatus: ProcessingStatus.exception,
+              malwareStatus: { not: MalwareStatus.object_missing },
+              NOT: { processingDetail: { startsWith: 'evidence object is MISSING' } },
+            },
+          ],
+        },
+        select: { id: true, version: true, malwareStatus: true, processingStatus: true },
+        orderBy: { id: 'asc' },
+        take: RETRY_MEMBER_CAP,
+      });
+      const rescan = stuckMembers.filter(
+        (item) =>
+          item.malwareStatus === MalwareStatus.scan_failed ||
+          item.malwareStatus === MalwareStatus.not_scanned,
+      );
+      const reextract = stuckMembers.filter(
+        (item) =>
+          item.processingStatus === ProcessingStatus.exception &&
+          item.malwareStatus !== MalwareStatus.scan_failed &&
+          item.malwareStatus !== MalwareStatus.not_scanned,
+      );
+      const memberJobs = [
+        ...rescan.map((item) => ({
+          tenantId: auth.tenantId,
+          topic: 'process.scan',
+          dedupKey: `scan:${item.id}:v${item.version}:retry${retryToken}`,
+          payload: { tenantId: auth.tenantId, evidenceItemId: item.id, version: item.version },
+        })),
+        ...reextract.map((item) => ({
+          tenantId: auth.tenantId,
+          topic: 'process.extract',
+          dedupKey: `extract:${item.id}:v${item.version}:retry${retryToken}`,
+          payload: { tenantId: auth.tenantId, evidenceItemId: item.id, version: item.version },
+        })),
+      ];
+      for (const batch of chunk(memberJobs, RETRY_BATCH_SIZE)) {
+        await tx.outboxEvent.createMany({ data: batch, skipDuplicates: true });
+      }
+      if (reextract.length > 0) {
+        for (const batch of chunk(
+          reextract.map((item) => item.id),
+          RETRY_BATCH_SIZE,
+        )) {
+          await tx.evidenceItem.updateMany({
+            where: { id: { in: batch } },
+            data: { processingStatus: ProcessingStatus.pending },
+          });
+        }
+      }
+
       await this.audit.appendTx(tx, {
         tenantId: auth.tenantId,
         actorUserId: auth.userId,
@@ -471,7 +543,10 @@ export class ImportsService {
         action: 'import.retry_requested',
         targetType: 'forensic_import',
         targetId: id,
-        summary: {},
+        summary: {
+          retriedMemberScans: rescan.length,
+          retriedMemberExtracts: reextract.length,
+        },
         request,
       });
       return toSummary({ ...current, status: 'uploaded', error: '' });
