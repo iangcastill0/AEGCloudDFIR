@@ -35,14 +35,13 @@ describe('teamLogRequest', () => {
     });
   });
 
-  it('narrows to a single actor when exactly one was named', () => {
-    // More than one actor cannot be expressed, so the filter is dropped rather
-    // than silently applying only the first — which would under-collect and
-    // report success.
+  it('narrows to a single actor; rejects two-or-more instead of widening to all', () => {
+    // More than one actor cannot be expressed. Widening to the whole team
+    // would over-collect while looking like success.
     expect(teamLogRequest({ actorFilter: ['dbmid:AAA1'] }).account_id).toBe('dbmid:AAA1');
-    expect(
-      teamLogRequest({ actorFilter: ['dbmid:AAA1', 'dbmid:BBB2'] }).account_id,
-    ).toBeUndefined();
+    expect(() => teamLogRequest({ actorFilter: ['dbmid:AAA1', 'dbmid:BBB2'] })).toThrow(
+      /at most one actor/,
+    );
   });
 
   it('sends only the cursor when continuing, because Dropbox forbids the rest', () => {

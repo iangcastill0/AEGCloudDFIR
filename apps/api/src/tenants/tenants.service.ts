@@ -331,10 +331,10 @@ export class TenantsService {
         where: { tenantId_userId: { tenantId: found.id, userId } },
         select: { id: true, status: true },
       });
-      // Standing links are for first-time join only. Re-running them must not
-      // add reviewer (or any role) onto an existing membership — that would
-      // escalate read_only / auditor into tenant-wide evidence access — and
-      // must not silently re-activate a disabled member.
+      // Standing links are for first-time join only. The URL is copied onto
+      // the dashboard and pasted into Slack. Re-running it must not add
+      // reviewer onto an existing membership, and must not re-activate a
+      // disabled member.
       if (existing) {
         if (existing.status !== MembershipStatus.active) {
           throw new ForbiddenException(
