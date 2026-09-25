@@ -238,13 +238,14 @@ what is on GitHub, so a commit left on the Mac silently does nothing — it has
 already made a staging deploy ship the previous commit and look like the change
 failed.
 
-**Batch related changes into one branch and PR (agent default).** CI runs on
+**Stack pull requests. The operator merges only the newest.** CI runs on
 every push to `main` and `release.yml` builds images once per green CI, so three
-separate merges mean three image builds on the shared 98 GB disk. Stack related
-work as commits on a single branch and open one PR; one merge is then one CI and
-one Release. Back-to-back merges also collapse to one run because `main` cancels
-older in-progress CI, but that is timing luck — the single-PR way is the
-deterministic one.
+separate merges mean three image builds on the shared 98 GB disk. Branch each
+new pull request from the previous open one, not from `main`, and open the
+newest against `main`. That branch already contains the older commits, so one
+merge of the newest lands all of them. Use a merge commit. A squash makes one
+new commit, GitHub does not see the older heads on `main`, and those pull
+requests stay open. Do not merge the stack one by one.
 
 **Never edit code on the server.** Every deploy runs `git reset --hard <sha>` on
 the host, so anything changed there is destroyed without a word. The server also
