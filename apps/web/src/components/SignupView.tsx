@@ -13,19 +13,21 @@ function tokenFromWindow(): string {
 export function SignupView() {
   const me = useMe();
   const join = useJoinTenant();
-  const [token, setToken] = useState('');
+  // null until the URL is read. Starting at '' made a logged-in visitor
+  // bounce to / or /auth/tenant before the token was seen, so an invite
+  // never joined them to the org that sent the link.
+  const [token, setToken] = useState<string | null>(null);
   const [autoTried, setAutoTried] = useState(false);
   const mutate = join.mutate;
   const joinPending = join.isPending;
   const joinSuccess = join.isSuccess;
 
   useEffect(() => {
-    const fromUrl = tokenFromWindow();
-    if (fromUrl) setToken(fromUrl);
+    setToken(tokenFromWindow());
   }, []);
 
   useEffect(() => {
-    if (!me.data || token) return;
+    if (token === null || !me.data || token) return;
     window.location.assign(me.data.tenant ? '/' : '/auth/tenant');
   }, [me.data, token]);
 
@@ -37,7 +39,7 @@ export function SignupView() {
     mutate(token, { onSuccess: () => window.location.assign('/') });
   }, [autoTried, token, me.isPending, me.data, joinPending, joinSuccess, mutate]);
 
-  if (me.isPending) {
+  if (me.isPending || token === null) {
     return (
       <p role="status" aria-live="polite">
         Loading…
