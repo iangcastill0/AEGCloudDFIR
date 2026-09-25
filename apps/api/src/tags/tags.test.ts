@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, ForbiddenException } from '@nestjs/common';
 import { TagFamilyBehavior, TenantRole } from '@aeg-clouddfir/database';
 import { TagsService } from './tags.service.js';
 import {
@@ -121,6 +121,81 @@ describe('TagsService.bulk', () => {
       evidenceItemId: manyIds[0],
       version: 3,
     });
+  });
+
+  it('refuses a reviewer applying or removing a privileged tag', async () => {
+    const createMany = vi.fn();
+    const deleteMany = vi.fn();
+    const { service } = makeService({
+      tag: { findFirst: vi.fn(async () => tagRow({ isPrivileged: true })) },
+      tagAssignment: { createMany, deleteMany },
+    });
+    const reviewer = makeAuth([TenantRole.reviewer]);
+
+    await expect(
+      service.bulk(
+        reviewer,
+        { tagId: TAG_ID, evidenceItemIds: [ITEM_A], action: 'remove' },
+        fakeRequest(),
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(
+      service.bulk(
+        reviewer,
+        { tagId: TAG_ID, evidenceItemIds: [ITEM_A], action: 'apply' },
+        fakeRequest(),
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(createMany).not.toHaveBeenCalled();
+    expect(deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('lets a case manager remove a privileged tag', async () => {
+    const deleteMany = vi.fn(async (args: { where: { evidenceItemId: { in: string[] } } }) => ({
+      count: args.where.evidenceItemId.in.length,
+    }));
+    const { service } = makeService({
+      tag: { findFirst: vi.fn(async () => tagRow({ isPrivileged: true })) },
+      evidenceItem: {
+        findMany: vi.fn(async (args: { where?: { id?: { in: string[] } } }) =>
+          (args.where?.id?.in ?? []).map((id: string) => ({ id })),
+        ),
+      },
+      tagAssignment: { deleteMany },
+      outboxEvent: { createMany: vi.fn(async () => ({ count: 0 })) },
+    });
+
+    const result = await service.bulk(
+      auth,
+      { tagId: TAG_ID, evidenceItemIds: [ITEM_A], action: 'remove' },
+      fakeRequest(),
+    );
+    expect(result.affected).toBe(1);
+    expect(deleteMany).toHaveBeenCalled();
+  });
+
+  it('still lets a reviewer apply a non-privileged tag', async () => {
+    const createMany = vi.fn(async (args: { data: unknown[] }) => ({
+      count: args.data.length,
+    }));
+    const { service } = makeService({
+      tag: { findFirst: vi.fn(async () => tagRow()) },
+      evidenceItem: {
+        findMany: vi.fn(async (args: { where?: { id?: { in: string[] } } }) =>
+          (args.where?.id?.in ?? []).map((id: string) => ({ id })),
+        ),
+      },
+      tagAssignment: { createMany },
+      outboxEvent: { createMany: vi.fn(async () => ({ count: 0 })) },
+    });
+
+    const result = await service.bulk(
+      makeAuth([TenantRole.reviewer]),
+      { tagId: TAG_ID, evidenceItemIds: [ITEM_A], action: 'apply' },
+      fakeRequest(),
+    );
+    expect(result.affected).toBe(1);
+    expect(createMany).toHaveBeenCalled();
   });
 
   it('409s when expectedTagVersion does not match the current definition', async () => {

@@ -153,10 +153,9 @@ describe('TenantsService.createInvite', () => {
       fakeRequest(),
     );
     expect(result.email).toBe('pat@example.com');
-    expect(result.inviteUrl).toMatch(/^https:\/\/api\.ev\.test\/auth\/login\?redirectTo=/);
+    expect(result.inviteUrl).toMatch(/^https:\/\/app\.ev\.test\/signup\?token=/);
     const stored = create.mock.calls[0]?.[0] as { data: { tokenHash: string } };
-    const next = new URL(result.inviteUrl).searchParams.get('redirectTo') ?? '';
-    const token = new URL(next, 'https://app.ev.test').searchParams.get('token') ?? '';
+    const token = new URL(result.inviteUrl).searchParams.get('token') ?? '';
     expect(stored.data.tokenHash).toBe(hashInviteToken(token));
     expect(stored.data.tokenHash).not.toBe(token);
     expect(audit.appendTx).toHaveBeenCalledWith(
@@ -307,6 +306,106 @@ describe('TenantsService.redeemInvite', () => {
       }),
     );
   });
+
+  it('does not add reviewer to someone who is already a member', async () => {
+    // The standing URL lives on the dashboard. A read_only member who opens
+    // it used to gain reviewer, which lifts the case-only read fence.
+    const membershipCreate = vi.fn(async () => ({ id: 'mem-1' }));
+    const membershipUpdate = vi.fn(async () => ({ id: 'mem-1' }));
+    const roleCreate = vi.fn(async () => ({ id: 'role-1' }));
+    const { service, audit } = makeService({
+      tenantInvite: { findUnique: vi.fn(async () => null) },
+      tenant: {
+        findFirst: vi.fn(async () => ({
+          id: TENANT_ID,
+          name: 'Acme',
+          slug: 'acme',
+          status: 'active',
+        })),
+      },
+      user: { findUnique: vi.fn(async () => ({ id: USER_ID })) },
+      membership: {
+        findUnique: vi.fn(async () => ({ id: 'mem-existing', status: 'active' })),
+        create: membershipCreate,
+        update: membershipUpdate,
+      },
+      roleAssignment: { findUnique: vi.fn(async () => null), create: roleCreate },
+    });
+
+    const result = await service.redeemInvite(USER_ID, token, fakeRequest());
+    expect(result).toEqual({ tenantId: TENANT_ID, name: 'Acme', slug: 'acme' });
+    expect(membershipCreate).not.toHaveBeenCalled();
+    expect(membershipUpdate).not.toHaveBeenCalled();
+    expect(roleCreate).not.toHaveBeenCalled();
+    expect(audit.appendTx).not.toHaveBeenCalled();
+  });
+
+  it('does not let a disabled member rejoin through the standing link', async () => {
+    const roleCreate = vi.fn(async () => ({ id: 'role-1' }));
+    const membershipUpdate = vi.fn(async () => ({ id: 'mem-1' }));
+    const { service } = makeService({
+      tenantInvite: { findUnique: vi.fn(async () => null) },
+      tenant: {
+        findFirst: vi.fn(async () => ({
+          id: TENANT_ID,
+          name: 'Acme',
+          slug: 'acme',
+          status: 'active',
+        })),
+      },
+      user: { findUnique: vi.fn(async () => ({ id: USER_ID })) },
+      membership: {
+        findUnique: vi.fn(async () => ({ id: 'mem-1', status: 'disabled' })),
+        update: membershipUpdate,
+      },
+      roleAssignment: { create: roleCreate },
+    });
+
+    await expect(service.redeemInvite(USER_ID, token, fakeRequest())).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    expect(roleCreate).not.toHaveBeenCalled();
+    expect(membershipUpdate).not.toHaveBeenCalled();
+  });
+
+  it('still grants the invited role on a one-time invite to an existing member', async () => {
+    // A named invite is an admin choosing that role. That is a promotion,
+    // not a leaked Slack URL.
+    const roleCreate = vi.fn(async () => ({ id: 'role-1' }));
+    const { service } = makeService({
+      tenantInvite: {
+        findUnique: vi.fn(async () => ({
+          id: 'inv-1',
+          tenantId: TENANT_ID,
+          email: 'pat@example.com',
+          role: TenantRole.reviewer,
+          expiresAt: future,
+          usedAt: null,
+        })),
+        update: vi.fn(async () => ({ id: 'inv-1' })),
+      },
+      user: { findUnique: vi.fn(async () => ({ id: USER_ID, email: 'pat@example.com' })) },
+      tenant: {
+        findUnique: vi.fn(async () => ({
+          id: TENANT_ID,
+          name: 'Acme',
+          slug: 'acme',
+          status: 'active',
+        })),
+      },
+      membership: {
+        findUnique: vi.fn(async () => ({ id: 'mem-1', status: 'active' })),
+      },
+      roleAssignment: { findUnique: vi.fn(async () => null), create: roleCreate },
+    });
+
+    await service.redeemInvite(USER_ID, token, fakeRequest());
+    expect(roleCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ role: TenantRole.reviewer }),
+      }),
+    );
+  });
 });
 
 describe('TenantsService join link', () => {
@@ -319,7 +418,7 @@ describe('TenantsService join link', () => {
     const result = await service.getOrCreateJoinLink(makeAuth([TenantRole.org_admin]));
     expect(result.role).toBe(TenantRole.reviewer);
     expect(result.inviteUrl).toBe(
-      `https://api.ev.test/auth/login?redirectTo=${encodeURIComponent('/signup?token=standing-token-value-32chars!!')}`,
+      'https://app.ev.test/signup?token=standing-token-value-32chars!!',
     );
   });
 
@@ -333,11 +432,7 @@ describe('TenantsService join link', () => {
     });
     const result = await service.getOrCreateJoinLink(makeAuth([TenantRole.org_admin]));
     expect(result.role).toBe(TenantRole.reviewer);
-    const minted =
-      new URL(
-        new URL(result.inviteUrl).searchParams.get('redirectTo') ?? '',
-        'https://app.ev.test',
-      ).searchParams.get('token') ?? '';
+    const minted = new URL(result.inviteUrl).searchParams.get('token') ?? '';
     expect(minted.length).toBeGreaterThan(16);
     expect(update).toHaveBeenCalledWith(expect.objectContaining({ data: { joinToken: minted } }));
   });
@@ -348,11 +443,7 @@ describe('TenantsService join link', () => {
       tenant: { update },
     });
     const result = await service.rotateJoinLink(makeAuth([TenantRole.org_admin]), fakeRequest());
-    const minted =
-      new URL(
-        new URL(result.inviteUrl).searchParams.get('redirectTo') ?? '',
-        'https://app.ev.test',
-      ).searchParams.get('token') ?? '';
+    const minted = new URL(result.inviteUrl).searchParams.get('token') ?? '';
     expect(update).toHaveBeenCalledWith(expect.objectContaining({ data: { joinToken: minted } }));
     expect(audit.appendTx).toHaveBeenCalledWith(
       expect.anything(),

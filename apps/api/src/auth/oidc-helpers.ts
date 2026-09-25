@@ -123,6 +123,19 @@ export interface AuthorizationParamsInput {
   codeChallenge: string;
 }
 
+/**
+ * Force Authentik to show identification even when a session already exists.
+ *
+ * Same rule as the connector OAuth builders (`prompt=select_account`): a
+ * leftover IdP session must not be adopted silently. `/auth/login` is the
+ * OIDC start for Sign in, Create account, and any leftover invite URL that
+ * still points here. With implicit consent, an existing Authentik session
+ * would otherwise complete with no picker, then SignupView auto-joins that
+ * person to the org. `login` is the standard prompt Authentik honours
+ * (select_account is a Google/Microsoft thing).
+ */
+export const FORCE_REAUTHENTICATION = 'login';
+
 /** Parameters for client.buildAuthorizationUrl. */
 export function buildAuthorizationParameters(
   input: AuthorizationParamsInput,
@@ -130,6 +143,7 @@ export function buildAuthorizationParameters(
   return {
     redirect_uri: callbackUrl(input.apiPublicUrl),
     scope: 'openid profile email',
+    prompt: FORCE_REAUTHENTICATION,
     state: input.state,
     nonce: input.nonce,
     code_challenge: input.codeChallenge,
