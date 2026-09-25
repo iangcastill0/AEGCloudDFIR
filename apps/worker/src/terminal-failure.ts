@@ -57,7 +57,16 @@ export interface ForensicImportTarget {
   importId: string;
 }
 
-export type FailureTarget = CollectionItemTarget | EvidenceItemTarget | ForensicImportTarget;
+export interface PstExtractTarget {
+  kind: 'pst-extract';
+  tenantId: string;
+  collectionId: string;
+  custodianId: string;
+  evidenceItemId: string;
+}
+
+export type FailureTarget =
+  CollectionItemTarget | EvidenceItemTarget | ForensicImportTarget | PstExtractTarget;
 
 function str(data: Record<string, unknown>, key: string): string | null {
   const value = data[key];
@@ -104,6 +113,14 @@ export function failureTargetFor(
     return { kind: 'forensic-import', tenantId, importId };
   }
 
+  if (queue === QUEUES.pstExtract) {
+    const collectionId = str(data, 'collectionId');
+    const custodianId = str(data, 'custodianId');
+    const evidenceItemId = str(data, 'evidenceItemId');
+    if (collectionId === null || custodianId === null || evidenceItemId === null) return null;
+    return { kind: 'pst-extract', tenantId, collectionId, custodianId, evidenceItemId };
+  }
+
   return null;
 }
 
@@ -138,6 +155,58 @@ export async function recordTerminalFailure(
     ctx.log.warn(
       { importId: target.importId, reason },
       'recorded a terminal import failure the processor never saw',
+    );
+    return;
+  }
+
+  if (target.kind === 'pst-extract') {
+    const providerItemId = `pst:${target.evidenceItemId}`;
+    await withTenantContext(ctx.prisma, target.tenantId, async (tx) => {
+      const item = await tx.collectionItem.findFirst({
+        where: {
+          tenantId: target.tenantId,
+          collectionId: target.collectionId,
+          custodianId: target.custodianId,
+          source: 'email',
+          providerItemId,
+          state: { notIn: [...TERMINAL_STATES] },
+        },
+        select: { id: true },
+      });
+      if (item !== null) {
+        await tx.collectionItem.update({
+          where: { id: item.id },
+          data: { state: 'failed', lastError: message },
+        });
+        await recordException(tx, {
+          tenantId: target.tenantId,
+          collectionId: target.collectionId,
+          custodianId: target.custodianId,
+          source: 'email',
+          providerItemId,
+          kind: 'api_error',
+          message,
+          detail: { recoveredBy: 'job-failure-handler' },
+        });
+        await incrementProgress(tx, target.collectionId, target.custodianId, 'email', {
+          failures: 1,
+        });
+      }
+      await tx.evidenceItem.updateMany({
+        where: {
+          id: target.evidenceItemId,
+          processingStatus: 'pending',
+        },
+        data: { processingStatus: 'exception', processingDetail: message.slice(0, 500) },
+      });
+    });
+    ctx.log.warn(
+      {
+        collectionId: target.collectionId,
+        evidenceItemId: target.evidenceItemId,
+        reason,
+      },
+      'recorded a terminal pst.extract failure the processor never saw',
     );
     return;
   }

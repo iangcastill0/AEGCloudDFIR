@@ -163,6 +163,19 @@ describe('processPstExtract', () => {
     expect(closed()).toBe(true);
   });
 
+  it('touches the container ledger before downloading, so a slow extract is not swept as stalled', async () => {
+    const f = fakeCtx();
+    arm(f);
+    const { reader } = fakeReader([{ msg: message(), folderPath: 'Inbox' }]);
+
+    await processPstExtract(f.ctx, payload, { reader });
+
+    const heartbeats = f.tx.collectionItem.updateMany.mock.calls
+      .map((c) => c[0] as { data: { updatedAt?: Date } })
+      .filter((c) => c.data.updatedAt instanceof Date);
+    expect(heartbeats.length).toBeGreaterThan(0);
+  });
+
   it('is idempotent: completed containers are not re-extracted', async () => {
     const f = fakeCtx();
     arm(f);
