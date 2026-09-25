@@ -58,4 +58,16 @@ describe('logSafeUrl', () => {
     expect(safe).not.toContain('one');
     expect(safe).not.toContain('two');
   });
+
+  it('redacts a token nested inside redirectTo (org invite / join links)', () => {
+    // 8ee31bd put standing join and one-time invite tokens in redirectTo so
+    // the first request is /auth/login, not /signup. The secret is not a
+    // top-level `token=` parameter, so a key-only redact used to log it.
+    const encoded = logSafeUrl(
+      '/auth/login?redirectTo=%2Fsignup%3Ftoken%3Dstanding-secret-token-value',
+    );
+    expect(encoded).not.toContain('standing-secret-token-value');
+    expect(encoded).toContain('redirectTo=');
+    expect(encoded).toContain('token=[redacted]');
+  });
 });

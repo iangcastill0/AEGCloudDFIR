@@ -966,7 +966,11 @@ model AuditRecord {
   provider         Provider
   system           AuditSystem
   /// Provider's stable id for the event (Management API Id / signIn id /
-  /// Reports etag/uniqueQualifier / Vault export id). Enables idempotent dedup.
+  /// Reports etag/uniqueQualifier / Vault export id). Dedup is per collection:
+  /// retries and overlapping blobs in the same collection skip, a second
+  /// collection keeps its own copy. Tenant-wide unique emptied the new
+  /// collection's drill-in — Review loaded records by evidence item, and the
+  /// rows still pointed at the first collection.
   providerRecordId String
   /// Workload (Exchange, SharePoint, AzureActiveDirectory, Teams...) or the
   /// Google application name (login, drive, admin, token, ...).
@@ -989,7 +993,7 @@ model AuditRecord {
 
   evidenceItem EvidenceItem @relation(fields: [evidenceItemId], references: [id], onDelete: Cascade)
 
-  @@unique([tenantId, system, providerRecordId])
+  @@unique([tenantId, collectionId, system, providerRecordId])
   @@index([tenantId])
   @@index([tenantId, occurredAt])
   @@index([tenantId, actorEmail])

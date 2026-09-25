@@ -9,7 +9,7 @@ import {
   fakeCtx,
   type FakeCtx,
 } from '../testing/fakes.js';
-import { processAuditFetchPage } from './collection-audit-fetch-page.js';
+import { AUDIT_RECORD_INSERT_CHUNK, processAuditFetchPage } from './collection-audit-fetch-page.js';
 
 vi.mock('../connector-factory.js', () => ({
   // Mirror of requireDrive for the other direction: a files-only connector has
@@ -134,6 +134,7 @@ describe('processAuditFetchPage', () => {
     expect(arCreate.data).toHaveLength(1);
     expect(arCreate.data[0]?.['providerRecordId']).toBe('r1');
     expect(arCreate.data[0]?.['operation']).toBe('MailItemsAccessed');
+    expect(arCreate.data[0]?.['collectionId']).toBe(COLLECTION);
 
     // Search index enqueued at the batch level with the audit stage.
     const outbox = createManyRows(f.tx.outboxEvent);
@@ -236,6 +237,45 @@ describe('processAuditFetchPage', () => {
     };
     expect(reset.data['cursorKind']).toBe('none');
     expect(f.tx.evidenceItem.create).not.toHaveBeenCalled();
+  });
+
+  it('chunks a large blob so Prisma cannot hit its 32,767 bind ceiling', async () => {
+    // 17 columns per row. One Google Reports page is 1,000 activities and
+    // each can flatten to more than one event; 1,000 × 2 already overshoots
+    // 1,927 (32,767 / 17). A Microsoft content blob has no page size at all.
+    expect(AUDIT_RECORD_INSERT_CHUNK * 17).toBeLessThan(32_767);
+
+    const records = Array.from({ length: AUDIT_RECORD_INSERT_CHUNK * 2 + 3 }, (_, i) => ({
+      system: 'o365_management_activity' as const,
+      providerRecordId: `r${String(i)}`,
+      workload: 'Exchange',
+      operation: 'MailItemsAccessed',
+      actorEmail: 'alice@example.com',
+      occurredAt: '2026-01-01T00:00:00Z',
+      raw: { Id: `r${String(i)}` },
+    }));
+    const f = fakeCtx();
+    arm(f);
+    armConnector(
+      vi.fn().mockResolvedValue({
+        batches: [sampleBatch({ records, providerReportedCount: records.length })],
+        nextCursor: undefined,
+      }),
+    );
+    f.tx.collectionItem.createMany.mockResolvedValue({ count: 1 });
+    f.tx.evidenceBlob.findUniqueOrThrow.mockResolvedValue({ id: 'blob-1' });
+    f.tx.evidenceItem.create.mockResolvedValue({ id: 'cdfir-audit-1' });
+
+    await processAuditFetchPage(f.ctx, payload);
+
+    const sizes = f.tx.auditRecord.createMany.mock.calls.map(
+      (call) => (call[0] as { data: unknown[] }).data.length,
+    );
+    expect(sizes).toEqual([AUDIT_RECORD_INSERT_CHUNK, AUDIT_RECORD_INSERT_CHUNK, 3]);
+    expect(sizes.every((n) => n <= AUDIT_RECORD_INSERT_CHUNK)).toBe(true);
+    for (const call of f.tx.auditRecord.createMany.mock.calls) {
+      expect((call[0] as { skipDuplicates: boolean }).skipDuplicates).toBe(true);
+    }
   });
 
   it('bails quietly when the collection is not fetching', async () => {
