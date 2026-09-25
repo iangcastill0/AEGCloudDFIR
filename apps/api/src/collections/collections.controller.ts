@@ -113,8 +113,9 @@ export class CollectionsController {
   }
 
   /**
-   * Manifest download. Read-only roles included: fetching the custody artifact
-   * is a read, and an auditor or reviewer needs it to verify a collection.
+   * Manifest download. Reviewer and auditor may verify any collection in the
+   * tenant. read_only is case-scoped: only a collection filed under a case they
+   * are assigned to. The service 404s otherwise — the file names every item.
    */
   @Get(':id/manifest')
   @RequireRoles(

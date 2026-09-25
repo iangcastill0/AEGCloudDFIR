@@ -30,6 +30,7 @@ import type { AuthContext } from '../common/http.js';
 import { APP_CONFIG, EVIDENCE_STORE, PRISMA } from '../common/tokens.js';
 import type { CursorQuery } from '../common/pagination.js';
 import { assertWithinQuota, readQuota } from '../common/quotas.js';
+import { isCaseRestricted } from '../common/roles.js';
 import { zodValidate } from '../common/zod-validate.js';
 import { chunk, queryInChunks, FAMILY_QUERY_CHUNK } from '../common/families.js';
 import { autoCaseDescription, autoCaseName } from './auto-case.js';
@@ -258,12 +259,28 @@ export class CollectionsService {
     completenessReportUrl: string | null;
     expiresInSeconds: number;
   }> {
-    const row = await withTenantContext(this.prisma, auth.tenantId, (tx) =>
-      tx.collection.findFirst({
+    const row = await withTenantContext(this.prisma, auth.tenantId, async (tx) => {
+      const found = await tx.collection.findFirst({
         where: { id, tenantId: auth.tenantId },
-        select: { id: true, manifestKey: true, manifestSha256: true, status: true },
-      }),
-    );
+        select: { id: true, manifestKey: true, manifestSha256: true, status: true, caseId: true },
+      });
+      if (!found) return null;
+      // Reviewer and auditor may verify any collection in the tenant.
+      // read_only may not: the chain of one in-case item names the collection,
+      // and the manifest lists every other item, hash, and S3 key in it.
+      if (isCaseRestricted(auth)) {
+        if (found.caseId === null) throw new NotFoundException();
+        const member = await tx.caseMember.count({
+          where: {
+            tenantId: auth.tenantId,
+            caseId: found.caseId,
+            membershipId: auth.membershipId,
+          },
+        });
+        if (member === 0) throw new NotFoundException();
+      }
+      return found;
+    });
     if (!row) throw new NotFoundException();
     if (row.manifestKey === null || row.manifestKey === '') {
       // The manifest is written by the finalizer, so it does not exist until the
