@@ -61,6 +61,8 @@ export interface ApiFetchOptions<T> {
   body?: unknown;
   schema?: z.ZodType<T>;
   signal?: AbortSignal;
+  /** When true, a 401 is returned as an error and does not bounce to Authentik. */
+  skipAuthRedirect?: boolean;
 }
 
 export async function apiFetch<T = unknown>(
@@ -83,11 +85,13 @@ export async function apiFetch<T = unknown>(
   });
 
   if (response.status === 401) {
-    redirectToLogin();
+    if (!options.skipAuthRedirect) redirectToLogin();
     throw new ApiError({
       statusCode: 401,
       error: 'Unauthorized',
-      message: 'Your session has expired. Redirecting to sign-in…',
+      message: options.skipAuthRedirect
+        ? 'Not signed in'
+        : 'Your session has expired. Redirecting to sign-in…',
     });
   }
 

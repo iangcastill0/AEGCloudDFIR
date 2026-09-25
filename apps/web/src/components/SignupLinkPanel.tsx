@@ -33,8 +33,8 @@ export function SignupLinkPanel({
     <section aria-labelledby={headingId}>
       <h2 id={headingId}>{heading}</h2>
       <p>
-        Copy this link and send it. Anyone who opens it and signs up (or signs in) joins this
-        organization as a reviewer.
+        Copy this link and send it. It opens the sign-up page. Anyone who creates an account (or
+        signs in) joins this organization as a reviewer.
       </p>
       {joinLink.isError ? (
         <p role="alert" className="cdfir-field__error">

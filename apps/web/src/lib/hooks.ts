@@ -80,7 +80,7 @@ import {
 export function useMe() {
   return useQuery({
     queryKey: ['me'],
-    queryFn: () => apiFetch('/api/v1/me', { schema: meResponse }),
+    queryFn: () => apiFetch('/api/v1/me', { schema: meResponse, skipAuthRedirect: true }),
     staleTime: 60_000,
     retry: false,
   });

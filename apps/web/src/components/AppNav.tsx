@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { VisuallyHidden } from '@aeg-clouddfir/ui';
 import { useLogout, useMe, useSelectTenant } from '@/lib/hooks';
-import { API_URL } from '@/lib/api';
+import { API_URL, loginUrl } from '@/lib/api';
 
 const LINKS: Array<{ href: string; label: string; adminOnly?: boolean }> = [
   { href: '/', label: 'Dashboard' },
@@ -26,6 +26,7 @@ export function AppNav() {
   const logout = useLogout();
 
   const isAdmin = me.data?.roles.includes('org_admin') ?? false;
+  const signedIn = Boolean(me.data);
 
   function onTenantChange(tenantId: string) {
     if (!tenantId) return;
@@ -48,18 +49,20 @@ export function AppNav() {
         AEG-CloudDFIR
       </Link>
       <nav className="app-nav" aria-label="Primary">
-        <ul>
-          {LINKS.filter((l) => !l.adminOnly || isAdmin).map((link) => {
-            const current = link.href === '/' ? pathname === '/' : pathname.startsWith(link.href);
-            return (
-              <li key={link.href}>
-                <Link href={link.href} aria-current={current ? 'page' : undefined}>
-                  {link.label}
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
+        {signedIn ? (
+          <ul>
+            {LINKS.filter((l) => !l.adminOnly || isAdmin).map((link) => {
+              const current = link.href === '/' ? pathname === '/' : pathname.startsWith(link.href);
+              return (
+                <li key={link.href}>
+                  <Link href={link.href} aria-current={current ? 'page' : undefined}>
+                    {link.label}
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        ) : null}
       </nav>
       <div className="app-header__session">
         {me.data ? (
@@ -93,7 +96,19 @@ export function AppNav() {
           <span role="status" aria-live="polite">
             Loading session…
           </span>
-        ) : null}
+        ) : (
+          <>
+            <a
+              className="cdfir-button cdfir-button--secondary cdfir-button--small"
+              href={loginUrl()}
+            >
+              Sign in
+            </a>
+            <a className="cdfir-button cdfir-button--primary cdfir-button--small" href={loginUrl()}>
+              Create account
+            </a>
+          </>
+        )}
       </div>
     </header>
   );

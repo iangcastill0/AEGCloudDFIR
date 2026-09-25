@@ -98,6 +98,14 @@ h2 {
   max-width: 90rem;
   margin-inline: auto;
 }
+
+.signup-panel {
+  max-width: 36rem;
+}
+
+.signup-panel h1 {
+  font-size: 1.8rem;
+}
 .app-main:focus {
   outline: none;
 }
