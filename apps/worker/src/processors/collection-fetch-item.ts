@@ -20,6 +20,73 @@ import { incrementProgress, recordException } from '../progress.js';
 import { QUEUES, dedupKeys } from '../queues.js';
 import type { FetchItemPayload } from './payloads.js';
 
+/**
+ * Outbox key prefix for every fetch-item job of one collection item.
+ *
+ * The trailing colon is the delimiter before `:a{attempt}`. Without it,
+ * `file-1` would match `file-10`'s rows and we could recover the wrong listing.
+ */
+export function priorFetchItemKeyPrefix(
+  collectionId: string,
+  custodianId: string,
+  source: string,
+  providerItemId: string,
+): string {
+  return `${dedupKeys.collectionFetchItem(collectionId, custodianId, source, providerItemId)}:`;
+}
+
+function listingFromOutboxPayload(payload: unknown): {
+  entry?: DriveEntry;
+  message?: unknown;
+} {
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+    return {};
+  }
+  const record = payload as Record<string, unknown>;
+  const listing: { entry?: DriveEntry; message?: unknown } = {};
+  if (record['entry'] !== undefined && record['entry'] !== null) {
+    listing.entry = record['entry'] as DriveEntry;
+  }
+  if ('message' in record && record['message'] !== undefined) {
+    listing.message = record['message'];
+  }
+  return listing;
+}
+
+/**
+ * The stall sweeper and "Retry failed items" re-enqueue fetch-item with only
+ * ids — they drop the Drive listing and the Slack message JSON. Those bytes
+ * still live on the original outbox row (dispatched rows are kept). Copy them
+ * back so recovery actually collects the file instead of marking it skipped.
+ */
+async function recoverListingFromPriorFetch(
+  ctx: WorkerContext,
+  payload: FetchItemPayload,
+): Promise<{ entry?: DriveEntry; message?: unknown }> {
+  const prefix = priorFetchItemKeyPrefix(
+    payload.collectionId,
+    payload.custodianId,
+    payload.source,
+    payload.providerItemId,
+  );
+  const rows = await withTenantContext(ctx.prisma, payload.tenantId, (tx) =>
+    tx.outboxEvent.findMany({
+      where: {
+        topic: QUEUES.collectionFetchItem,
+        dedupKey: { startsWith: prefix },
+      },
+      select: { payload: true },
+      orderBy: { createdAt: 'asc' },
+      take: 32,
+    }),
+  );
+  for (const row of rows) {
+    const listing = listingFromOutboxPayload(row.payload);
+    if (listing.entry !== undefined || listing.message !== undefined) return listing;
+  }
+  return {};
+}
+
 /** After this many attempts an item fails permanently (no rethrow / no retry). */
 export const MAX_ITEM_ATTEMPTS = 5;
 
@@ -135,6 +202,29 @@ export async function processCollectionFetchItem(
   const attemptNumber = item.attempts + 1;
 
   try {
+    let driveEntry = payload.entry;
+    let chatMessage = payload.message;
+    const needsDriveListing = source !== 'email' && source !== 'chat' && driveEntry === undefined;
+    const needsChatListing = source === 'chat' && chatMessage === undefined;
+    if (needsDriveListing || needsChatListing) {
+      const recovered = await recoverListingFromPriorFetch(ctx, payload);
+      driveEntry ??= recovered.entry;
+      chatMessage ??= recovered.message;
+    }
+    if (source === 'chat' && chatMessage === undefined) {
+      // A missing listing is our recovery dropping the payload, not the
+      // provider saying the message is gone. Skipping as unavailable made
+      // Retry and the stall sweeper silently omit Slack messages.
+      throw new Error(
+        `chat item ${providerItemId} is missing its original message listing; cannot collect it as unavailable`,
+      );
+    }
+    if (source !== 'email' && source !== 'chat' && driveEntry === undefined) {
+      throw new Error(
+        `drive item ${providerItemId} is missing its original listing entry; cannot collect it as unavailable`,
+      );
+    }
+
     const bundle = await buildConnectorsForAccount(ctx, {
       tenantId,
       connectorAccountId: collection.connectorAccountId,
@@ -158,29 +248,17 @@ export async function processCollectionFetchItem(
       // would double every request and could return a DIFFERENT answer if the
       // message were edited in between — and the bytes we were given are the
       // ones whose hash goes in the chain of custody.
-      if (payload.message === undefined) {
-        throw new NonDownloadableError('chat item payload is missing its message', {
-          kind: 'unavailable_item',
-          providerItemId,
-        });
-      }
       // Canonical JSON with sorted keys: two collections of the same message
       // must hash identically, and key order from a JSON parse is not
       // guaranteed to be stable across runs.
-      const canonical = canonicalJson(payload.message);
+      const canonical = canonicalJson(chatMessage);
       fetched = {
         readable: Readable.from(Buffer.from(canonical, 'utf8')),
         contentType: 'application/json; charset=utf-8',
         apiExportDerivative: false,
       };
     } else {
-      if (payload.entry === undefined) {
-        throw new NonDownloadableError('drive item payload is missing its listing entry', {
-          kind: 'unavailable_item',
-          providerItemId,
-        });
-      }
-      const entry = payload.entry as DriveEntry;
+      const entry = driveEntry as DriveEntry;
       const content = await requireDrive(bundle).fetchContent(bundle.custodianRef, entry);
       fetched = {
         readable: toReadable(content.stream),
@@ -200,7 +278,7 @@ export async function processCollectionFetchItem(
       { quarantine: false },
     );
 
-    const entry = payload.entry;
+    const entry = driveEntry;
     await withTenantContext(ctx.prisma, tenantId, async (tx) => {
       await tx.evidenceBlob.createMany({
         data: [
@@ -232,7 +310,7 @@ export async function processCollectionFetchItem(
             // drop the LAST character instead of failing — 'noColonHere' became
             // 'noColonHer'.
             conversationIdOf(providerItemId),
-            (payload.message ?? {}) as RawSlackMessage,
+            (chatMessage ?? {}) as RawSlackMessage,
           )
         : null;
       const name = isEmail
