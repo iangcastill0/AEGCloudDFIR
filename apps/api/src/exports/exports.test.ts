@@ -320,10 +320,28 @@ describe('ExportsService.download', () => {
 
     const result = await service.download(auth, EXPORT_ID, fakeRequest());
 
-    expect(result.folderName).not.toMatch(/[\\/:*?"<>|]/);
+    expect(result.folderName).toMatch(/^[A-Za-z0-9._-]+$/);
     // The id suffix matters: two exports of one case often share a name, and
     // merging them into one folder would mix two evidence sets.
     expect(result.folderName).toContain(EXPORT_ID.slice(0, 8));
+  });
+
+  it('drops shell syntax from the folder name', async () => {
+    const { store } = makeStore();
+    const { service } = makeService(
+      {
+        export: {
+          findFirst: vi.fn(async () => exportRow({ name: '$(id)`whoami`${IFS}' })),
+        },
+        ...recordedParts(1),
+      },
+      store,
+    );
+
+    const result = await service.download(auth, EXPORT_ID, fakeRequest());
+
+    expect(result.folderName).toBe(`id-whoami-IFS-${EXPORT_ID.slice(0, 8)}`);
+    expect(result.folderName).not.toMatch(/[$`{}()]/);
   });
 
   it('issues a download token scoped to this export', async () => {
