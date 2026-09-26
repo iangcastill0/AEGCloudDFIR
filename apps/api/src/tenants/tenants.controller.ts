@@ -16,7 +16,11 @@ import {
 import { TenantRole, withTenantContext, type PrismaClient } from '@aeg-clouddfir/database';
 import type { AppConfig } from '@aeg-clouddfir/config';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { createInviteRequest, createTenantRequest } from '@aeg-clouddfir/contracts';
+import {
+  createInviteRequest,
+  createTenantRequest,
+  grantMemberRoleRequest,
+} from '@aeg-clouddfir/contracts';
 import '../common/http.js';
 import { APP_CONFIG, PRISMA } from '../common/tokens.js';
 import { parseCursorQuery } from '../common/pagination.js';
@@ -134,6 +138,24 @@ export class TenantsController {
       expiresAt: created.expiresAt.toISOString(),
       inviteUrl: created.inviteUrl,
     };
+  }
+
+  @Post(':tenantId/members/:membershipId/roles')
+  @UseGuards(TenantGuard, RolesGuard)
+  @RequireRoles(TenantRole.org_admin)
+  @HttpCode(200)
+  async grantRole(
+    @Param('tenantId') tenantIdParam: string,
+    @Param('membershipId') membershipId: string,
+    @Body() body: unknown,
+    @Req() request: FastifyRequest,
+  ): Promise<{ membershipId: string; role: TenantRole; granted: boolean }> {
+    const auth = request.cdfirAuth;
+    if (!auth || tenantIdParam !== auth.tenantId) {
+      throw new NotFoundException();
+    }
+    const parsed = zodValidate(grantMemberRoleRequest, body);
+    return this.tenants.grantMemberRole(auth, membershipId, parsed.role, request);
   }
 
   @Get(':tenantId/join-link')

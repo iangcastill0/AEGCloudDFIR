@@ -59,6 +59,7 @@ import {
   memberListResponse,
   createTenantResponse,
   createInviteResponse,
+  grantMemberRoleResponse,
   joinResponse,
   joinLinkResponse,
   orgConnectorSetupResponse,
@@ -128,6 +129,21 @@ export function useCreateInvite(tenantId: string | undefined) {
         body,
         schema: createInviteResponse,
       }),
+  });
+}
+
+export function useGrantMemberRole(tenantId: string | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { membershipId: string; role: string }) =>
+      apiFetch(`/api/v1/tenants/${tenantId}/members/${body.membershipId}/roles`, {
+        method: 'POST',
+        body: { role: body.role },
+        schema: grantMemberRoleResponse,
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['members', tenantId] });
+    },
   });
 }
 

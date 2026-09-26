@@ -163,6 +163,26 @@ describe('TenantsService.createInvite', () => {
       expect.objectContaining({ action: 'tenant.invite_created' }),
     );
   });
+
+  it('refuses elevated roles on email invites', async () => {
+    // Public enrollment does not verify the mailbox. An org_admin invite URL
+    // plus a self-asserted email was enough to take over a tenant.
+    const { service } = makeService({ tenantInvite: { create: vi.fn() } });
+    await expect(
+      service.createInvite(
+        makeAuth([TenantRole.org_admin]),
+        { email: 'pat@example.com', role: TenantRole.org_admin },
+        fakeRequest(),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      service.createInvite(
+        makeAuth([TenantRole.org_admin]),
+        { email: 'pat@example.com', role: TenantRole.case_manager },
+        fakeRequest(),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
 });
 
 describe('TenantsService.redeemInvite', () => {
@@ -225,7 +245,7 @@ describe('TenantsService.redeemInvite', () => {
   it('creates membership, grants the invited role, and marks the invite used', async () => {
     const membershipCreate = vi.fn(async () => ({ id: 'mem-1' }));
     const roleCreate = vi.fn(async () => ({ id: 'role-1' }));
-    const inviteUpdate = vi.fn(async () => ({ id: 'inv-1' }));
+    const inviteUpdateMany = vi.fn(async () => ({ count: 1 }));
     const { service, audit } = makeService({
       tenantInvite: {
         findUnique: vi.fn(async () => ({
@@ -236,7 +256,7 @@ describe('TenantsService.redeemInvite', () => {
           expiresAt: future,
           usedAt: null,
         })),
-        update: inviteUpdate,
+        updateMany: inviteUpdateMany,
       },
       user: { findUnique: vi.fn(async () => ({ id: USER_ID, email: 'Pat@example.com' })) },
       tenant: {
@@ -266,10 +286,59 @@ describe('TenantsService.redeemInvite', () => {
         data: expect.objectContaining({ role: TenantRole.reviewer, source: 'local' }),
       }),
     );
-    expect(inviteUpdate).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'inv-1' } }));
+    expect(inviteUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'inv-1', usedAt: null } }),
+    );
     expect(audit.appendTx).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ action: 'tenant.member_joined' }),
+    );
+  });
+
+  it('refuses an outstanding elevated invite that email-match cannot prove', async () => {
+    const { service } = makeService({
+      tenantInvite: {
+        findUnique: vi.fn(async () => ({
+          id: 'inv-1',
+          tenantId: TENANT_ID,
+          email: 'pat@example.com',
+          role: TenantRole.org_admin,
+          expiresAt: future,
+          usedAt: null,
+        })),
+      },
+      user: { findUnique: vi.fn(async () => ({ id: USER_ID, email: 'pat@example.com' })) },
+    });
+    await expect(service.redeemInvite(USER_ID, token, fakeRequest())).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+  });
+
+  it('treats a race that already burned the invite as not found', async () => {
+    const { service } = makeService({
+      tenantInvite: {
+        findUnique: vi.fn(async () => ({
+          id: 'inv-1',
+          tenantId: TENANT_ID,
+          email: 'pat@example.com',
+          role: TenantRole.reviewer,
+          expiresAt: future,
+          usedAt: null,
+        })),
+        updateMany: vi.fn(async () => ({ count: 0 })),
+      },
+      user: { findUnique: vi.fn(async () => ({ id: USER_ID, email: 'pat@example.com' })) },
+      tenant: {
+        findUnique: vi.fn(async () => ({
+          id: TENANT_ID,
+          name: 'Acme',
+          slug: 'acme',
+          status: 'active',
+        })),
+      },
+    });
+    await expect(service.redeemInvite(USER_ID, token, fakeRequest())).rejects.toBeInstanceOf(
+      NotFoundException,
     );
   });
 
@@ -390,7 +459,7 @@ describe('TenantsService.redeemInvite', () => {
           expiresAt: future,
           usedAt: null,
         })),
-        update: vi.fn(async () => ({ id: 'inv-1' })),
+        updateMany: vi.fn(async () => ({ count: 1 })),
       },
       user: { findUnique: vi.fn(async () => ({ id: USER_ID, email: 'pat@example.com' })) },
       tenant: {
@@ -402,7 +471,7 @@ describe('TenantsService.redeemInvite', () => {
         })),
       },
       membership: {
-        findUnique: vi.fn(async () => ({ id: 'mem-1', status: 'active' })),
+        findUnique: vi.fn(async () => ({ id: 'mem-1', status: 'active', invited: true })),
       },
       roleAssignment: { findUnique: vi.fn(async () => null), create: roleCreate },
     });
@@ -413,6 +482,78 @@ describe('TenantsService.redeemInvite', () => {
         data: expect.objectContaining({ role: TenantRole.reviewer }),
       }),
     );
+  });
+});
+
+describe('TenantsService.grantMemberRole', () => {
+  it('adds a local role to an active membership', async () => {
+    const roleCreate = vi.fn(async () => ({ id: 'role-1' }));
+    const { service, audit } = makeService({
+      membership: {
+        findFirst: vi.fn(async () => ({
+          id: 'mem-1',
+          status: 'active',
+          userId: USER_ID,
+        })),
+      },
+      roleAssignment: { findUnique: vi.fn(async () => null), create: roleCreate },
+    });
+    const result = await service.grantMemberRole(
+      makeAuth([TenantRole.org_admin]),
+      'mem-1',
+      TenantRole.org_admin,
+      fakeRequest(),
+    );
+    expect(result).toEqual({ membershipId: 'mem-1', role: TenantRole.org_admin, granted: true });
+    expect(roleCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ role: TenantRole.org_admin, source: 'local' }),
+      }),
+    );
+    expect(audit.appendTx).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ action: 'tenant.role_granted' }),
+    );
+  });
+
+  it('is a no-op when the role is already present', async () => {
+    const roleCreate = vi.fn(async () => ({ id: 'role-1' }));
+    const { service, audit } = makeService({
+      membership: {
+        findFirst: vi.fn(async () => ({
+          id: 'mem-1',
+          status: 'active',
+          userId: USER_ID,
+        })),
+      },
+      roleAssignment: {
+        findUnique: vi.fn(async () => ({ id: 'role-existing' })),
+        create: roleCreate,
+      },
+    });
+    const result = await service.grantMemberRole(
+      makeAuth([TenantRole.org_admin]),
+      'mem-1',
+      TenantRole.case_manager,
+    );
+    expect(result.granted).toBe(false);
+    expect(roleCreate).not.toHaveBeenCalled();
+    expect(audit.appendTx).not.toHaveBeenCalled();
+  });
+
+  it('refuses a disabled membership', async () => {
+    const { service } = makeService({
+      membership: {
+        findFirst: vi.fn(async () => ({
+          id: 'mem-1',
+          status: 'disabled',
+          userId: USER_ID,
+        })),
+      },
+    });
+    await expect(
+      service.grantMemberRole(makeAuth([TenantRole.org_admin]), 'mem-1', TenantRole.org_admin),
+    ).rejects.toBeInstanceOf(ForbiddenException);
   });
 });
 

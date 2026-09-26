@@ -14,11 +14,36 @@ export const createTenantResponse = z.object({
 });
 export type CreateTenantResponse = z.infer<typeof createTenantResponse>;
 
+/**
+ * Roles an email invite may grant.
+ *
+ * Public Authentik enrollment does not verify mailbox ownership (ADR-014: no
+ * confirmation mail). Matching the invite email to the signed-in address is
+ * therefore not proof the person controls that mailbox — anyone who sees the
+ * invite URL can register as that address and redeem. Elevated roles
+ * (org_admin / case_manager / production_manager) must be granted from
+ * Members after an admin has looked at who actually joined.
+ */
+export const emailInviteRole = z.enum(['reviewer', 'read_only', 'auditor']);
+export type EmailInviteRole = z.infer<typeof emailInviteRole>;
+
 export const createInviteRequest = z.object({
   email: z.string().trim().email().max(320),
-  role: tenantRole,
+  role: emailInviteRole,
 });
 export type CreateInviteRequest = z.infer<typeof createInviteRequest>;
+
+export const grantMemberRoleRequest = z.object({
+  role: tenantRole,
+});
+export type GrantMemberRoleRequest = z.infer<typeof grantMemberRoleRequest>;
+
+export const grantMemberRoleResponse = z.object({
+  membershipId: z.string().uuid(),
+  role: tenantRole,
+  granted: z.boolean(),
+});
+export type GrantMemberRoleResponse = z.infer<typeof grantMemberRoleResponse>;
 
 export const createInviteResponse = z.object({
   inviteId: z.string().uuid(),

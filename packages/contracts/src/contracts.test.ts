@@ -430,6 +430,15 @@ describe('self-serve tenancy contracts', () => {
     expect(
       createInviteRequest.safeParse({ email: 'pat@example.com', role: 'reviewer' }).success,
     ).toBe(true);
+    // Public signup does not verify mailbox ownership. Elevated roles on an
+    // email invite would let anyone who saw the URL register as that address
+    // and become org_admin without controlling the mailbox.
+    expect(
+      createInviteRequest.safeParse({ email: 'pat@example.com', role: 'org_admin' }).success,
+    ).toBe(false);
+    expect(
+      createInviteRequest.safeParse({ email: 'pat@example.com', role: 'case_manager' }).success,
+    ).toBe(false);
     expect(
       joinLinkResponse.safeParse({
         inviteUrl: 'https://app.ev.test/join?token=abc',
