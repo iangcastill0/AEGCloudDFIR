@@ -142,7 +142,7 @@ export class ExportsService {
   private async countSelection(auth: AuthContext, input: CreateExportRequest): Promise<number> {
     const selection = input.selection;
     if (selection.kind === 'saved_search') {
-      return this.selection.countForSavedSearch(auth.tenantId, selection.savedSearchId);
+      return this.selection.countForSavedSearch(auth, selection.savedSearchId);
     }
     return withTenantContext(this.prisma, auth.tenantId, async (tx) => {
       switch (selection.kind) {

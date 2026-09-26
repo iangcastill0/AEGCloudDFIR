@@ -31,6 +31,26 @@ export interface AuthContext {
   importAccess?: { ownerUserId: string; caseIds: string[] };
 }
 
+/**
+ * Tenant-wide + privileged (managers file, export, and produce that way) but
+ * still honor forensic-import ACL. Live Review already hides unattached
+ * imports; selections that omit this filter hand those bytes to any
+ * case_manager via export / production / case-file.
+ */
+export function managerSelectionAuth(
+  tenantId: string,
+  actor: { userId: string; isOrgAdmin: boolean; memberCaseIds: string[] },
+): AuthContext {
+  return {
+    tenantId,
+    caseIds: null,
+    includePrivileged: true,
+    ...(actor.isOrgAdmin
+      ? {}
+      : { importAccess: { ownerUserId: actor.userId, caseIds: actor.memberCaseIds } }),
+  };
+}
+
 /** Fields that have a `.keyword` multi-field for exact/wildcard matching. */
 const KEYWORD_MULTIFIELDS: ReadonlySet<string> = new Set(['name', 'email.subject']);
 
@@ -295,7 +315,8 @@ export function compileNode(node: ValidatedNode): QueryDsl {
  * THE authorization wrapper. Every query sent to OpenSearch passes through
  * this function: it injects an unconditional tenantId term filter, an
  * optional case-ACL terms filter (an empty caseIds array matches nothing),
- * and a privilege filter unless the caller may see privileged material.
+ * a forensic-import ACL when `importAccess` is set, and a privilege filter
+ * unless the caller may see privileged material.
  */
 export function wrapWithAuthorization(query: QueryDsl, auth: AuthContext): QueryDsl {
   if (typeof auth.tenantId !== 'string' || auth.tenantId.length === 0) {

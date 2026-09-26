@@ -51,6 +51,7 @@ export {
   compileNode,
   DEFAULT_PAGE_SIZE,
   FACET_FIELDS,
+  managerSelectionAuth,
   MAX_PAGE_SIZE,
   wrapWithAuthorization,
 } from './compile.js';

@@ -5,6 +5,8 @@ import { TRUTHFULNESS_NOTICES } from '@aeg-clouddfir/contracts';
 import {
   appendAuditEvent,
   FAMILY_RELATIONSHIP_KINDS,
+  MembershipStatus,
+  TenantRole,
   withTenantContext,
   type Prisma,
 } from '@aeg-clouddfir/database';
@@ -20,7 +22,9 @@ import { AUDIT_CSV_COLUMNS, auditRowsFor } from './audit-csv.js';
 import {
   DEFAULT_FIELD_REGISTRY,
   buildSearchRequest,
+  managerSelectionAuth,
   validateAst,
+  type AuthContext as SearchAuthContext,
   type QueryNode,
 } from '@aeg-clouddfir/search';
 import { sanitizeError, type WorkerContext } from '../context.js';
@@ -155,10 +159,48 @@ export const EXPORT_CSV_COLUMNS: readonly string[] = [
   ...AUDIT_CSV_COLUMNS,
 ];
 
-async function resolveSelectionIds(
+async function loadExportSelectionAuth(
+  ctx: WorkerContext,
+  tenantId: string,
+  createdById: string | null,
+): Promise<SearchAuthContext> {
+  // Fail closed: a missing creator still cannot pull someone else's unattached
+  // import. Org admins are the only callers who omit the fence.
+  if (createdById === null) {
+    return managerSelectionAuth(tenantId, {
+      userId: '00000000-0000-4000-8000-000000000000',
+      isOrgAdmin: false,
+      memberCaseIds: [],
+    });
+  }
+  const membership = await withTenantContext(ctx.prisma, tenantId, (tx) =>
+    tx.membership.findFirst({
+      where: { tenantId, userId: createdById, status: MembershipStatus.active },
+      select: {
+        roles: { select: { role: true } },
+        caseMemberships: { select: { caseId: true } },
+      },
+    }),
+  );
+  if (membership === null) {
+    return managerSelectionAuth(tenantId, {
+      userId: createdById,
+      isOrgAdmin: false,
+      memberCaseIds: [],
+    });
+  }
+  return managerSelectionAuth(tenantId, {
+    userId: createdById,
+    isOrgAdmin: membership.roles.some((row) => row.role === TenantRole.org_admin),
+    memberCaseIds: membership.caseMemberships.map((row) => row.caseId),
+  });
+}
+
+export async function resolveSelectionIds(
   ctx: WorkerContext,
   tenantId: string,
   params: ExportParameters,
+  createdById: string | null,
 ): Promise<string[]> {
   const selection = params.selection;
   if (selection.kind === 'items') return [...new Set(selection.evidenceItemIds)];
@@ -181,20 +223,18 @@ async function resolveSelectionIds(
     return [...new Set(rows.map((r) => r.evidenceItemId))];
   }
   // saved_search: run the stored, pre-validated AST through the search
-  // adapter with a search_after loop (capped).
+  // adapter with a search_after loop (capped). Import ACL matches Review:
+  // an unattached forensic import is not in someone else's export.
   const saved = await withTenantContext(ctx.prisma, tenantId, (tx) =>
     tx.savedSearch.findUnique({ where: { id: selection.savedSearchId } }),
   );
   if (saved === null) throw new Error('saved search referenced by the export no longer exists');
   const validated = validateAst(saved.queryAst as unknown as QueryNode, DEFAULT_FIELD_REGISTRY);
+  const searchAuth = await loadExportSelectionAuth(ctx, tenantId, createdById);
   const ids: string[] = [];
   let searchAfter: (string | number)[] | undefined;
   while (ids.length < SAVED_SEARCH_RESULT_CAP) {
-    const request = buildSearchRequest(
-      validated,
-      { tenantId, includePrivileged: true },
-      { limit: 100, searchAfter },
-    );
+    const request = buildSearchRequest(validated, searchAuth, { limit: 100, searchAfter });
     const page = await ctx.search.search(request);
     if (page.items.length === 0) break;
     for (const hit of page.items) ids.push(hit.id);
@@ -508,7 +548,7 @@ export async function processExportRun(
 
   try {
     const params = exportParameters.parse(exportRow.parameters);
-    let ids = await resolveSelectionIds(ctx, tenantId, params);
+    let ids = await resolveSelectionIds(ctx, tenantId, params, exportRow.createdById ?? null);
     // `includeFamilies` still decides WHAT is exported; `attachments` decides
     // HOW it is laid out. They are separate questions and both still matter.
     //
