@@ -96,6 +96,12 @@ describe('TenantsService.createSelfServe', () => {
     expect(createdData.data.planQuota).toEqual(QUOTA_DEFAULTS);
     expect(typeof createdData.data.joinToken).toBe('string');
     expect((createdData.data.joinToken as string).length).toBeGreaterThan(16);
+    const membershipData = membershipCreate.mock.calls[0]?.[0] as {
+      data: { invited?: boolean };
+    };
+    // Owners who create the org are not invitees. Prisma defaults invited to
+    // false when the field is omitted; the plan wall keys off that flag.
+    expect(membershipData.data.invited).not.toBe(true);
     expect(roleCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ role: TenantRole.org_admin, source: 'local' }),
