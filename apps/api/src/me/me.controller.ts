@@ -44,7 +44,10 @@ export class MeController {
         ? { id: active.tenant.id, name: active.tenant.name, slug: active.tenant.slug }
         : null,
       roles: active ? active.roles.map((r) => r.role) : [],
-      invited: memberships.some((m) => m.invited),
+      // Active tenant only. "Invited on any membership" let a guest invite on
+      // tenant A unlock an unpaid self-serve org on tenant B, and the reverse
+      // (invited nowhere) is what the plan wall keys off.
+      invited: active?.invited ?? false,
       memberships: memberships.map((m) => ({
         tenantId: m.tenantId,
         tenantName: m.tenant.name,
