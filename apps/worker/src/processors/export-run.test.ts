@@ -7,6 +7,8 @@ import {
   expandFamilies,
   exportStatusDetail,
   loadItemsInBatches,
+  MALWARE_EXPORT_REFUSAL,
+  malwareNativeRefusal,
   partitionPstSelection,
   processExportRun,
   PST_NOT_EMAIL_EXCEPTION,
@@ -164,6 +166,140 @@ describe('processExportRun (native)', () => {
     });
     await processExportRun(f.ctx, payload);
     expect(f.tx.export.update).not.toHaveBeenCalled();
+  });
+
+  it('does not stream infected natives into the archive', async () => {
+    // Native GET returns 423 for malwareStatus=infected. The worker used to
+    // pack those bytes (from quarantine, or from the evidence bucket when the
+    // blob is shared) with no lock and no override audit.
+    const infectedId = BAD_ID;
+    const f = fakeCtx();
+    const { writer } = arm(f);
+    f.tx.evidenceItem.findMany.mockResolvedValue([
+      evidenceRow(GOOD_ID, GOOD_SHA),
+      {
+        ...evidenceRow(infectedId, GOOD_SHA),
+        malwareStatus: 'infected',
+        blob: {
+          objectKey: `tenants/${TENANT}/quarantine/sha256/aa/${GOOD_SHA}`,
+          storageClass: 'quarantine',
+        },
+      },
+    ]);
+
+    await processExportRun(f.ctx, payload, { createArchive: () => writer });
+
+    const streamedKeys = f.store.getStream.mock.calls.map((c) => c[1] as string);
+    expect(streamedKeys.every((key) => !String(key).includes('quarantine'))).toBe(true);
+
+    const upserts = f.tx.exportItem.upsert.mock.calls.map(
+      (c) =>
+        c[0] as {
+          where: { exportId_evidenceItemId: { evidenceItemId: string } };
+          create: Record<string, unknown>;
+        },
+    );
+    const good = upserts.find((u) => u.where.exportId_evidenceItemId.evidenceItemId === GOOD_ID);
+    const infected = upserts.find(
+      (u) => u.where.exportId_evidenceItemId.evidenceItemId === infectedId,
+    );
+    expect(good?.create['state']).toBe('verified');
+    expect(infected?.create['state']).toBe('failed');
+    expect(String(infected?.create['error'])).toBe(MALWARE_EXPORT_REFUSAL);
+
+    const finalUpdate = f.tx.export.update.mock.calls.at(-1)?.[0] as {
+      data: Record<string, unknown>;
+    };
+    expect(finalUpdate.data['status']).toBe('ready');
+    expect(finalUpdate.data['itemCount']).toBe(1);
+  });
+
+  it('refuses a shared-blob infected item still sitting in the evidence bucket', async () => {
+    const infectedId = BAD_ID;
+    const f = fakeCtx();
+    const { writer } = arm(f);
+    f.tx.evidenceItem.findMany.mockResolvedValue([
+      {
+        ...evidenceRow(infectedId, GOOD_SHA),
+        malwareStatus: 'infected',
+        blob: {
+          objectKey: `tenants/${TENANT}/originals/sha256/aa/${GOOD_SHA}`,
+          storageClass: 'original',
+        },
+      },
+    ]);
+    f.tx.export.findUnique.mockResolvedValue({
+      id: EXPORT_ID,
+      kind: 'native',
+      status: 'queued',
+      parameters: {
+        selection: { kind: 'items', evidenceItemIds: [infectedId] },
+        includeFamilies: false,
+        archiveSplitMb: 2048,
+      },
+    });
+
+    await processExportRun(f.ctx, payload, { createArchive: () => writer });
+
+    expect(f.store.getStream).not.toHaveBeenCalled();
+    const upsert = f.tx.exportItem.upsert.mock.calls[0]?.[0] as {
+      create: Record<string, unknown>;
+    };
+    expect(upsert.create['state']).toBe('failed');
+    expect(String(upsert.create['error'])).toBe(MALWARE_EXPORT_REFUSAL);
+  });
+});
+
+describe('malwareNativeRefusal', () => {
+  it('blocks infected items and leaves clean / unscanned / suspicious alone', () => {
+    expect(malwareNativeRefusal('infected')).toBe(MALWARE_EXPORT_REFUSAL);
+    expect(malwareNativeRefusal('clean')).toBeNull();
+    expect(malwareNativeRefusal('not_scanned')).toBeNull();
+    expect(malwareNativeRefusal('scan_failed')).toBeNull();
+    expect(malwareNativeRefusal('suspicious')).toBeNull();
+  });
+});
+
+describe('processExportRun (pst malware)', () => {
+  it('does not fetch infected emails when building a PST', async () => {
+    const f = fakeCtx();
+    f.tx.export.findUnique.mockResolvedValue({
+      id: EXPORT_ID,
+      kind: 'pst',
+      name: 'mail',
+      status: 'queued',
+      parameters: {
+        selection: { kind: 'items', evidenceItemIds: [BAD_ID] },
+        includeFamilies: false,
+      },
+    });
+    f.tx.evidenceItem.findMany.mockResolvedValue([
+      {
+        ...evidenceRow(BAD_ID, GOOD_SHA),
+        kind: 'email',
+        malwareStatus: 'infected',
+        blob: {
+          objectKey: `tenants/${TENANT}/quarantine/sha256/aa/${GOOD_SHA}`,
+          storageClass: 'quarantine',
+        },
+        emailMetadata: {
+          subject: 'virus',
+          messageId: '<v@example.com>',
+          sentAt: null,
+          receivedAt: null,
+          bccPresent: false,
+        },
+      },
+    ]);
+
+    await processExportRun(f.ctx, payload);
+
+    expect(f.store.getStream).not.toHaveBeenCalled();
+    const finalUpdate = f.tx.export.update.mock.calls.at(-1)?.[0] as {
+      data: Record<string, unknown>;
+    };
+    expect(finalUpdate.data['status']).toBe('failed');
+    expect(String(finalUpdate.data['statusDetail'])).toMatch(/flagged as malware/);
   });
 });
 

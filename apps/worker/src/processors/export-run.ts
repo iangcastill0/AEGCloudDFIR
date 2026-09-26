@@ -736,6 +736,7 @@ async function runPstExportKind(
   batches: AsyncIterable<LoadedExportItem[]>,
 ): Promise<ExportResult> {
   const items: PstExportItem[] = [];
+  const malwareSkipped: { evidenceItemId: string; error: string }[] = [];
   const loaded: {
     id: string;
     kind: string;
@@ -749,6 +750,11 @@ async function runPstExportKind(
         childRelationships: item.childRelationships,
       });
       if (item.kind !== 'email') continue;
+      const malwareRefusal = malwareNativeRefusal(item.malwareStatus);
+      if (malwareRefusal !== null) {
+        malwareSkipped.push({ evidenceItemId: item.id, error: malwareRefusal });
+        continue;
+      }
       items.push({
         evidenceItemId: item.id,
         sha256: item.sha256,
@@ -774,10 +780,13 @@ async function runPstExportKind(
   const split = partitionPstSelection(loaded);
   if (items.length === 0) {
     throw new Error(
-      split.omitted.length > 0
-        ? `this selection has no email items, so there is nothing to put in a PST ` +
+      malwareSkipped.length > 0
+        ? `every email in this selection is flagged as malware, so no PST was written ` +
+            `(${String(malwareSkipped.length)} item(s))`
+        : split.omitted.length > 0
+          ? `this selection has no email items, so there is nothing to put in a PST ` +
             `(${String(split.omitted.length)} non-email item(s) were selected)`
-        : 'this selection is empty, so there is nothing to put in a PST',
+          : 'this selection is empty, so there is nothing to put in a PST',
     );
   }
   if (split.omitted.length > 0) {
@@ -794,7 +803,7 @@ async function runPstExportKind(
     spoolThresholdBytes: ctx.config.CDFIR_PSTB_SPOOL_THRESHOLD_BYTES,
     partBytes: params.pstPartMb * 1024 * 1024,
     storeDisplayName: pstStoreDisplayName(exportName),
-    extraExceptions: split.omitted,
+    extraExceptions: [...split.omitted, ...malwareSkipped],
   });
 
   return {
@@ -948,6 +957,20 @@ export function exportStatusDetail(
   }
   if (failedCount > 0) said.push(`${String(failedCount)} item(s) failed verification`);
   return said.join(' ');
+}
+
+/**
+ * Native GET locks `malwareStatus=infected` at 423 unless org_admin confirms
+ * and audits `evidence.infected_download_override`. Exports used to stream
+ * those bytes anyway — including `getStream('quarantine', …)` — with no lock
+ * and no audit event. Shared blobs stay in the evidence bucket when more than
+ * one item points at them, so storageClass alone is not a gate.
+ */
+export const MALWARE_EXPORT_REFUSAL =
+  'this item is flagged as malware and is not included in the export';
+
+export function malwareNativeRefusal(malwareStatus: string): string | null {
+  return malwareStatus === 'infected' ? MALWARE_EXPORT_REFUSAL : null;
 }
 
 /**
@@ -1125,6 +1148,11 @@ async function runNativeExport(
     entry: ManifestEntry,
   ): Promise<'verified' | 'failed'> => {
     const size = Number(item.size);
+    const malwareRefusal = malwareNativeRefusal(item.malwareStatus);
+    if (malwareRefusal !== null) {
+      entry.error = malwareRefusal;
+      return 'failed';
+    }
     if (item.blob === null || item.sha256 === '') {
       entry.error = 'no preserved native bytes';
       return 'failed';
