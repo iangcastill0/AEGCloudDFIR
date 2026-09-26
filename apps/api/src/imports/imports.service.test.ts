@@ -129,6 +129,42 @@ describe('ImportsService', () => {
     ).toBe(true);
   });
 
+  it('queues search.case-import with a fresh dedup token on every attach', async () => {
+    // A key of only import+case is once-ever. After a failed stamp (or a first
+    // run that matched no documents yet), Attach again must be able to retry.
+    const importId = '99999999-9999-4999-8999-999999999999';
+    const outboxCreateMany = vi.fn().mockResolvedValue({ count: 1 });
+    const prisma = fakePrisma({
+      forensicImport: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: importId,
+          createdById: USER_ID,
+          cases: [],
+        }),
+      },
+      case: { findFirst: vi.fn().mockResolvedValue({ id: CASE_ID }) },
+      importCase: { createMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      evidenceItem: { findMany: vi.fn().mockResolvedValue([]) },
+      caseItem: { createMany: vi.fn().mockResolvedValue({ count: 0 }) },
+      outboxEvent: { createMany: outboxCreateMany },
+    });
+    const service = new ImportsService(prisma, store() as never, fakeAudit().service);
+    const auth = makeAuth([TenantRole.case_manager]);
+
+    await service.attach(auth, importId, { caseId: CASE_ID }, fakeRequest());
+    await service.attach(auth, importId, { caseId: CASE_ID }, fakeRequest());
+
+    const keys = outboxCreateMany.mock.calls.map((call) => {
+      const rows = call[0]?.data as { dedupKey: string; topic: string }[];
+      return rows[0];
+    });
+    expect(keys).toHaveLength(2);
+    expect(keys[0]?.topic).toBe('search.case-import');
+    expect(keys[0]?.dedupKey).toMatch(new RegExp(`^case-import:${importId}:${CASE_ID}:`));
+    expect(keys[1]?.dedupKey).toMatch(new RegExp(`^case-import:${importId}:${CASE_ID}:`));
+    expect(keys[0]?.dedupKey).not.toBe(keys[1]?.dedupKey);
+  });
+
   it('re-runs malware scanning before retrying an import whose scan failed', async () => {
     const importId = '99999999-9999-4999-8999-999999999999';
     const outboxCreate = vi.fn().mockResolvedValue({ id: 'event-1' });

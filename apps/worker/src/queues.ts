@@ -102,7 +102,9 @@ export const dedupKeys = {
    */
   searchIndex: (evidenceItemId: string, version: number, stage = 'final') =>
     `index:${evidenceItemId}:v${version}:${stage}`,
-  searchCaseImport: (importId: string, caseId: string) => `case-import:${importId}:${caseId}`,
+  // Caller must append a fresh token; a key of only import+case is once-ever.
+  searchCaseImport: (importId: string, caseId: string, token: string) =>
+    `case-import:${importId}:${caseId}:${token}`,
   exportRun: (exportId: string) => `export:${exportId}`,
   productionRun: (productionRunId: string) => `production-run:${productionRunId}`,
   deletionRun: (deletionRequestId: string) => `deletion:${deletionRequestId}`,

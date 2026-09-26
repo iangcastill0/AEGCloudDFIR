@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import {
   BadRequestException,
@@ -528,7 +529,12 @@ export class ImportsService {
           {
             tenantId: auth.tenantId,
             topic: 'search.case-import',
-            dedupKey: `case-import:${id}:${input.caseId}`,
+            // Fresh token each call. A key of only import+case worked once
+            // ever: after a failed search.case-import (or a first run that
+            // stamped nothing because documents were not indexed yet), a
+            // second Attach was skipped by skipDuplicates and Review kept
+            // the old caseIds. Same shape as case-collection on collections.
+            dedupKey: `case-import:${id}:${input.caseId}:${randomUUID()}`,
             payload: { tenantId: auth.tenantId, importId: id, caseId: input.caseId },
           },
         ],
