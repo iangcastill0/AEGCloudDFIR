@@ -1,6 +1,19 @@
 import { TenantRole } from '@aeg-clouddfir/database';
 import type { AuthContext } from './http.js';
 
+/**
+ * Roles that may search and open evidence. Passed to `@RequireRoles`, which is
+ * exact — org_admin implies nothing. Self-serve create and bootstrap grant
+ * only org_admin, so omitting it here 403s Review for the people who own the
+ * tenant. Native download already listed this role; search and detail did not.
+ */
+export const EVIDENCE_READ_ROLES: TenantRole[] = [
+  TenantRole.case_manager,
+  TenantRole.reviewer,
+  TenantRole.read_only,
+  TenantRole.org_admin,
+];
+
 /** Roles whose evidence/search visibility is tenant-wide (not case-scoped). */
 const TENANT_WIDE_READ_ROLES: readonly TenantRole[] = [
   TenantRole.org_admin,

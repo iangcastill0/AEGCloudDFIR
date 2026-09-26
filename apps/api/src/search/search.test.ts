@@ -136,6 +136,20 @@ describe('SearchService.execute', () => {
     expect(filters).toContainEqual({ term: { tenantId: TENANT_ID } });
   });
 
+  it('lets org_admin browse tenant-wide, including privileged and imported items', async () => {
+    const adapter = makeAdapter();
+    const memberFind = vi.fn(async () => [{ caseId: CASE_ID }]);
+    const { service } = makeService({ caseMember: { findMany: memberFind } }, adapter);
+
+    await service.execute(makeAuth([TenantRole.org_admin]), { query: 'hello' }, fakeRequest());
+
+    expect(memberFind).not.toHaveBeenCalled();
+    const filters = authFilters(adapter.lastBody);
+    expect(filters).toContainEqual({ term: { tenantId: TENANT_ID } });
+    expect(filters).not.toContainEqual({ term: { privileged: false } });
+    expect(JSON.stringify(filters)).not.toContain('importOwnerId');
+  });
+
   it('audits query shape and total, never result bodies', async () => {
     const adapter = makeAdapter(42);
     const { service, audit } = makeService({}, adapter);

@@ -1,5 +1,4 @@
 import { Controller, Get, NotFoundException, Param, Query, Req, UseGuards } from '@nestjs/common';
-import { TenantRole } from '@aeg-clouddfir/database';
 import type { FastifyRequest } from 'fastify';
 import '../common/http.js';
 import type { AuthContext } from '../common/http.js';
@@ -8,6 +7,7 @@ import { TenantGuard } from '../auth/guards/tenant.guard.js';
 import { RolesGuard } from '../auth/guards/roles.guard.js';
 import { RequireRoles } from '../auth/guards/require-roles.decorator.js';
 import { parseCursorQuery } from '../common/pagination.js';
+import { EVIDENCE_READ_ROLES } from '../common/roles.js';
 import { EvidenceService, type EvidenceDetailDto } from './evidence.service.js';
 
 function requireAuth(request: FastifyRequest): AuthContext {
@@ -22,7 +22,7 @@ export class EvidenceController {
   constructor(private readonly evidence: EvidenceService) {}
 
   @Get(':id')
-  @RequireRoles(TenantRole.case_manager, TenantRole.reviewer, TenantRole.read_only)
+  @RequireRoles(...EVIDENCE_READ_ROLES)
   async detail(
     @Param('id') id: string,
     @Req() request: FastifyRequest,
@@ -31,7 +31,7 @@ export class EvidenceController {
   }
 
   @Get(':id/headers')
-  @RequireRoles(TenantRole.case_manager, TenantRole.reviewer, TenantRole.read_only)
+  @RequireRoles(...EVIDENCE_READ_ROLES)
   async headers(
     @Param('id') id: string,
     @Req() request: FastifyRequest,
@@ -40,7 +40,7 @@ export class EvidenceController {
   }
 
   @Get(':id/audit-records')
-  @RequireRoles(TenantRole.case_manager, TenantRole.reviewer, TenantRole.read_only)
+  @RequireRoles(...EVIDENCE_READ_ROLES)
   async auditRecords(
     @Param('id') id: string,
     @Query() query: Record<string, unknown>,
@@ -50,7 +50,7 @@ export class EvidenceController {
   }
 
   @Get(':id/family')
-  @RequireRoles(TenantRole.case_manager, TenantRole.reviewer, TenantRole.read_only)
+  @RequireRoles(...EVIDENCE_READ_ROLES)
   async family(
     @Param('id') id: string,
     @Req() request: FastifyRequest,
@@ -59,7 +59,7 @@ export class EvidenceController {
   }
 
   @Get(':id/chain')
-  @RequireRoles(TenantRole.case_manager, TenantRole.reviewer, TenantRole.read_only)
+  @RequireRoles(...EVIDENCE_READ_ROLES)
   async chain(
     @Param('id') id: string,
     @Req() request: FastifyRequest,
@@ -68,7 +68,7 @@ export class EvidenceController {
   }
 
   @Get(':id/preview')
-  @RequireRoles(TenantRole.case_manager, TenantRole.reviewer, TenantRole.read_only)
+  @RequireRoles(...EVIDENCE_READ_ROLES)
   async preview(
     @Param('id') id: string,
     @Req() request: FastifyRequest,
@@ -80,12 +80,7 @@ export class EvidenceController {
   }
 
   @Get(':id/native')
-  @RequireRoles(
-    TenantRole.case_manager,
-    TenantRole.reviewer,
-    TenantRole.read_only,
-    TenantRole.org_admin,
-  )
+  @RequireRoles(...EVIDENCE_READ_ROLES)
   async native(
     @Param('id') id: string,
     @Query('confirmDangerous') confirmDangerous: string | undefined,
