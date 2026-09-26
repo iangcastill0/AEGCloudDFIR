@@ -174,6 +174,13 @@ describe('O365ManagementActivityConnector.fetchAuditPage', () => {
     ).rejects.toThrow(/both since and until/);
   });
 
+  it('refuses an actor filter rather than preserving the whole tenant feed', async () => {
+    await expect(
+      connector().fetchAuditPage('Audit.Exchange', { actorFilter: ['avery.chen@example.com'] }),
+    ).rejects.toThrow(/cannot restrict by actor/);
+    expect(server.requests).toHaveLength(0);
+  });
+
   it('honors a 429 Retry-After and surfaces the wait', async () => {
     const waits: { reason: string; waitMs: number }[] = [];
     let hits = 0;

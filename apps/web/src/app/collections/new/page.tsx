@@ -1095,7 +1095,7 @@ function AuditScopeFields({ state, dispatch }: StepProps) {
 
       <TextArea
         label="Actor filter (optional)"
-        hint="Restrict to one actor principal (UPN/email) where the provider supports it. Google Reports accepts at most one; leave blank for all users. Separate collections per actor if you need more than one."
+        hint="Restrict to one actor principal (UPN/email) where the provider supports it. Google Reports and Microsoft Graph accept at most one. Office 365 Management Activity cannot filter by actor and will skip those scopes. Leave blank for all users."
         rows={2}
         value={a.actorFilterText}
         onChange={(e) =>
