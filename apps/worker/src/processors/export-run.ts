@@ -5,6 +5,8 @@ import { TRUTHFULNESS_NOTICES } from '@aeg-clouddfir/contracts';
 import {
   appendAuditEvent,
   FAMILY_RELATIONSHIP_KINDS,
+  MembershipStatus,
+  TenantRole,
   withTenantContext,
   type Prisma,
 } from '@aeg-clouddfir/database';
@@ -208,6 +210,74 @@ async function resolveSelectionIds(
     );
   }
   return [...new Set(ids)];
+}
+
+/**
+ * Same forensic-import fence as Review / `requireItem`. Export selection used
+ * to run as SYSTEM: a second case_manager exporting a shared tag (or a raw
+ * id list / case) received natives Review would 404.
+ *
+ * Fail closed when the export has no creator: only non-import evidence and
+ * items already on a case that dummy membership is not on (i.e. none).
+ */
+export async function keepImportReadableIds(
+  ctx: WorkerContext,
+  tenantId: string,
+  createdById: string | null,
+  ids: string[],
+): Promise<string[]> {
+  if (ids.length === 0) return ids;
+
+  const membership =
+    createdById === null
+      ? null
+      : await withTenantContext(ctx.prisma, tenantId, (tx) =>
+          tx.membership.findFirst({
+            where: { tenantId, userId: createdById, status: MembershipStatus.active },
+            select: { id: true, roles: { select: { role: true } } },
+          }),
+        );
+
+  if (membership?.roles.some((row) => row.role === TenantRole.org_admin) === true) {
+    return ids;
+  }
+
+  const userId = createdById ?? '00000000-0000-4000-8000-000000000000';
+  const membershipId = membership?.id ?? '00000000-0000-4000-8000-000000000000';
+  const fence: Prisma.EvidenceItemWhereInput = {
+    OR: [
+      { importId: null },
+      { forensicImport: { is: { createdById: userId } } },
+      {
+        forensicImport: {
+          is: {
+            cases: {
+              some: { case: { members: { some: { membershipId } } } },
+            },
+          },
+        },
+      },
+      {
+        caseItems: {
+          some: { case: { members: { some: { membershipId } } } },
+        },
+      },
+    ],
+  };
+
+  const allowed = new Set(
+    (
+      await queryInChunks(ids, (batch) =>
+        withTenantContext(ctx.prisma, tenantId, (tx) =>
+          tx.evidenceItem.findMany({
+            where: { id: { in: batch }, ...fence },
+            select: { id: true },
+          }),
+        ),
+      )
+    ).map((row) => row.id),
+  );
+  return ids.filter((id) => allowed.has(id));
 }
 
 /** Exported for tests: the transaction-per-batch behaviour is the whole point. */
@@ -522,6 +592,9 @@ export async function processExportRun(
     if (params.includeFamilies) {
       ids = await expandFamilies(ctx, tenantId, ids);
     }
+    // After family expansion: a readable parent must not pull an unattached
+    // import sibling into the archive. Same fence as Review / requireItem.
+    ids = await keepImportReadableIds(ctx, tenantId, exportRow.createdById ?? null, ids);
     // Streamed, a batch at a time, chunked and with one transaction per batch:
     // `ids` is a whole case or collection and has no upper bound. Holding all
     // of them is what made a 434,910-item export a memory problem as well as a

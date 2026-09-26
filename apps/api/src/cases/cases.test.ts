@@ -142,6 +142,49 @@ describe('CasesService.addItems', () => {
     );
   });
 
+  it('does not file another user unattached forensic import via a shared tag', async () => {
+    // Alice tagged her unattached import with a tenant tag. Bob adding that
+    // tag to his case must not pull those ids — Review would 404 them, and
+    // filing would then unlock native download through case membership.
+    const createMany = vi.fn(async (args: { data: unknown[] }) => ({ count: args.data.length }));
+    const evidenceFindMany = vi.fn(
+      async (args: { where?: { OR?: unknown }; select?: { id?: boolean; version?: number } }) => {
+        if (args.select?.id === true && args.select.version === undefined) {
+          expect(args.where?.OR).toEqual(
+            expect.arrayContaining([
+              { importId: null },
+              { forensicImport: { is: { createdById: auth.userId } } },
+            ]),
+          );
+          return [{ id: ITEM_A }];
+        }
+        return [{ id: ITEM_A, version: 1 }];
+      },
+    );
+    const { service } = makeService({
+      case: { findFirst: vi.fn(async () => caseRow()) },
+      tag: { findFirst: vi.fn(async () => ({ id: TAG_ID })) },
+      tagAssignment: {
+        findMany: vi.fn(async () => [{ evidenceItemId: ITEM_A }, { evidenceItemId: ITEM_B }]),
+      },
+      caseItem: { createMany },
+      evidenceItem: { findMany: evidenceFindMany },
+      outboxEvent: {
+        createMany: vi.fn(async (args: { data: unknown[] }) => ({ count: args.data.length })),
+      },
+    });
+
+    const result = await service.addItems(
+      auth,
+      CASE_ID,
+      { source: { kind: 'tag', tagId: TAG_ID }, includeFamilies: false },
+      fakeRequest(),
+    );
+    expect(result.added).toBe(1);
+    const rows = (createMany.mock.calls[0]?.[0] as { data: { evidenceItemId: string }[] }).data;
+    expect(rows.map((row) => row.evidenceItemId)).toEqual([ITEM_A]);
+  });
+
   it('adds everything in a collection without loading its ids', async () => {
     // "Add from a collection" is how a case starts: you collect first, then
     // scope a matter to what came back.

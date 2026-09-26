@@ -28,6 +28,7 @@ import type { CursorQuery } from '../common/pagination.js';
 import { assertWithinQuota, readQuota } from '../common/quotas.js';
 import { zodValidate } from '../common/zod-validate.js';
 import { AuditService } from '../audit/audit.service.js';
+import { importReadableEvidenceWhere } from '../imports/import-access.js';
 import { SelectionService } from '../search/selection.service.js';
 import { chunk, FAMILY_QUERY_CHUNK } from '../common/families.js';
 import { signDownloadToken, verifyDownloadToken } from './download-token.js';
@@ -145,6 +146,7 @@ export class ExportsService {
       return this.selection.countForSavedSearch(auth.tenantId, selection.savedSearchId);
     }
     return withTenantContext(this.prisma, auth.tenantId, async (tx) => {
+      const importFence = importReadableEvidenceWhere(auth);
       switch (selection.kind) {
         case 'items': {
           // createExportRequest puts no ceiling on this list, unlike the case
@@ -154,7 +156,7 @@ export class ExportsService {
           let total = 0;
           for (const batch of chunk(selection.evidenceItemIds, FAMILY_QUERY_CHUNK)) {
             total += await tx.evidenceItem.count({
-              where: { tenantId: auth.tenantId, id: { in: batch } },
+              where: { tenantId: auth.tenantId, id: { in: batch }, ...importFence },
             });
           }
           return total;
@@ -165,7 +167,9 @@ export class ExportsService {
             select: { id: true },
           });
           if (!tag) throw new NotFoundException();
-          return tx.tagAssignment.count({ where: { tenantId: auth.tenantId, tagId: tag.id } });
+          return tx.tagAssignment.count({
+            where: { tenantId: auth.tenantId, tagId: tag.id, evidenceItem: importFence },
+          });
         }
         case 'case': {
           const found = await tx.case.findFirst({
@@ -174,7 +178,11 @@ export class ExportsService {
           });
           if (!found) throw new NotFoundException();
           return tx.caseItem.count({
-            where: { tenantId: auth.tenantId, caseId: selection.caseId },
+            where: {
+              tenantId: auth.tenantId,
+              caseId: selection.caseId,
+              evidenceItem: importFence,
+            },
           });
         }
         default:

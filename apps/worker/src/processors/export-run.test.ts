@@ -6,6 +6,7 @@ import {
   buildFamilyIndex,
   expandFamilies,
   exportStatusDetail,
+  keepImportReadableIds,
   loadItemsInBatches,
   partitionPstSelection,
   processExportRun,
@@ -119,7 +120,47 @@ describe('processExportRun (native)', () => {
     };
     expect(audit.data['action']).toBe('export.completed');
   });
+});
 
+describe('keepImportReadableIds', () => {
+  const BOB = '22222222-2222-4222-8222-222222222222';
+  const BOB_MEMBERSHIP = '33333333-3333-4333-8333-333333333333';
+
+  it("drops another user's unattached forensic import from a tag export", async () => {
+    const f = fakeCtx();
+    f.tx.membership.findFirst.mockResolvedValue({
+      id: BOB_MEMBERSHIP,
+      roles: [{ role: 'case_manager' }],
+    });
+    f.tx.evidenceItem.findMany.mockResolvedValue([{ id: GOOD_ID }]);
+
+    const kept = await keepImportReadableIds(f.ctx, TENANT, BOB, [GOOD_ID, BAD_ID]);
+    expect(kept).toEqual([GOOD_ID]);
+    expect(f.tx.evidenceItem.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          OR: expect.arrayContaining([
+            { importId: null },
+            { forensicImport: { is: { createdById: BOB } } },
+          ]),
+        }),
+      }),
+    );
+  });
+
+  it('does not fence an org_admin exporter', async () => {
+    const f = fakeCtx();
+    f.tx.membership.findFirst.mockResolvedValue({
+      id: BOB_MEMBERSHIP,
+      roles: [{ role: 'org_admin' }],
+    });
+    const kept = await keepImportReadableIds(f.ctx, TENANT, BOB, [GOOD_ID, BAD_ID]);
+    expect(kept).toEqual([GOOD_ID, BAD_ID]);
+    expect(f.tx.evidenceItem.findMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('processExportRun (native) extras', () => {
   it('appends manifests, hashlist, exceptions, and README to the archive', async () => {
     const f = fakeCtx();
     const { writer, append } = arm(f);
@@ -394,9 +435,16 @@ function armGenerated(
   });
   f.tx.evidenceRelationship.findMany.mockResolvedValue([]);
   f.tx.evidenceItem.findMany.mockImplementation((args: Record<string, unknown>) => {
-    // buildFamilyIndex asks for { id, name }; the item stream asks with
-    // `include`. Only the stream should produce rows here.
-    if (args['select'] !== undefined) return Promise.resolve([]);
+    // buildFamilyIndex asks for { id, name }; the import-ACL fence asks for
+    // { id } only; the item stream asks with `include`.
+    const select = args['select'] as { id?: boolean; name?: boolean } | undefined;
+    if (select !== undefined) {
+      if (select.id === true && select.name === undefined) {
+        const where = args['where'] as { id: { in: string[] } };
+        return Promise.resolve(where.id.in.map((id) => ({ id })));
+      }
+      return Promise.resolve([]);
+    }
     opts.onQuery?.();
     const where = args['where'] as { id: { in: string[] } };
     return Promise.resolve(
