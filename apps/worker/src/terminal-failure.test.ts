@@ -58,6 +58,25 @@ describe('failureTargetFor', () => {
     });
   });
 
+  it('locates a stalled Slack fetch-item the same way as email and drive', () => {
+    expect(
+      failureTargetFor('collection.fetch-item', {
+        tenantId: TENANT,
+        collectionId: COLLECTION,
+        custodianId: CUSTODIAN,
+        source: 'chat',
+        providerItemId: 'C05766F2SCX:1773152773.141959',
+      }),
+    ).toEqual({
+      kind: 'collection-item',
+      tenantId: TENANT,
+      collectionId: COLLECTION,
+      custodianId: CUSTODIAN,
+      source: 'chat',
+      providerItemId: 'C05766F2SCX:1773152773.141959',
+    });
+  });
+
   it('locates the evidence item behind a parse job', () => {
     expect(
       failureTargetFor('process.parse', {

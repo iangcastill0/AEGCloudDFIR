@@ -94,7 +94,12 @@ export function failureTargetFor(
     const source = str(data, 'source');
     const providerItemId = str(data, 'providerItemId');
     if (collectionId === null || custodianId === null || providerItemId === null) return null;
-    if (source !== 'email' && source !== 'drive' && source !== 'audit') return null;
+    // Chat belongs here too. Excluding it left stalled Slack fetch-item jobs
+    // unmarked until the 15-minute sweeper, while email/drive/audit failures
+    // were recorded immediately so finalize could settle.
+    if (source !== 'email' && source !== 'drive' && source !== 'audit' && source !== 'chat') {
+      return null;
+    }
     return { kind: 'collection-item', tenantId, collectionId, custodianId, source, providerItemId };
   }
 

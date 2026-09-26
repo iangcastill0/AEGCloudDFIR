@@ -543,21 +543,32 @@ export async function processCollectionFetchItem(
 
     const message = sanitizeError(err);
     const permanent = attemptNumber >= MAX_ITEM_ATTEMPTS;
+    // Only mark `failed` when this attempt is the last. A transient error used
+    // to flip the row to failed and then rethrow for BullMQ. Finalize treats
+    // failed as settled (it only waits on discovered/fetching/preserved), so
+    // a neighbour finishing could seal the collection while this job was
+    // still queued to retry. The retry then saw status !== fetching and
+    // dropped — the item stayed failed and the bytes never arrived.
     await withTenantContext(ctx.prisma, tenantId, async (tx) => {
       await tx.collectionItem.update({
         where: { id: item.id },
-        data: { state: 'failed', lastError: message },
+        data: {
+          state: permanent ? 'failed' : 'fetching',
+          lastError: message,
+        },
       });
-      await recordException(tx, {
-        tenantId,
-        collectionId,
-        custodianId,
-        source,
-        providerItemId,
-        kind: 'api_error',
-        message,
-        detail: { attempt: attemptNumber, permanent },
-      });
+      if (permanent) {
+        await recordException(tx, {
+          tenantId,
+          collectionId,
+          custodianId,
+          source,
+          providerItemId,
+          kind: 'api_error',
+          message,
+          detail: { attempt: attemptNumber, permanent: true },
+        });
+      }
       await incrementProgress(
         tx,
         collectionId,
