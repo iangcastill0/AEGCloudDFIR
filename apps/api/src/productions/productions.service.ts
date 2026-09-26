@@ -1151,6 +1151,36 @@ export class ProductionsService {
       });
     }
 
+    // Re-check malware at submit. Draft validation only snapshots flags once;
+    // ClamAV can mark an item infected (or move it to quarantine) between
+    // validate and submit. Without this, a frozen "clean" selection would still
+    // queue a run — and the worker used to stream those natives.
+    if (ids.length > 0) {
+      let malwareCount = 0;
+      await withTenantContext(this.prisma, auth.tenantId, async (tx) => {
+        for (const idChunk of chunk(ids, QUERY_CHUNK)) {
+          malwareCount += await tx.evidenceItem.count({
+            where: {
+              tenantId: auth.tenantId,
+              id: { in: idChunk },
+              OR: [
+                { malwareStatus: { in: [MalwareStatus.infected, MalwareStatus.scan_failed] } },
+                { blob: { storageClass: 'quarantine' } },
+              ],
+            },
+          });
+        }
+      });
+      if (malwareCount > 0) {
+        throw new ConflictException({
+          message:
+            'selection now includes items flagged as malware; re-run validation and change the selection',
+          code: 'malware_item',
+          count: malwareCount,
+        });
+      }
+    }
+
     const acknowledgedWarnings = input.acknowledgedWarnings.map((ack) => ({
       code: ack.code,
       note: ack.note,

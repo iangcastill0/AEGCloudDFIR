@@ -44,6 +44,8 @@ function params(overrides: Record<string, unknown> = {}): Record<string, unknown
 interface ItemOverrides {
   redactions?: unknown[];
   extension?: string;
+  malwareStatus?: string;
+  blob?: Record<string, unknown> | null;
   childRelationships?: { parentId: string; kind: string }[];
   parentRelationships?: { childId: string; kind: string }[];
 }
@@ -61,7 +63,8 @@ function item(id: string, overrides: ItemOverrides = {}): Record<string, unknown
     primaryDate: null,
     sourceCreatedAt: null,
     sourceModifiedAt: null,
-    blob: null,
+    malwareStatus: overrides.malwareStatus ?? 'clean',
+    blob: overrides.blob === undefined ? null : overrides.blob,
     custodian: { email: 'user@example.com' },
     emailMetadata: {
       subject: 'subject',
@@ -236,6 +239,71 @@ describe('processProductionRun', () => {
     expect(rows[0]).toMatchObject({ outputKind: 'placeholder', state: 'placeholder' });
     const security = createdExceptions(f).filter((e) => e['severity'] === 'security_critical');
     expect(security.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('does not stream infected natives, even when the blob is still in the evidence bucket', async () => {
+    // Shared blobs stay in evidence when ClamAV flags them. Native download
+    // returns 423; draft validation blocks malware_item. The run still used to
+    // copy the bytes because submit only re-checked the id set — not the scan.
+    const f = fakeCtx();
+    const objectKey = `tenants/${TENANT}/originals/sha256/aa/${'a'.repeat(64)}`;
+    arm(
+      f,
+      params({
+        output: { mode: 'natives_only' },
+        selectionItemIds: [SOLO],
+      }),
+      [
+        item(SOLO, {
+          malwareStatus: 'infected',
+          blob: { objectKey, storageClass: 'original', sha256: 'a'.repeat(64) },
+        }),
+      ],
+    );
+    f.store.getStream.mockResolvedValue(
+      // Should never be read.
+      (await import('node:stream')).Readable.from([Buffer.from('malware-bytes')]),
+    );
+
+    await processProductionRun(f.ctx, payload, deps());
+
+    expect(f.store.getStream).not.toHaveBeenCalled();
+    const exceptions = createdExceptions(f);
+    expect(exceptions.some((e) => e['code'] === 'malware_item')).toBe(true);
+    const rows = createdProductionItems(f);
+    expect(rows[0]).toMatchObject({
+      outputKind: 'placeholder',
+      state: 'placeholder',
+      nativePath: '',
+      textPath: '',
+    });
+    const finalUpdate = f.tx.productionRun.update.mock.calls.at(-1)?.[0] as {
+      data: Record<string, unknown>;
+    };
+    expect(finalUpdate.data['status']).toBe('ready');
+  });
+
+  it('does not read the quarantine bucket for a sole-owner infected item', async () => {
+    const f = fakeCtx();
+    const objectKey = `tenants/${TENANT}/quarantine/sha256/aa/${'b'.repeat(64)}`;
+    arm(
+      f,
+      params({
+        output: { mode: 'natives_only' },
+        selectionItemIds: [SOLO],
+      }),
+      [
+        item(SOLO, {
+          malwareStatus: 'infected',
+          blob: { objectKey, storageClass: 'quarantine', sha256: 'b'.repeat(64) },
+        }),
+      ],
+    );
+
+    await processProductionRun(f.ctx, payload, deps());
+
+    expect(f.store.getStream).not.toHaveBeenCalled();
+    expect(createdExceptions(f).some((e) => e['code'] === 'malware_item')).toBe(true);
   });
 
   it('fails the run record on malformed frozen parameters', async () => {
