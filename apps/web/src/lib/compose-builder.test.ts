@@ -71,6 +71,22 @@ describe('composeBuilder', () => {
     });
   });
 
+  it('turns the chat source into kind chat_message OR chat_conversation', () => {
+    expect(composeBuilder(input({ source: 'chat' }), BUILT)).toEqual({
+      op: 'and',
+      children: [
+        BUILT,
+        {
+          op: 'or',
+          children: [
+            { field: 'kind', operator: 'equals', value: 'chat_message' },
+            { field: 'kind', operator: 'equals', value: 'chat_conversation' },
+          ],
+        },
+      ],
+    });
+  });
+
   it('maps ticked audit facets back to their audit query fields', () => {
     const composed = composeBuilder(
       input({ facetFilters: { auditWorkload: ['Exchange'], auditOperation: ['HardDelete'] } }),

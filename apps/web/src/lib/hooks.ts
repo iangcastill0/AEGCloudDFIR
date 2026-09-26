@@ -572,6 +572,9 @@ export function composeQuery(input: SearchRequestInput): string {
     parts.push(`(${eq('kind', 'email')} OR ${eq('kind', 'attachment')})`);
   }
   if (input.source === 'drive') parts.push(eq('kind', 'file'));
+  if (input.source === 'chat') {
+    parts.push(`(${eq('kind', 'chat_message')} OR ${eq('kind', 'chat_conversation')})`);
+  }
   if (input.source === 'audit') parts.push(eq('kind', 'audit_batch'));
   for (const [field, values] of Object.entries(input.facetFilters ?? {})) {
     const queryField = FACET_QUERY_FIELDS[field];
@@ -599,6 +602,12 @@ export function composeBuilder(input: SearchRequestInput, builder: unknown): unk
     extra.push({ op: 'or', children: [eq('kind', 'email'), eq('kind', 'attachment')] });
   }
   if (input.source === 'drive') extra.push(eq('kind', 'file'));
+  if (input.source === 'chat') {
+    extra.push({
+      op: 'or',
+      children: [eq('kind', 'chat_message'), eq('kind', 'chat_conversation')],
+    });
+  }
   if (input.source === 'audit') extra.push(eq('kind', 'audit_batch'));
   for (const [field, values] of Object.entries(input.facetFilters ?? {})) {
     const queryField = FACET_QUERY_FIELDS[field];

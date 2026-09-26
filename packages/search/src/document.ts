@@ -3,7 +3,16 @@
  * This is the only document shape the search package indexes or returns.
  */
 
-export type EvidenceKind = 'email' | 'attachment' | 'file' | 'audit_record' | 'audit_batch';
+export type EvidenceKind =
+  | 'email'
+  | 'attachment'
+  | 'file'
+  | 'audit_record'
+  | 'audit_batch'
+  /** One Slack (or other chat) message; native is the provider JSON. */
+  | 'chat_message'
+  /** One channel or DM, holding collection-time metadata. */
+  | 'chat_conversation';
 
 /** Structured fields for an audit-log event (contract §5 audit sources). */
 export interface EvidenceAuditFields {

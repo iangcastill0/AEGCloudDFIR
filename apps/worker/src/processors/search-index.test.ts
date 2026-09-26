@@ -223,6 +223,22 @@ describe('buildSearchDoc (audit batch)', () => {
   });
 });
 
+describe('buildSearchDoc (chat message)', () => {
+  it('keeps chat_message as chat_message, not file', () => {
+    // Preserve wrote kind=chat_message correctly. Indexing then coerced every
+    // unknown kind to file, so Slack messages showed up under Drive.
+    const doc = buildSearchDoc({
+      ...base,
+      kind: 'chat_message',
+      email: null,
+      extension: 'json',
+      mimeType: 'application/json; charset=utf-8',
+      texts: { file: 'hello from slack' },
+    });
+    expect(doc.kind).toBe('chat_message');
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Ledger transition after indexing
 // ---------------------------------------------------------------------------
@@ -301,5 +317,62 @@ describe('processSearchIndex ledger transition', () => {
     expect(f.tx.$executeRaw).toHaveBeenCalled();
     const sql = f.tx.$executeRaw.mock.calls.map((c) => JSON.stringify(c)).join('\n');
     expect(sql).toContain('indexed');
+  });
+
+  it('promotes a chat_message sitting at pending, like an audit batch', async () => {
+    // Chat skips parse/extract and indexes from pending. Without pending in
+    // indexableFrom, OpenSearch got the doc but processingStatus never moved.
+    const f = fakeCtx();
+    armItem(f, 'chat_message');
+    f.tx.evidenceItem.findUnique.mockResolvedValue({
+      id: EVIDENCE,
+      tenantId: TENANT,
+      collectionId: COLLECTION,
+      custodianId: CUSTODIAN,
+      kind: 'chat_message',
+      name: 'hello from slack',
+      extension: 'json',
+      mimeType: 'application/json; charset=utf-8',
+      size: 42,
+      sha256: 'd'.repeat(64),
+      provider: 'slack',
+      processingStatus: 'pending',
+      malwareStatus: 'clean',
+      primaryDate: new Date('2026-08-20T00:00:00Z'),
+      acquiredAt: new Date('2026-08-20T00:00:00Z'),
+      sourceCreatedAt: null,
+      sourceModifiedAt: null,
+      sourcePath: 'C0123',
+      sourceLabels: [],
+      isApiExportDerivative: false,
+      custodian: { email: 'test@test.com' },
+      emailMetadata: null,
+      participants: [],
+      headers: [],
+      extractedTexts: [],
+      ocrPages: [],
+      tagAssignments: [],
+      caseItems: [],
+      productionItems: [],
+      childRelationships: [],
+      parentRelationships: [],
+      auditRecords: [],
+    });
+
+    await processSearchIndex(f.ctx, { tenantId: TENANT, evidenceItemId: EVIDENCE });
+
+    const statusPromotion = f.tx.evidenceItem.updateMany.mock.calls
+      .map(
+        (c) =>
+          c[0] as {
+            where: { processingStatus?: { in: string[] } };
+            data: { processingStatus?: string };
+          },
+      )
+      .find((c) => c.data.processingStatus === 'indexed');
+    expect(statusPromotion?.where.processingStatus?.in).toContain('pending');
+
+    const sql = f.tx.$executeRaw.mock.calls.map((c) => JSON.stringify(c)).join('\n');
+    expect(sql).toContain('chat');
   });
 });

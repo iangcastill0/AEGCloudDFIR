@@ -464,6 +464,7 @@ function SearchRail(props: {
         options={[
           { value: 'email', label: 'Email' },
           { value: 'drive', label: 'Drive' },
+          { value: 'chat', label: 'Chat' },
           { value: 'audit', label: 'Audit logs' },
         ]}
       />
