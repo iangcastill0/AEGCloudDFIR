@@ -225,7 +225,7 @@ describe('TenantsService.redeemInvite', () => {
   it('creates membership, grants the invited role, and marks the invite used', async () => {
     const membershipCreate = vi.fn(async () => ({ id: 'mem-1' }));
     const roleCreate = vi.fn(async () => ({ id: 'role-1' }));
-    const inviteUpdate = vi.fn(async () => ({ id: 'inv-1' }));
+    const inviteUpdateMany = vi.fn(async () => ({ count: 1 }));
     const { service, audit } = makeService({
       tenantInvite: {
         findUnique: vi.fn(async () => ({
@@ -236,7 +236,7 @@ describe('TenantsService.redeemInvite', () => {
           expiresAt: future,
           usedAt: null,
         })),
-        update: inviteUpdate,
+        updateMany: inviteUpdateMany,
       },
       user: { findUnique: vi.fn(async () => ({ id: USER_ID, email: 'Pat@example.com' })) },
       tenant: {
@@ -262,11 +262,53 @@ describe('TenantsService.redeemInvite', () => {
         data: expect.objectContaining({ role: TenantRole.reviewer, source: 'local' }),
       }),
     );
-    expect(inviteUpdate).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'inv-1' } }));
+    expect(inviteUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: 'inv-1', usedAt: null }),
+        data: expect.objectContaining({ usedAt: expect.any(Date) }),
+      }),
+    );
     expect(audit.appendTx).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ action: 'tenant.member_joined' }),
     );
+  });
+
+  it('rejects a second concurrent claim of the same one-time invite', async () => {
+    // User.email is not unique — only (issuer, subject) is. Two Authentik
+    // subjects can share an invite address. Claiming must be WHERE usedAt IS
+    // NULL, or both pass the outer check and both become members.
+    const inviteUpdateMany = vi.fn(async () => ({ count: 0 }));
+    const membershipCreate = vi.fn(async () => ({ id: 'mem-1' }));
+    const { service } = makeService({
+      tenantInvite: {
+        findUnique: vi.fn(async () => ({
+          id: 'inv-1',
+          tenantId: TENANT_ID,
+          email: 'pat@example.com',
+          role: TenantRole.org_admin,
+          expiresAt: future,
+          usedAt: null,
+        })),
+        updateMany: inviteUpdateMany,
+      },
+      user: { findUnique: vi.fn(async () => ({ id: USER_ID, email: 'pat@example.com' })) },
+      tenant: {
+        findUnique: vi.fn(async () => ({
+          id: TENANT_ID,
+          name: 'Acme',
+          slug: 'acme',
+          status: 'active',
+        })),
+      },
+      membership: {
+        findUnique: vi.fn(async () => null),
+        create: membershipCreate,
+      },
+    });
+
+    await expect(service.redeemInvite(USER_ID, token)).rejects.toBeInstanceOf(NotFoundException);
+    expect(membershipCreate).not.toHaveBeenCalled();
   });
 
   it('redeems a standing join link without matching email and does not consume it', async () => {
@@ -382,7 +424,7 @@ describe('TenantsService.redeemInvite', () => {
           expiresAt: future,
           usedAt: null,
         })),
-        update: vi.fn(async () => ({ id: 'inv-1' })),
+        updateMany: vi.fn(async () => ({ count: 1 })),
       },
       user: { findUnique: vi.fn(async () => ({ id: USER_ID, email: 'pat@example.com' })) },
       tenant: {

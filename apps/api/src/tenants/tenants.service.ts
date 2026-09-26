@@ -287,11 +287,18 @@ export class TenantsService {
 
     return withTenantContext(this.prisma, invite.tenantId, async (tx) => {
       const tenant = await this.requireActiveTenant(tx, invite.tenantId);
-      await this.ensureMembership(tx, tenant.id, userId, invite.role);
-      await tx.tenantInvite.update({
-        where: { id: invite.id },
+      // Claim first, and only once. The usedAt check above is a fast path in a
+      // different transaction; without this WHERE, two accounts that share the
+      // invite email (User.email is not unique — only issuer+subject is) can
+      // both pass that check and both land as members of a "one-time" invite.
+      const claimed = await tx.tenantInvite.updateMany({
+        where: { id: invite.id, usedAt: null, expiresAt: { gt: new Date() } },
         data: { usedAt: new Date() },
       });
+      if (claimed.count !== 1) {
+        throw new NotFoundException('invite is not valid');
+      }
+      await this.ensureMembership(tx, tenant.id, userId, invite.role);
       await this.audit.appendTx(tx, {
         tenantId: tenant.id,
         actorUserId: userId,
