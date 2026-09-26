@@ -17,7 +17,7 @@ import {
 // Imported to assert the UI's stall fuse is the SAME one the worker's sweeper
 // uses. A shorter fuse in the UI means an alarm nothing is acting on.
 import { STALL_AFTER_MS as WORKER_STALL_AFTER_MS } from '../../../worker/src/stalled-items.js';
-import { CollectionsService } from './collections.service.js';
+import { CollectionsService, isDiscoveryFailureMessage } from './collections.service.js';
 import {
   STALL_AFTER_MS,
   completeBuckets,
@@ -941,6 +941,96 @@ describe('CollectionsService.action — retry covers processing exceptions', () 
     expect(outboxCreateMany).not.toHaveBeenCalled();
     expect(updateMany).not.toHaveBeenCalled();
     expect(deleteMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('Retry re-runs discovery when enumeration never listed a mailbox', () => {
+  it('recognises only the discover processor prefixes', () => {
+    expect(isDiscoveryFailureMessage('discovery failed: mailbox not found')).toBe(true);
+    expect(isDiscoveryFailureMessage('audit discovery failed: token expired')).toBe(true);
+    expect(isDiscoveryFailureMessage('GET /messages/xyz returned 503')).toBe(false);
+    expect(isDiscoveryFailureMessage(undefined)).toBe(false);
+  });
+
+  it('enqueues a fresh collection.discover when Retry sees a discovery exception and no items', async () => {
+    // Trigger: every mailbox listing threw, the collection is failed, the
+    // original discover:{id} key is already dispatched. Clicking Retry used
+    // to report success, queue nothing, and leave the mailbox uncollected.
+    const outboxCreate = vi.fn(async () => ({}));
+    const outboxCreateMany = vi.fn(async () => ({ count: 0 }));
+    const collectionUpdate = vi.fn(async () => ({}));
+    const deleteMany = vi.fn(async () => ({}));
+    const { service } = makeService({
+      collection: {
+        findFirst: vi.fn(async () => ({ id: COLLECTION_ID, status: CollectionStatus.failed })),
+        update: collectionUpdate,
+      },
+      collectionItem: {
+        findMany: vi.fn(async () => []),
+        updateMany: vi.fn(async () => ({ count: 0 })),
+      },
+      evidenceItem: { findMany: vi.fn(async () => []), updateMany: vi.fn(async () => ({})) },
+      collectionException: {
+        findMany: vi.fn(async () => [
+          {
+            id: 'exc-discover',
+            kind: 'api_error',
+            message: 'discovery failed: unauthorized_client',
+            detail: {},
+          },
+        ]),
+        deleteMany,
+      },
+      outboxEvent: { createMany: outboxCreateMany, create: outboxCreate },
+    });
+
+    const result = await service.action(auth, COLLECTION_ID, 'retry', fakeRequest());
+
+    expect(result.retriedDiscovery).toBe(1);
+    expect(result.retriedItems).toBe(0);
+    expect(result.status).toBe(CollectionStatus.fetching);
+    const created = outboxCreate.mock.calls[0]?.[0] as {
+      data: { topic: string; dedupKey: string };
+    };
+    expect(created.data.topic).toBe('collection.discover');
+    expect(created.data.dedupKey).toMatch(new RegExp(`^discover:${COLLECTION_ID}:retry\\d+$`));
+    expect(created.data.dedupKey).not.toBe(`discover:${COLLECTION_ID}`);
+    expect(collectionUpdate).toHaveBeenCalledWith({
+      where: { id: COLLECTION_ID },
+      data: { status: CollectionStatus.fetching, finishedAt: null },
+    });
+    expect(deleteMany).toHaveBeenCalledWith({ where: { id: { in: ['exc-discover'] } } });
+  });
+
+  it('does not re-discover a fetch failure that uses the same ledger kind', async () => {
+    const outboxCreate = vi.fn(async () => ({}));
+    const { service } = makeService({
+      collection: {
+        findFirst: vi.fn(async () => ({ id: COLLECTION_ID, status: CollectionStatus.completed })),
+        update: vi.fn(async () => ({})),
+      },
+      collectionItem: {
+        findMany: vi.fn(async () => []),
+        updateMany: vi.fn(async () => ({ count: 0 })),
+      },
+      evidenceItem: { findMany: vi.fn(async () => []), updateMany: vi.fn(async () => ({})) },
+      collectionException: {
+        findMany: vi.fn(async () => [
+          {
+            id: 'exc-fetch',
+            kind: 'api_error',
+            message: 'GET /messages/abc returned 503',
+            detail: { evidenceItemId: ITEM_A },
+          },
+        ]),
+        deleteMany: vi.fn(async () => ({})),
+      },
+      outboxEvent: { createMany: vi.fn(async () => ({ count: 0 })), create: outboxCreate },
+    });
+
+    const result = await service.action(auth, COLLECTION_ID, 'retry', fakeRequest());
+    expect(result.retriedDiscovery).toBe(0);
+    expect(outboxCreate).not.toHaveBeenCalled();
   });
 });
 

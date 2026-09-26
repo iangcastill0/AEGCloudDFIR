@@ -253,7 +253,7 @@ function processingRetryOutbox(
   tenantId: string;
   topic: string;
   dedupKey: string;
-  payload: Record<string, unknown>;
+  payload: Prisma.InputJsonValue;
 } | null {
   const retry = String(round);
   if (item.kind === 'email') {
@@ -287,6 +287,16 @@ function processingRetryOutbox(
     dedupKey: `extract:${item.id}:v${String(item.version)}:retry${retry}`,
     payload: { tenantId, evidenceItemId: item.id, version: item.version },
   };
+}
+
+/**
+ * Enumeration failures written by collection.discover. Fetch/page errors use
+ * the same ledger `kind` (`api_error`) but not this prefix, so Retry can tell
+ * "this mailbox was never listed" from "this message failed to download".
+ */
+export function isDiscoveryFailureMessage(message: string | null | undefined): boolean {
+  if (typeof message !== 'string') return false;
+  return message.startsWith('discovery failed:') || message.startsWith('audit discovery failed:');
 }
 
 @Injectable()
@@ -1079,6 +1089,8 @@ export class CollectionsService {
     status: string;
     retriedItems?: number;
     retriedProcessing?: number;
+    retriedIndexing?: number;
+    retriedDiscovery?: number;
   }> {
     const parsed = collectionAction.safeParse(actionRaw);
     if (!parsed.success) throw new BadRequestException('unknown collection action');
@@ -1276,6 +1288,28 @@ export class CollectionsService {
         });
       }
 
+      const openRows = await tx.collectionException.findMany({
+        where: { tenantId: auth.tenantId, collectionId: id },
+        select: { id: true, kind: true, message: true, detail: true },
+      });
+      const discoveryRows = openRows.filter((row) => isDiscoveryFailureMessage(row.message));
+
+      // Discovery never created collection_items, so fetch-item retry has
+      // nothing to re-queue. Resume is the only other path that mints a
+      // fresh discover key, and it is paused-only. The original
+      // discover:{id} key is burned. Re-queue with a retry token, same
+      // pattern as extract/index.
+      if (discoveryRows.length > 0) {
+        await tx.outboxEvent.create({
+          data: {
+            tenantId: auth.tenantId,
+            topic: 'collection.discover',
+            dedupKey: `discover:${id}:retry${String(Date.now())}`,
+            payload: { tenantId: auth.tenantId, collectionId: id },
+          },
+        });
+      }
+
       if (processingJobs.length > 0) {
         // Move them off 'exception' so the UI reflects that work is queued.
         // If the stage fails again the processor puts them straight back.
@@ -1284,31 +1318,34 @@ export class CollectionsService {
           where: { id: { in: [...retried] } },
           data: { processingStatus: ProcessingStatus.pending },
         });
-
-        // Clear the ledger rows for exactly these items — never object_missing.
-        // The exceptions list is the set of OUTSTANDING problems and feeds
-        // disclosure; leaving an entry for an item that has since been read
-        // would misstate the collection. Erasing an object_missing row would
-        // be worse: the bytes are still gone and retry cannot restore them.
-        // The permanent record lives in the append-only audit chain below,
-        // which records the retry and its count.
-        const openRows = await tx.collectionException.findMany({
-          where: { tenantId: auth.tenantId, collectionId: id },
-          select: { id: true, kind: true, detail: true },
-        });
-        const toClear = openRows
-          .filter((row) => {
-            if (row.kind === 'object_missing') return false;
-            const d = (row.detail ?? {}) as { evidenceItemId?: unknown };
-            return typeof d.evidenceItemId === 'string' && retried.has(d.evidenceItemId);
-          })
-          .map((row) => row.id);
-        if (toClear.length > 0) {
-          await tx.collectionException.deleteMany({ where: { id: { in: toClear } } });
-        }
       }
 
-      if (failedItems.length > 0) {
+      // Clear ledger rows we just re-queued — never object_missing.
+      // The exceptions list is the set of OUTSTANDING problems and feeds
+      // disclosure; leaving an entry for an item that has since been read
+      // would misstate the collection. Erasing an object_missing row would
+      // be worse: the bytes are still gone and retry cannot restore them.
+      // The permanent record lives in the append-only audit chain below,
+      // which records the retry and its count.
+      const retriedEvidence = new Set(processingJobs.map((row) => row.evidenceItemId));
+      const discoveryIds = new Set(discoveryRows.map((row) => row.id));
+      const toClear = openRows
+        .filter((row) => {
+          if (row.kind === 'object_missing') return false;
+          if (discoveryIds.has(row.id)) return true;
+          const d = (row.detail ?? {}) as { evidenceItemId?: unknown };
+          return typeof d.evidenceItemId === 'string' && retriedEvidence.has(d.evidenceItemId);
+        })
+        .map((row) => row.id);
+      if (toClear.length > 0) {
+        await tx.collectionException.deleteMany({ where: { id: { in: toClear } } });
+      }
+
+      const reopen = failedItems.length > 0 || discoveryRows.length > 0;
+      if (reopen) {
+        // discover refuses any status other than created/discovering/fetching.
+        // Same reopen as resume, so a failed or sealed run can list folders
+        // again after the connector is fixed.
         await tx.collection.update({
           where: { id },
           data: { status: CollectionStatus.fetching, finishedAt: null },
@@ -1323,15 +1360,17 @@ export class CollectionsService {
           retriedItems: failedItems.length,
           retriedProcessing: processingJobs.length,
           retriedIndexing: reindexed,
+          retriedDiscovery: discoveryRows.length,
         },
         request,
       );
       return {
         id,
-        status: failedItems.length > 0 ? CollectionStatus.fetching : collection.status,
+        status: reopen ? CollectionStatus.fetching : collection.status,
         retriedItems: failedItems.length,
         retriedProcessing: processingJobs.length,
         retriedIndexing: reindexed,
+        retriedDiscovery: discoveryRows.length,
       };
     });
   }
