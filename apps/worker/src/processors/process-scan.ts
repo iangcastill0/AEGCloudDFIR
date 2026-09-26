@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { Readable } from 'node:stream';
 import { DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { appendAuditEvent, Prisma, withTenantContext } from '@aeg-clouddfir/database';
@@ -80,12 +81,36 @@ export async function processScan(
           payload: { tenantId, evidenceItemId, version },
         });
       } else if (item.sourceForImport !== null && item.sourceForImport !== undefined) {
-        outboxRows.push({
-          tenantId,
-          topic: QUEUES.importAnalyze,
-          dedupKey: dedupKeys.importAnalyze(item.sourceForImport.id),
-          payload: { tenantId, importId: item.sourceForImport.id },
-        });
+        // Same gate as extracted members below. A scan_failed used to enqueue
+        // import.analyze under the once-ever `import:<id>:initial` key. Analyze
+        // then marked the import failed. Retry re-scans, and a later clean
+        // result tried that same key — skipDuplicates dropped it, so Crush
+        // never ran. ClamAV off has the same hole: every scan is scan_failed,
+        // so a failed analyze could never be retried through this path.
+        if (result === 'clean' || !ctx.config.CDFIR_CLAMAV_ENABLED) {
+          outboxRows.push({
+            tenantId,
+            topic: QUEUES.importAnalyze,
+            dedupKey: dedupKeys.importAnalyze(item.sourceForImport.id, `scan${randomUUID()}`),
+            payload: { tenantId, importId: item.sourceForImport.id },
+          });
+        } else {
+          await tx.forensicImport.update({
+            where: { id: item.sourceForImport.id },
+            data: { status: 'failed', error: 'source malware scan did not complete' },
+          });
+          await appendAuditEvent(tx, {
+            tenantId,
+            action: 'import.analysis_failed',
+            targetType: 'forensic_import',
+            targetId: item.sourceForImport.id,
+            actorDisplay: 'worker',
+            summary: {
+              error: 'source malware scan did not complete',
+              evidenceItemId,
+            },
+          });
+        }
       } else if (result === 'clean' || !ctx.config.CDFIR_CLAMAV_ENABLED) {
         outboxRows.push(
           {

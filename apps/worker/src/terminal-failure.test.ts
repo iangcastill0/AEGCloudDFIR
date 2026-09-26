@@ -84,6 +84,23 @@ describe('failureTargetFor', () => {
     });
   });
 
+  it('locates the container behind a pst.extract job', () => {
+    expect(
+      failureTargetFor('pst.extract', {
+        tenantId: TENANT,
+        collectionId: COLLECTION,
+        custodianId: CUSTODIAN,
+        evidenceItemId: '00000000-0000-4000-8000-0000000000dd',
+      }),
+    ).toEqual({
+      kind: 'pst-extract',
+      tenantId: TENANT,
+      collectionId: COLLECTION,
+      custodianId: CUSTODIAN,
+      evidenceItemId: '00000000-0000-4000-8000-0000000000dd',
+    });
+  });
+
   it('returns null for a queue with nothing to mark', () => {
     expect(failureTargetFor('dead-letter', { tenantId: TENANT })).toBeNull();
   });
@@ -123,7 +140,10 @@ function fakeCtx(itemRow: Record<string, unknown> | null = { id: 'item-1' }) {
       update: recorded.progress,
     },
     collectionException: { create: recorded.exception },
-    evidenceItem: { update: vi.fn(async () => ({})) },
+    evidenceItem: {
+      update: vi.fn(async () => ({})),
+      updateMany: vi.fn(async () => ({ count: 1 })),
+    },
   } as unknown as TenantScopedTx;
 
   const ctx = {
@@ -192,5 +212,25 @@ describe('recordTerminalFailure', () => {
     );
 
     expect(recorded.updateMany).toHaveBeenCalled();
+  });
+
+  it('marks the PST container failed and pending evidence an exception', async () => {
+    const { ctx, recorded } = fakeCtx();
+    await recordTerminalFailure(
+      ctx,
+      {
+        kind: 'pst-extract',
+        tenantId: TENANT,
+        collectionId: COLLECTION,
+        custodianId: CUSTODIAN,
+        evidenceItemId: '00000000-0000-4000-8000-0000000000dd',
+      },
+      STALLED_REASON,
+    );
+
+    expect(recorded.update).toHaveBeenCalled();
+    const itemArg = recorded.update.mock.calls[0]?.[0] as { data: Record<string, unknown> };
+    expect(itemArg.data['state']).toBe('failed');
+    expect(recorded.exception).toHaveBeenCalled();
   });
 });

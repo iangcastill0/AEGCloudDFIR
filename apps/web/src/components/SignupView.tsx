@@ -13,11 +13,10 @@ function tokenFromWindow(): string {
 export function SignupView() {
   const me = useMe();
   const join = useJoinTenant();
-  const [token, setToken] = useState('');
-  // URL token is read in an effect (window is unavailable during SSR). Until
-  // that runs, a cached `me` must not redirect — otherwise /signup?token=…
-  // for a signed-in user loses the invite and never calls /auth/join.
-  const [tokenReady, setTokenReady] = useState(false);
+  // null until the URL is read. Starting at '' made a logged-in visitor
+  // bounce to / or /auth/tenant before the token was seen, so an invite
+  // never joined them to the org that sent the link.
+  const [token, setToken] = useState<string | null>(null);
   const [autoTried, setAutoTried] = useState(false);
   const mutate = join.mutate;
   const joinPending = join.isPending;
@@ -25,31 +24,22 @@ export function SignupView() {
 
   useEffect(() => {
     setToken(tokenFromWindow());
-    setTokenReady(true);
   }, []);
 
   useEffect(() => {
-    if (!tokenReady || !me.data || token) return;
+    if (token === null || !me.data || token) return;
     window.location.assign(me.data.tenant ? '/' : '/auth/tenant');
-  }, [tokenReady, me.data, token]);
+  }, [me.data, token]);
 
   useEffect(() => {
-    if (
-      !tokenReady ||
-      autoTried ||
-      !token ||
-      me.isPending ||
-      !me.data ||
-      joinPending ||
-      joinSuccess
-    ) {
+    if (autoTried || !token || me.isPending || !me.data || joinPending || joinSuccess) {
       return;
     }
     setAutoTried(true);
     mutate(token, { onSuccess: () => window.location.assign('/') });
-  }, [tokenReady, autoTried, token, me.isPending, me.data, joinPending, joinSuccess, mutate]);
+  }, [autoTried, token, me.isPending, me.data, joinPending, joinSuccess, mutate]);
 
-  if (me.isPending) {
+  if (me.isPending || token === null) {
     return (
       <p role="status" aria-live="polite">
         Loading…

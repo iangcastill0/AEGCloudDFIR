@@ -4,6 +4,7 @@ import '@aeg-clouddfir/ui/styles.css';
 import './globals.css';
 import { Providers } from '@/components/Providers';
 import { AppNav } from '@/components/AppNav';
+import { PaywallGate } from '@/components/PaywallGate';
 
 export const metadata: Metadata = {
   title: { default: 'AEG-CloudDFIR', template: '%s — AEG-CloudDFIR' },
@@ -20,7 +21,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <Providers>
           <AppNav />
           <main id="main" tabIndex={-1} className="app-main">
-            {children}
+            <PaywallGate>{children}</PaywallGate>
           </main>
         </Providers>
       </body>
