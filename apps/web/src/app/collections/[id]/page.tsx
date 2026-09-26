@@ -54,15 +54,23 @@ const ACTION_LABEL: Record<CollectionAction, string> = {
  */
 function describeActionResult(
   action: CollectionAction,
-  result: { retriedItems?: number; retriedProcessing?: number },
+  result: {
+    retriedItems?: number;
+    retriedProcessing?: number;
+    retriedDiscovery?: number;
+  },
 ): string {
   if (action !== 'retry') return `${ACTION_LABEL[action]} requested.`;
   const fetches = result.retriedItems ?? 0;
   const processing = result.retriedProcessing ?? 0;
-  if (fetches === 0 && processing === 0) {
+  const discovery = result.retriedDiscovery ?? 0;
+  if (fetches === 0 && processing === 0 && discovery === 0) {
     return 'Nothing to retry \u2014 no failed or excepted items remain.';
   }
   const parts: string[] = [];
+  if (discovery > 0) {
+    parts.push(`${String(discovery)} mailbox or source listing(s) queued to run again`);
+  }
   if (fetches > 0) parts.push(`${String(fetches)} failed item(s) queued for re-collection`);
   if (processing > 0) parts.push(`${String(processing)} item(s) queued for re-processing`);
   return `Retry started: ${parts.join(' and ')}. Progress updates as the workers pick them up.`;

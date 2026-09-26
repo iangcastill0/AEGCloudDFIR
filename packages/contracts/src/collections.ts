@@ -330,6 +330,12 @@ export const collectionActionResponse = z.object({
    * so an operator can see that nothing was fetched from the provider again.
    */
   retriedIndexing: z.number().int().optional(),
+  /**
+   * Custodian/source enumerations that never produced collection items.
+   * Re-queued as collection.discover — not as fetch-item, which has nothing
+   * to fetch until folders exist.
+   */
+  retriedDiscovery: z.number().int().optional(),
 });
 
 /**
