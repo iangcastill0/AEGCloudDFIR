@@ -700,6 +700,41 @@ describe('CasesService.tags — only tags present in the matter', () => {
     const service = makeService({ case: { findFirst: vi.fn(async () => null) } }).service;
     await expect(service.tags(auth, CASE_ID)).rejects.toThrow(NotFoundException);
   });
+
+  it('hides privileged tags from a reviewer', async () => {
+    const findMany = vi.fn(async () => []);
+    const service = makeService({
+      case: { findFirst: vi.fn(async () => ({ id: CASE_ID })) },
+      caseMember: { count: vi.fn(async () => 1) },
+      caseItem: { findMany: vi.fn(async () => [{ evidenceItemId: ITEM_A }]) },
+      tagAssignment: { findMany },
+    }).service;
+    await service.tags(makeAuth([TenantRole.reviewer]), CASE_ID);
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          tag: { isPrivileged: false },
+          evidenceItem: {
+            tagAssignments: { none: { tag: { isPrivileged: true } } },
+          },
+        }),
+      }),
+    );
+  });
+
+  it('leaves privileged tags visible to a case manager', async () => {
+    const findMany = vi.fn(async () => []);
+    const service = makeService({
+      case: { findFirst: vi.fn(async () => ({ id: CASE_ID })) },
+      caseMember: { count: vi.fn(async () => 1) },
+      caseItem: { findMany: vi.fn(async () => [{ evidenceItemId: ITEM_A }]) },
+      tagAssignment: { findMany },
+    }).service;
+    await service.tags(auth, CASE_ID);
+    const where = findMany.mock.calls[0]?.[0] as { where: Record<string, unknown> };
+    expect(where.where).not.toHaveProperty('tag');
+    expect(where.where).not.toHaveProperty('evidenceItem');
+  });
 });
 
 const COLLECTION_ID = '00000000-0000-4000-8000-0000000000c1';

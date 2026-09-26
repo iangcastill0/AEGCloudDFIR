@@ -22,6 +22,7 @@ import type { FastifyRequest } from 'fastify';
 import '../common/http.js';
 import type { AuthContext } from '../common/http.js';
 import { APP_CONFIG, EVIDENCE_STORE, PRISMA } from '../common/tokens.js';
+import { queryInChunks } from '../common/families.js';
 import { isCaseRestricted, mayViewPrivileged } from '../common/roles.js';
 import { AuditService } from '../audit/audit.service.js';
 import { mayReadImport } from '../imports/import-access.js';
@@ -313,6 +314,11 @@ export class EvidenceService {
       item: { id: string; kind: string; name: string; size: string; sha256: string };
     }[];
   }> {
+    // requireItem gates the requested id. Related rows are a second read: a
+    // case-restricted caller who may open a parent must not learn the name,
+    // size or hash of an attachment that was never filed into one of their
+    // cases. The detail panel always fetches this list (useEvidence), so the
+    // leak fired on every item open — not only when someone clicked Family.
     await this.requireItem(auth, id, (tx) =>
       tx.evidenceItem.findFirst({ where: { id, tenantId: auth.tenantId }, select: { id: true } }),
     );
@@ -324,22 +330,42 @@ export class EvidenceService {
           child: { select: { id: true, kind: true, name: true, size: true, sha256: true } },
         },
       });
-      if (mayViewPrivileged(auth)) return rows;
-      const otherIds = rows.map((rel) => (rel.parentId === id ? rel.childId : rel.parentId));
-      if (otherIds.length === 0) return rows;
-      const hidden = await tx.tagAssignment.findMany({
-        where: {
-          tenantId: auth.tenantId,
-          evidenceItemId: { in: otherIds },
-          tag: { isPrivileged: true },
-        },
-        select: { evidenceItemId: true },
-      });
-      const hiddenIds = new Set(hidden.map((row) => row.evidenceItemId));
-      return rows.filter((rel) => {
-        const otherId = rel.parentId === id ? rel.childId : rel.parentId;
-        return !hiddenIds.has(otherId);
-      });
+      const otherIdOf = (rel: (typeof rows)[number]) =>
+        rel.parentId === id ? rel.childId : rel.parentId;
+
+      let visible = rows;
+      if (!mayViewPrivileged(auth) && visible.length > 0) {
+        const hidden = await queryInChunks(visible.map(otherIdOf), (batch) =>
+          tx.tagAssignment.findMany({
+            where: {
+              tenantId: auth.tenantId,
+              evidenceItemId: { in: batch },
+              tag: { isPrivileged: true },
+            },
+            select: { evidenceItemId: true },
+          }),
+        );
+        const hiddenIds = new Set(hidden.map((row) => row.evidenceItemId));
+        visible = visible.filter((rel) => !hiddenIds.has(otherIdOf(rel)));
+      }
+
+      if (isCaseRestricted(auth) && visible.length > 0) {
+        const inCase = await queryInChunks([...new Set(visible.map(otherIdOf))], (batch) =>
+          tx.caseItem.findMany({
+            where: {
+              tenantId: auth.tenantId,
+              evidenceItemId: { in: batch },
+              case: { members: { some: { membershipId: auth.membershipId } } },
+            },
+            select: { evidenceItemId: true },
+            distinct: ['evidenceItemId'],
+          }),
+        );
+        const visibleIds = new Set(inCase.map((row) => row.evidenceItemId));
+        visible = visible.filter((rel) => visibleIds.has(otherIdOf(rel)));
+      }
+
+      return visible;
     });
     return {
       items: rels.map((rel) => {
