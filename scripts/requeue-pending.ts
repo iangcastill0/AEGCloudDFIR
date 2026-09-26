@@ -82,10 +82,22 @@ function nextStage(status: string, kind: string, mimeType = ''): Stage | null {
     case 'preview_ready':
       return { topic: 'search.index', stage: 'index' };
     case 'exception':
-      // Only with --include-exceptions. Start it over from its kind.
-      return kind === 'email'
-        ? { topic: 'process.parse', stage: 'parse' }
-        : { topic: 'process.extract', stage: 'extract' };
+      // Only with --include-exceptions. Emails restart at parse. Image and PDF
+      // exceptions are OCR failures (extract already wrote file_text and burned
+      // the once-ever OCR key); sending those back to extract is a silent no-op.
+      if (kind === 'email') {
+        return { topic: 'process.parse', stage: 'parse' };
+      }
+      {
+        const mime = (mimeType.split(';')[0] ?? '').trim().toLowerCase();
+        if (mime.startsWith('image/')) {
+          return { topic: 'process.ocr.image', stage: 'ocr' };
+        }
+        if (mime === 'application/pdf') {
+          return { topic: 'process.ocr', stage: 'ocr' };
+        }
+      }
+      return { topic: 'process.extract', stage: 'extract' };
     default:
       return null;
   }

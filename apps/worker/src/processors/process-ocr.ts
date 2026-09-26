@@ -234,22 +234,14 @@ export async function processOcr(
   const engineVersion = await runner.tesseractVersion();
   const rasterOk = isPdf ? await runner.pdfRasterAvailable() : true;
   if (engineVersion === null || !rasterOk) {
-    await withTenantContext(ctx.prisma, tenantId, async (tx) => {
-      if (item.collectionId !== null) {
-        await recordException(tx, {
-          tenantId,
-          collectionId: item.collectionId,
-          custodianId: item.custodianId ?? undefined,
-          providerItemId: item.providerItemId,
-          kind: 'other',
-          message:
-            engineVersion === null
-              ? 'ocr engine unavailable on this host'
-              : 'pdf rasterizer unavailable on this host; pdf ocr skipped',
-        });
-      }
-      await enqueueIndex(tx, tenantId, evidenceItemId, version);
-    });
+    await markOcrFailed(
+      ctx,
+      payload,
+      item,
+      engineVersion === null
+        ? 'ocr engine unavailable on this host'
+        : 'pdf rasterizer unavailable on this host; pdf ocr skipped',
+    );
     return;
   }
 
@@ -304,21 +296,11 @@ export async function processOcr(
       pages = [await runner.ocrImage(input, ctx.config.CDFIR_OCR_LANGS)];
     }
   } catch (err) {
-    // Engine failure on this item: honest exception, no retry storm.
-    const message = sanitizeError(err);
-    await withTenantContext(ctx.prisma, tenantId, async (tx) => {
-      if (item.collectionId !== null) {
-        await recordException(tx, {
-          tenantId,
-          collectionId: item.collectionId,
-          custodianId: item.custodianId ?? undefined,
-          providerItemId: item.providerItemId,
-          kind: 'other',
-          message: `ocr failed: ${message}`,
-        });
-      }
-      await enqueueIndex(tx, tenantId, evidenceItemId, version);
-    });
+    // Engine failure on this item: honest exception, no retry storm. The
+    // once-ever `ocr:<id>:v<n>` key is already burned, so leaving status at
+    // `extracted` meant Retry queued extract (a no-op) and search kept the
+    // empty body forever.
+    await markOcrFailed(ctx, payload, item, `ocr failed: ${sanitizeError(err)}`);
     return;
   }
 
@@ -398,6 +380,52 @@ export async function processOcr(
       targetId: evidenceItemId,
       actorDisplay: 'worker',
       summary: { pages: pages.length, engineVersion, truncatedAtPage: stoppedAtPage },
+    });
+    await enqueueIndex(tx, tenantId, evidenceItemId, version);
+  });
+}
+
+/**
+ * OCR did not produce text. Index whatever extract already wrote, and mark the
+ * item so Retry can re-queue OCR under a fresh key. The ledger row carries the
+ * evidence id because `providerItemId` is empty for Crush members and
+ * attachments — without it, Retry cannot match the row to clear.
+ */
+async function markOcrFailed(
+  ctx: WorkerContext,
+  payload: EvidenceStagePayload,
+  item: {
+    id: string;
+    collectionId: string | null;
+    custodianId: string | null;
+    providerItemId: string;
+    name?: string | null;
+    mimeType?: string | null;
+    size?: number | bigint | null;
+  },
+  message: string,
+): Promise<void> {
+  const { tenantId, evidenceItemId, version } = payload;
+  await withTenantContext(ctx.prisma, tenantId, async (tx) => {
+    if (item.collectionId !== null) {
+      await recordException(tx, {
+        tenantId,
+        collectionId: item.collectionId,
+        custodianId: item.custodianId ?? undefined,
+        providerItemId: item.providerItemId,
+        kind: 'other',
+        message,
+        detail: {
+          evidenceItemId: item.id,
+          name: item.name ?? '',
+          mimeType: item.mimeType ?? '',
+          sizeBytes: item.size === null || item.size === undefined ? 0 : Number(item.size),
+        },
+      });
+    }
+    await tx.evidenceItem.update({
+      where: { id: evidenceItemId },
+      data: { processingStatus: 'exception', processingDetail: message.slice(0, 500) },
     });
     await enqueueIndex(tx, tenantId, evidenceItemId, version);
   });
