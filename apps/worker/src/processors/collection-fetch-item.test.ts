@@ -246,6 +246,17 @@ describe('processCollectionFetchItem', () => {
     arm(f, 'discovered', 0);
     armEmailConnector(vi.fn().mockRejectedValue(new Error('HTTP 503 from provider')));
     await expect(processCollectionFetchItem(f.ctx, emailPayload)).rejects.toThrow('503');
+    // Must stay fetching — failed would let finalize seal while BullMQ still
+    // has a retry queued, and that retry then drops on a sealed collection.
+    expect(f.tx.collectionItem.update).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          state: 'fetching',
+          lastError: expect.stringContaining('503'),
+        }),
+      }),
+    );
+    expect(f.tx.collectionException.create).not.toHaveBeenCalled();
   });
 
   it('recovers a Drive listing from the original outbox instead of skipping as unavailable', async () => {
@@ -305,7 +316,7 @@ describe('processCollectionFetchItem', () => {
     expect(f.tx.collectionException.create).not.toHaveBeenCalled();
   });
 
-  it('fails a Drive item without a listing instead of skipping it as unavailable', async () => {
+  it('keeps a Drive item without a listing in fetching so finalize waits for retries', async () => {
     const f = fakeCtx();
     arm(f);
     f.tx.outboxEvent.findMany.mockResolvedValue([
@@ -319,6 +330,26 @@ describe('processCollectionFetchItem', () => {
         providerItemId: 'file-1',
       }),
     ).rejects.toThrow(/missing its original listing entry/);
+
+    expect(f.store.stageStream).not.toHaveBeenCalled();
+    expect(f.tx.collectionItem.update).toHaveBeenLastCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ state: 'fetching' }) }),
+    );
+    expect(f.tx.collectionException.create).not.toHaveBeenCalled();
+  });
+
+  it('marks a Drive item failed only after the attempt cap', async () => {
+    const f = fakeCtx();
+    arm(f, 'discovered', 4);
+    f.tx.outboxEvent.findMany.mockResolvedValue([
+      { payload: { tenantId: TENANT, collectionId: COLLECTION, providerItemId: 'file-1' } },
+    ]);
+
+    await processCollectionFetchItem(f.ctx, {
+      ...emailPayload,
+      source: 'drive',
+      providerItemId: 'file-1',
+    });
 
     expect(f.store.stageStream).not.toHaveBeenCalled();
     expect(f.tx.collectionItem.update).toHaveBeenLastCalledWith(
