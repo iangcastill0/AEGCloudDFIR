@@ -13,11 +13,28 @@ export const PAYWALL_FEATURES: Record<PaywallTierId, readonly string[]> = {
   max: [],
 };
 
+/**
+ * True when Basic / Pro / Max can actually be purchased.
+ *
+ * Until checkout exists the wall's buttons only set local React state. Turning
+ * the gate on in that state locked every self-serve creator and every
+ * bootstrap admin out of the app with no way forward — invite-only members
+ * skipped it, so the product looked fine for guests and broken for owners.
+ */
+export const PAYWALL_CHECKOUT_READY = false;
+
 export function paywallCta(name: string): string {
   return `Get ${name}`;
 }
 
-/** Invite and join-link members skip the wall. Everyone else who is signed in sees it. */
-export function paywallApplies(invited: boolean): boolean {
+/**
+ * Whether the signed-in person must pick a plan before using the app.
+ *
+ * `invited` is the ACTIVE tenant's membership flag (not "invited anywhere").
+ * Checkout must be ready too: a wall with dead buttons is a lockout, not a
+ * plan picker.
+ */
+export function paywallApplies(invited: boolean, checkoutReady = PAYWALL_CHECKOUT_READY): boolean {
+  if (!checkoutReady) return false;
   return !invited;
 }
