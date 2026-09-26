@@ -258,10 +258,7 @@ export class CasesService {
       sourceIds = input.source.evidenceItemIds;
       addedVia = 'manual';
     } else if (input.source.kind === 'saved_search') {
-      sourceIds = await this.selection.collectIdsForSavedSearch(
-        auth.tenantId,
-        input.source.savedSearchId,
-      );
+      sourceIds = await this.selection.collectIdsForSavedSearch(auth, input.source.savedSearchId);
       addedVia = 'search';
     } else if (input.source.kind === 'collection') {
       // Resolved inside the transaction below: the collection has to be

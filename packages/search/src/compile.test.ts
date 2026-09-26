@@ -3,6 +3,7 @@ import {
   buildSearchRequest,
   compile,
   compileNode,
+  managerSelectionAuth,
   wrapWithAuthorization,
   type AuthContext,
   type QueryDsl,
@@ -149,6 +150,28 @@ describe('tenant isolation (ADVERSARIAL)', () => {
         minimum_should_match: 1,
       },
     });
+  });
+});
+
+describe('managerSelectionAuth', () => {
+  it('keeps managers tenant-wide and privileged, but still fences unattached imports', () => {
+    const auth = managerSelectionAuth('tenant-1', {
+      userId: 'user-1',
+      isOrgAdmin: false,
+      memberCaseIds: ['case-1'],
+    });
+    expect(auth.caseIds).toBeNull();
+    expect(auth.includePrivileged).toBe(true);
+    expect(auth.importAccess).toEqual({ ownerUserId: 'user-1', caseIds: ['case-1'] });
+  });
+
+  it('omits the import fence for org admins', () => {
+    const auth = managerSelectionAuth('tenant-1', {
+      userId: 'admin-1',
+      isOrgAdmin: true,
+      memberCaseIds: [],
+    });
+    expect(auth.importAccess).toBeUndefined();
   });
 });
 

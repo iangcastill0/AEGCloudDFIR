@@ -86,6 +86,7 @@ const MODEL_NAMES = [
   'forensicImport',
   'importArtifact',
   'importCase',
+  'membership',
 ] as const;
 
 export type FakeTx = Record<(typeof MODEL_NAMES)[number], FakeModel> & {

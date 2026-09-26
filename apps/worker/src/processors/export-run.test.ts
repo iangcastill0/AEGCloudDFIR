@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
+import { parseQuery } from '@aeg-clouddfir/search';
 import { EVIDENCE, EXPORT_ID, TENANT, fakeCtx, type FakeCtx } from '../testing/fakes.js';
 import {
   buildFamilyIndex,
@@ -11,6 +12,7 @@ import {
   processExportRun,
   PST_NOT_EMAIL_EXCEPTION,
   pstExportStatusDetail,
+  resolveSelectionIds,
   shouldStartNewArchive,
   type ArchiveWriterLike,
 } from './export-run.js';
@@ -958,5 +960,72 @@ describe('native export leaves email attachments inside the parent', () => {
     expect(readme).toContain('Attachment layout: inline');
     expect(readme).toContain('inline-attachments.csv');
     expect(readme).toContain('RFC822');
+  });
+});
+
+describe('resolveSelectionIds saved_search import ACL', () => {
+  const SAVED_SEARCH_ID = '12121212-1212-4121-8121-121212121212';
+  const CREATOR = '22222222-2222-4222-8222-222222222222';
+  const CASE = '55555555-5555-4555-8555-555555555555';
+
+  it('attaches the exporter import fence so another manager cannot export an unattached import', async () => {
+    const f = fakeCtx();
+    f.tx.savedSearch.findUnique.mockResolvedValue({
+      id: SAVED_SEARCH_ID,
+      queryAst: parseQuery('body CONTAINS anything'),
+    });
+    f.tx.membership.findFirst.mockResolvedValue({
+      roles: [{ role: 'case_manager' }],
+      caseMemberships: [{ caseId: CASE }],
+    });
+    f.search.search.mockResolvedValue({ items: [], total: 0, searchAfter: undefined });
+
+    await resolveSelectionIds(
+      f.ctx,
+      TENANT,
+      {
+        selection: { kind: 'saved_search', savedSearchId: SAVED_SEARCH_ID },
+        includeFamilies: false,
+        attachments: 'inline',
+        archiveSplitMb: 2048,
+        pstPartMb: 3072,
+      },
+      CREATOR,
+    );
+
+    expect(f.search.search).toHaveBeenCalled();
+    const body = JSON.stringify(f.search.search.mock.calls[0]?.[0]);
+    expect(body).toContain('importOwnerId');
+    expect(body).toContain(CREATOR);
+    expect(body).toContain(CASE);
+  });
+
+  it('does not fence an org_admin exporter', async () => {
+    const f = fakeCtx();
+    f.tx.savedSearch.findUnique.mockResolvedValue({
+      id: SAVED_SEARCH_ID,
+      queryAst: parseQuery('body CONTAINS anything'),
+    });
+    f.tx.membership.findFirst.mockResolvedValue({
+      roles: [{ role: 'org_admin' }],
+      caseMemberships: [],
+    });
+    f.search.search.mockResolvedValue({ items: [], total: 0, searchAfter: undefined });
+
+    await resolveSelectionIds(
+      f.ctx,
+      TENANT,
+      {
+        selection: { kind: 'saved_search', savedSearchId: SAVED_SEARCH_ID },
+        includeFamilies: false,
+        attachments: 'inline',
+        archiveSplitMb: 2048,
+        pstPartMb: 3072,
+      },
+      CREATOR,
+    );
+
+    const body = JSON.stringify(f.search.search.mock.calls[0]?.[0]);
+    expect(body).not.toContain('importOwnerId');
   });
 });

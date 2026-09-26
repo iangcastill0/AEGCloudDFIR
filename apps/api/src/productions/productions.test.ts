@@ -19,8 +19,10 @@ import type { SelectionService } from '../search/selection.service.js';
 import {
   ITEM_A,
   ITEM_B,
+  MEMBERSHIP_ID,
   TAG_ID,
   TENANT_ID,
+  USER_ID,
   fakeAudit,
   fakePrisma,
   fakeRequest,
@@ -896,5 +898,58 @@ describe('ProductionsService.get — matches productionDetail', () => {
       production: { findFirst: vi.fn(async () => null) },
     }).service;
     await expect(service.get(auth, PRODUCTION_ID)).rejects.toThrow(NotFoundException);
+  });
+});
+
+describe('ProductionsService inverted selection import ACL', () => {
+  const invertedParams = {
+    ...parameters,
+    selection: {
+      ...parameters.selection,
+      tagIds: [],
+      savedSearchIds: [],
+      inverted: true,
+    },
+  };
+
+  it('does not load another user’s unattached forensic import', async () => {
+    const findMany = vi.fn(async () => []);
+    const { service } = makeService({
+      production: {
+        findFirst: vi.fn(async () => ({
+          ...productionRow(null),
+          draftParameters: invertedParams,
+        })),
+        update: vi.fn(async () => ({})),
+      },
+      evidenceItem: { findMany },
+    });
+    await service.validate(auth, PRODUCTION_ID, fakeRequest());
+    const where = findMany.mock.calls[0]?.[0] as { where: Record<string, unknown> };
+    expect(where.where.tenantId).toBe(TENANT_ID);
+    expect(where.where.OR).toEqual(
+      expect.arrayContaining([
+        { importId: null },
+        { forensicImport: { is: { createdById: USER_ID } } },
+      ]),
+    );
+    expect(JSON.stringify(where.where)).toContain(MEMBERSHIP_ID);
+  });
+
+  it('does not fence org admins', async () => {
+    const findMany = vi.fn(async () => []);
+    const { service } = makeService({
+      production: {
+        findFirst: vi.fn(async () => ({
+          ...productionRow(null),
+          draftParameters: invertedParams,
+        })),
+        update: vi.fn(async () => ({})),
+      },
+      evidenceItem: { findMany },
+    });
+    await service.validate(makeAuth([TenantRole.org_admin]), PRODUCTION_ID, fakeRequest());
+    const where = findMany.mock.calls[0]?.[0] as { where: Record<string, unknown> };
+    expect(where.where).toEqual({ tenantId: TENANT_ID });
   });
 });

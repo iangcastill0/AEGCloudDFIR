@@ -39,6 +39,7 @@ import { AuditService } from '../audit/audit.service.js';
 import type { AppConfig } from '@aeg-clouddfir/config';
 import type { EvidenceObjectStore } from '@aeg-clouddfir/evidence';
 import { SelectionService } from '../search/selection.service.js';
+import { importReadableEvidenceWhere } from '../imports/import-access.js';
 import {
   FLAG_DEFINITIONS,
   validateProductionSet,
@@ -726,23 +727,25 @@ export class ProductionsService {
 
   /** Resolve the draft selection into a deterministic, sorted id list. */
   private async resolveSelectionIds(
-    tenantId: string,
+    auth: AuthContext,
     parameters: ProductionParameters,
   ): Promise<string[]> {
+    const tenantId = auth.tenantId;
     const selection = parameters.selection;
 
-    // Saved searches resolve through the search engine (system context).
+    // Saved searches resolve through the search engine with import ACL.
     const searchIds = new Set<string>();
     for (const savedSearchId of selection.savedSearchIds) {
-      const ids = await this.selection.collectIdsForSavedSearch(tenantId, savedSearchId);
+      const ids = await this.selection.collectIdsForSavedSearch(auth, savedSearchId);
       for (const id of ids) searchIds.add(id);
     }
 
+    const importWhere = importReadableEvidenceWhere(auth);
     return withTenantContext(this.prisma, tenantId, async (tx) => {
       const base = new Set<string>(searchIds);
       if (selection.tagIds.length > 0) {
         const assignments = await tx.tagAssignment.findMany({
-          where: { tenantId, tagId: { in: selection.tagIds } },
+          where: { tenantId, tagId: { in: selection.tagIds }, evidenceItem: importWhere },
           select: { evidenceItemId: true },
         });
         for (const assignment of assignments) base.add(assignment.evidenceItemId);
@@ -756,7 +759,7 @@ export class ProductionsService {
         // nothing), so the exclusion happens in memory instead.
         const excludeSet = new Set(base);
         const all = await tx.evidenceItem.findMany({
-          where: { tenantId },
+          where: { tenantId, ...importWhere },
           select: { id: true },
           orderBy: { id: 'asc' },
         });
@@ -993,7 +996,7 @@ export class ProductionsService {
     }
     const parameters = this.parseDraftParameters(production.draftParameters);
 
-    const ids = await this.resolveSelectionIds(auth.tenantId, parameters);
+    const ids = await this.resolveSelectionIds(auth, parameters);
     const flags = await withTenantContext(this.prisma, auth.tenantId, async (tx) => {
       const items = await this.loadValidationItems(tx, auth.tenantId, ids, parameters);
       return validateProductionSet(items, {
@@ -1143,7 +1146,7 @@ export class ProductionsService {
     }
 
     // Selection must be byte-identical to what was validated.
-    const ids = await this.resolveSelectionIds(auth.tenantId, parameters);
+    const ids = await this.resolveSelectionIds(auth, parameters);
     if (idsHash(ids) !== snapshot.itemIdsHash) {
       throw new ConflictException({
         message: FLAG_DEFINITIONS.selection_changed_since_draft.message,
