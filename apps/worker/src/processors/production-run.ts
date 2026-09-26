@@ -134,6 +134,28 @@ function bestText(item: LoadedItem): string | null {
   return null;
 }
 
+/**
+ * Native download returns 423 for infected items. Draft validation blocks
+ * `malware_item` as non-overridable. The run still used to stream natives —
+ * from the quarantine bucket, and from shared infected blobs that stay in
+ * evidence — because submit only re-checks the selection id set, not scan
+ * results that land after the draft was validated. Gate on malwareStatus
+ * (and quarantine storage), not on the draft snapshot alone.
+ */
+export function isMalwareLocked(item: {
+  malwareStatus: string;
+  blob: { storageClass: string } | null;
+}): boolean {
+  return (
+    item.malwareStatus === 'infected' ||
+    item.malwareStatus === 'scan_failed' ||
+    item.blob?.storageClass === 'quarantine'
+  );
+}
+
+const MALWARE_PRODUCTION_LOCK =
+  'this item is flagged as malware; native and text production are locked';
+
 function wantsNative(item: LoadedItem, params: ProductionParameters): boolean {
   if (params.output.mode === 'natives_only') return true;
   if (params.output.mode === 'load_file' && params.output.includeNatives) {
@@ -265,7 +287,8 @@ export async function processProductionRun(
       if (sortEntry === undefined) continue;
       const item = sortEntry.loaded;
       const hasFinalRedactions = item.redactions.length > 0;
-      const nativeRequested = wantsNative(item, params);
+      const malwareLocked = isMalwareLocked(item);
+      const nativeRequested = wantsNative(item, params) && !malwareLocked;
 
       let pdfBytes: Uint8Array | null = null;
       let pageCount = 1;
@@ -273,7 +296,19 @@ export async function processProductionRun(
       let outputKind: ProducedDraft['outputKind'] = 'image';
 
       try {
-        if (hasFinalRedactions) {
+        if (malwareLocked) {
+          // SECURITY: never stream originals (or text derived from them) once
+          // ClamAV has flagged the item — including the race where scan lands
+          // after draft validation froze a clean/unscanned snapshot.
+          placeholderReason = MALWARE_PRODUCTION_LOCK;
+          exceptions.push({
+            evidenceItemId: item.id,
+            code: 'malware_item',
+            severity: 'blocking',
+            message: placeholderReason,
+          });
+          outputKind = 'placeholder';
+        } else if (hasFinalRedactions) {
           if (nativeRequested) {
             // SECURITY: a redacted document must never ship as native.
             exceptions.push({
@@ -319,10 +354,7 @@ export async function processProductionRun(
         } else if (params.output.mode === 'natives_only') {
           outputKind = 'native';
         } else if (item.mimeType === 'application/pdf' && item.blob !== null) {
-          const stream = await ctx.store.getStream(
-            item.blob.storageClass === 'quarantine' ? 'quarantine' : 'evidence',
-            item.blob.objectKey,
-          );
+          const stream = await ctx.store.getStream('evidence', item.blob.objectKey);
           const buffer = await readAllCapped(stream, MAX_NATIVE_BYTES);
           pdfBytes = new Uint8Array(buffer);
           pageCount = countPdfPagesApprox(buffer);
@@ -330,10 +362,7 @@ export async function processProductionRun(
           (item.mimeType === 'image/png' || item.mimeType === 'image/jpeg') &&
           item.blob !== null
         ) {
-          const stream = await ctx.store.getStream(
-            item.blob.storageClass === 'quarantine' ? 'quarantine' : 'evidence',
-            item.blob.objectKey,
-          );
+          const stream = await ctx.store.getStream('evidence', item.blob.objectKey);
           const buffer = await readAllCapped(stream, MAX_NATIVE_BYTES);
           pdfBytes = await deps.assembleImagePdf([
             { image: buffer, format: item.mimeType === 'image/png' ? 'png' : 'jpeg' },
@@ -431,10 +460,7 @@ export async function processProductionRun(
 
       if (nativeRequested && !hasFinalRedactions && item.blob !== null) {
         try {
-          const stream = await ctx.store.getStream(
-            item.blob.storageClass === 'quarantine' ? 'quarantine' : 'evidence',
-            item.blob.objectKey,
-          );
+          const stream = await ctx.store.getStream('evidence', item.blob.objectKey);
           const body = await readAllCapped(stream, MAX_NATIVE_BYTES);
           nativeOutPath = nativeNames.pathFor({
             begBates: bates.begBates,
@@ -457,7 +483,7 @@ export async function processProductionRun(
         params.output.mode === 'load_file'
           ? params.output.includeText
           : params.output.mode !== 'natives_only';
-      if (includeText && !hasFinalRedactions) {
+      if (includeText && !hasFinalRedactions && !malwareLocked) {
         const textContent =
           bestText(item) ??
           (item.extractedTexts.length > 0 ? '(see extracted text derivative)' : null);

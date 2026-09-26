@@ -179,6 +179,8 @@ function makeService(models: Record<string, unknown>, opts?: { store?: unknown }
   const selection = { collectIdsForSavedSearch: vi.fn(async () => []) };
   const prisma = fakePrisma({
     tagAssignment: { findMany: vi.fn(async () => [{ evidenceItemId: ITEM_A }]) },
+    // Submit re-checks malware after the draft snapshot; default to clean.
+    evidenceItem: { count: vi.fn(async () => 0), findMany: vi.fn(async () => []) },
     ...models,
   });
   const service = new ProductionsService(
@@ -264,6 +266,25 @@ describe('ProductionsService.submit', () => {
     expect(caught).toBeInstanceOf(ConflictException);
     const response = caught?.getResponse() as { code?: string };
     expect(response.code).toBe('selection_changed_since_draft');
+  });
+
+  it('409s when an item became malware after the draft was validated', async () => {
+    // Validate saw not_scanned; ClamAV then flagged infected. Submit used to
+    // trust the frozen flag snapshot and queue a run that streamed natives.
+    const { service } = makeService({
+      production: { findFirst: vi.fn(async () => productionRow(snapshot())) },
+      evidenceItem: { count: vi.fn(async () => 1) },
+    });
+    let caught: ConflictException | undefined;
+    try {
+      await service.submit(auth, PRODUCTION_ID, submitBody, fakeRequest());
+    } catch (err) {
+      caught = err as ConflictException;
+    }
+    expect(caught).toBeInstanceOf(ConflictException);
+    const response = caught?.getResponse() as { code?: string; count?: number };
+    expect(response.code).toBe('malware_item');
+    expect(response.count).toBe(1);
   });
 
   it('409s when the expected draftCalculatedAt is stale', async () => {
