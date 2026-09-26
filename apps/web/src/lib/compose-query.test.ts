@@ -59,6 +59,14 @@ describe('composeQuery', () => {
     expect(composeQuery({ queryText: '', source: 'audit' })).toBe('kind:"audit_batch"');
   });
 
+  it('uses kind chat_message for the Chat source filter', () => {
+    // Without this, Chat was collected correctly but Review had no way to
+    // select it — and mis-indexed chat docs looked like Drive files.
+    expect(composeQuery({ queryText: '', source: 'chat' })).toBe(
+      '(kind:"chat_message" OR kind:"chat_conversation")',
+    );
+  });
+
   it('maps ticked audit facets to their audit query fields', () => {
     const q = composeQuery({
       queryText: '',

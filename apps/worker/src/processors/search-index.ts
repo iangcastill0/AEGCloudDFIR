@@ -197,6 +197,12 @@ const KNOWN_KINDS: ReadonlySet<EvidenceKind> = new Set([
   'file',
   'audit_record',
   'audit_batch',
+  // Chat was added to the database enum and written correctly on preserve, but
+  // left out of this set. Unknown kinds fall through to 'file', so every Slack
+  // message was indexed as a drive file — Review's Drive filter showed chat,
+  // and kind:"chat_message" matched nothing.
+  'chat_message',
+  'chat_conversation',
 ]);
 
 export function buildSearchDoc(input: SearchDocInput): EvidenceSearchDoc {
@@ -507,9 +513,12 @@ export async function processSearchIndex(
     return;
   }
 
-  // Audit batches never pass through parse/extract, so they index straight from
-  // 'pending'; other kinds index from a processed state.
-  const indexableFrom: ProcessingStatus[] = isAuditBatch
+  // Audit batches and chat messages never pass through parse/extract, so they
+  // index straight from 'pending'. Chat skips extract on purpose (the message
+  // text is written at preserve time); without pending here the OpenSearch
+  // write succeeded but evidence_items.processingStatus stayed pending forever.
+  const indexesFromPending = isAuditBatch || item.kind === 'chat_message';
+  const indexableFrom: ProcessingStatus[] = indexesFromPending
     ? [
         ProcessingStatus.pending,
         ProcessingStatus.parsed,
@@ -523,7 +532,13 @@ export async function processSearchIndex(
         ProcessingStatus.ocr_complete,
         ProcessingStatus.preview_ready,
       ];
-  const progressSource = isAuditBatch ? 'audit' : item.kind === 'email' ? 'email' : 'drive';
+  const progressSource = isAuditBatch
+    ? 'audit'
+    : item.kind === 'email'
+      ? 'email'
+      : item.kind === 'chat_message'
+        ? 'chat'
+        : 'drive';
 
   await withTenantContext(ctx.prisma, tenantId, async (tx) => {
     await tx.evidenceItem.updateMany({
@@ -563,5 +578,6 @@ export async function processSearchIndex(
 /** Progress bucket an item's counters belong to. */
 function progressSourceFor(item: { kind: string }): 'email' | 'drive' | 'chat' | 'audit' {
   if (item.kind === 'audit_batch') return 'audit';
+  if (item.kind === 'chat_message' || item.kind === 'chat_conversation') return 'chat';
   return item.kind === 'email' || item.kind === 'attachment' ? 'email' : 'drive';
 }
