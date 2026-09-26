@@ -44,6 +44,8 @@ function params(overrides: Record<string, unknown> = {}): Record<string, unknown
 interface ItemOverrides {
   redactions?: unknown[];
   extension?: string;
+  malwareStatus?: string;
+  blob?: Record<string, unknown> | null;
   childRelationships?: { parentId: string; kind: string }[];
   parentRelationships?: { childId: string; kind: string }[];
 }
@@ -61,7 +63,8 @@ function item(id: string, overrides: ItemOverrides = {}): Record<string, unknown
     primaryDate: null,
     sourceCreatedAt: null,
     sourceModifiedAt: null,
-    blob: null,
+    malwareStatus: overrides.malwareStatus ?? 'clean',
+    blob: overrides.blob === undefined ? null : overrides.blob,
     custodian: { email: 'user@example.com' },
     emailMetadata: {
       subject: 'subject',
@@ -194,6 +197,57 @@ describe('processProductionRun', () => {
     expect(finalUpdate.data['status']).toBe('ready');
   });
 
+  it('does not stream a clean parent native that still embeds infected children', async () => {
+    const f = fakeCtx();
+    const objectKey = `tenants/${TENANT}/originals/sha256/aa/${'a'.repeat(64)}`;
+    arm(
+      f,
+      params({
+        output: { mode: 'natives_only' },
+        selectionItemIds: [PARENT],
+        selection: {
+          tagIds: [],
+          savedSearchIds: [],
+          inverted: false,
+          excludePreviouslyProduced: { kind: 'none' },
+          includeFamilies: false,
+        },
+      }),
+      [
+        item(PARENT, {
+          blob: { objectKey, storageClass: 'original', sha256: 'a'.repeat(64) },
+        }),
+        item(CHILD, {
+          malwareStatus: 'infected',
+          blob: {
+            objectKey: `tenants/${TENANT}/originals/sha256/bb/${'b'.repeat(64)}`,
+            storageClass: 'original',
+            sha256: 'b'.repeat(64),
+          },
+        }),
+      ],
+    );
+    f.tx.evidenceRelationship.findMany.mockResolvedValue([{ parentId: PARENT, childId: CHILD }]);
+    f.store.getStream.mockResolvedValue(
+      (await import('node:stream')).Readable.from([Buffer.from('parent-eml-with-malware')]),
+    );
+
+    await processProductionRun(f.ctx, payload, deps());
+
+    expect(f.store.getStream).not.toHaveBeenCalled();
+    expect(createdExceptions(f).some((e) => e['code'] === 'malware_item')).toBe(true);
+    const rows = createdProductionItems(f);
+    expect(rows[0]).toMatchObject({
+      outputKind: 'placeholder',
+      state: 'placeholder',
+      nativePath: '',
+    });
+    const finalUpdate = f.tx.productionRun.update.mock.calls.at(-1)?.[0] as {
+      data: Record<string, unknown>;
+    };
+    expect(finalUpdate.data['status']).toBe('ready');
+  });
+
   it('records an honest downgrade exception when tiff_g4 is requested without a rasterizer', async () => {
     const f = fakeCtx();
     arm(
@@ -280,7 +334,9 @@ describe('processProductionRun', () => {
     const seen: number[] = [];
     f.tx.evidenceItem.findMany.mockImplementation((args: Record<string, unknown>) => {
       const batch = (args['where'] as { id: { in: string[] } }).id.in;
-      seen.push(batch.length);
+      // The malware walk also chunks an `in:` list (select). This test is
+      // about the frozen selection LOAD, which is the include-shaped query.
+      if (args['include'] !== undefined) seen.push(batch.length);
       return Promise.resolve(
         batch.map((id) => ({
           id,

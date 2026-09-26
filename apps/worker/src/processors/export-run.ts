@@ -25,6 +25,10 @@ import {
 } from '@aeg-clouddfir/search';
 import { sanitizeError, type WorkerContext } from '../context.js';
 import { QUERY_ID_CHUNK, chunkIds, queryInChunks } from '../chunked.js';
+import {
+  EMBEDDED_MALWARE_NATIVE_ERROR,
+  idsWhoseNativeEmbedsMalware,
+} from '../contained-malware.js';
 import { pstStoreDisplayName, runPstExport, type PstExportItem } from './pst-export.js';
 import type { ExportRunPayload } from './payloads.js';
 
@@ -735,7 +739,7 @@ async function runPstExportKind(
   params: ExportParameters,
   batches: AsyncIterable<LoadedExportItem[]>,
 ): Promise<ExportResult> {
-  const items: PstExportItem[] = [];
+  const collected: PstExportItem[] = [];
   const loaded: {
     id: string;
     kind: string;
@@ -749,7 +753,7 @@ async function runPstExportKind(
         childRelationships: item.childRelationships,
       });
       if (item.kind !== 'email') continue;
-      items.push({
+      collected.push({
         evidenceItemId: item.id,
         sha256: item.sha256,
         size: Number(item.size),
@@ -771,8 +775,34 @@ async function runPstExportKind(
     }
   }
 
+  const malwareLocked = await withTenantContext(ctx.prisma, tenantId, (tx) =>
+    idsWhoseNativeEmbedsMalware(
+      tx,
+      tenantId,
+      collected.map((item) => item.evidenceItemId),
+    ),
+  );
+  const malwareOmitted: { evidenceItemId: string; error: string }[] = [];
+  const items: PstExportItem[] = [];
+  for (const item of collected) {
+    if (malwareLocked.has(item.evidenceItemId)) {
+      malwareOmitted.push({
+        evidenceItemId: item.evidenceItemId,
+        error: EMBEDDED_MALWARE_NATIVE_ERROR,
+      });
+      continue;
+    }
+    items.push(item);
+  }
+
   const split = partitionPstSelection(loaded);
   if (items.length === 0) {
+    if (malwareOmitted.length > 0) {
+      throw new Error(
+        `every selected email's native still contains flagged malware; native is locked ` +
+          `(${String(malwareOmitted.length)} item(s))`,
+      );
+    }
     throw new Error(
       split.omitted.length > 0
         ? `this selection has no email items, so there is nothing to put in a PST ` +
@@ -794,7 +824,7 @@ async function runPstExportKind(
     spoolThresholdBytes: ctx.config.CDFIR_PSTB_SPOOL_THRESHOLD_BYTES,
     partBytes: params.pstPartMb * 1024 * 1024,
     storeDisplayName: pstStoreDisplayName(exportName),
-    extraExceptions: split.omitted,
+    extraExceptions: [...split.omitted, ...malwareOmitted],
   });
 
   return {
@@ -1123,10 +1153,15 @@ async function runNativeExport(
   const writeNative = async (
     item: LoadedExportItem,
     entry: ManifestEntry,
+    lockedNatives: ReadonlySet<string>,
   ): Promise<'verified' | 'failed'> => {
     const size = Number(item.size);
     if (item.blob === null || item.sha256 === '') {
       entry.error = 'no preserved native bytes';
+      return 'failed';
+    }
+    if (lockedNatives.has(item.id)) {
+      entry.error = EMBEDDED_MALWARE_NATIVE_ERROR;
       return 'failed';
     }
     if (shouldStartNewArchive(bytesInPart, size, splitBytes)) {
@@ -1167,6 +1202,13 @@ async function runNativeExport(
 
   let seen = 0;
   for await (const batch of batches) {
+    const lockedNatives = await withTenantContext(ctx.prisma, tenantId, (tx) =>
+      idsWhoseNativeEmbedsMalware(
+        tx,
+        tenantId,
+        batch.map((item) => item.id),
+      ),
+    );
     for (const item of batch) {
       seen += 1;
       const placement = placementFor(item);
@@ -1206,7 +1248,7 @@ async function runNativeExport(
         continue;
       }
 
-      const state = await writeNative(item, entry);
+      const state = await writeNative(item, entry, lockedNatives);
       if (state === 'verified') {
         written += 1;
         if (family.parents.has(item.id)) partByParentId.set(item.id, entry.archivePart);
@@ -1235,7 +1277,11 @@ async function runNativeExport(
       { exportId, parents: orphaned.length, attachments: byItemId.size },
       'export: parent natives missing from the archive; writing their attachments as files',
     );
-    for await (const batch of loadItemsInBatches(ctx, tenantId, [...byItemId.keys()])) {
+    const rescueIds = [...byItemId.keys()];
+    const rescueLocked = await withTenantContext(ctx.prisma, tenantId, (tx) =>
+      idsWhoseNativeEmbedsMalware(tx, tenantId, rescueIds),
+    );
+    for await (const batch of loadItemsInBatches(ctx, tenantId, rescueIds)) {
       for (const item of batch) {
         const filed = byItemId.get(item.id);
         const entry = filed === undefined ? undefined : manifestEntries[filed.entryIndex];
@@ -1247,7 +1293,7 @@ async function runNativeExport(
         entry.note =
           'the parent native could not be exported, so this attachment was written as its own file rather than lost';
         inlineCount -= 1;
-        const state = await writeNative(item, entry);
+        const state = await writeNative(item, entry, rescueLocked);
         if (state === 'verified') written += 1;
         else failedCount += 1;
         await upsertExportItem(ctx, tenantId, exportId, item.id, entry, state);
