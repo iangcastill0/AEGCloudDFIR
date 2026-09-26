@@ -58,9 +58,19 @@ describe('failureTargetFor', () => {
     });
   });
 
-  it('locates the evidence item behind a parse job', () => {
+  it('locates the evidence item behind an OCR job', () => {
     expect(
-      failureTargetFor('process.parse', {
+      failureTargetFor('process.ocr', {
+        tenantId: TENANT,
+        evidenceItemId: '00000000-0000-4000-8000-0000000000dd',
+      }),
+    ).toEqual({
+      kind: 'evidence-item',
+      tenantId: TENANT,
+      evidenceItemId: '00000000-0000-4000-8000-0000000000dd',
+    });
+    expect(
+      failureTargetFor('process.ocr.image', {
         tenantId: TENANT,
         evidenceItemId: '00000000-0000-4000-8000-0000000000dd',
       }),
@@ -117,15 +127,22 @@ interface Recorded {
   findFirst: ReturnType<typeof vi.fn>;
   progress: ReturnType<typeof vi.fn>;
   exception: ReturnType<typeof vi.fn>;
+  evidenceFindFirst: ReturnType<typeof vi.fn>;
+  evidenceUpdate: ReturnType<typeof vi.fn>;
 }
 
-function fakeCtx(itemRow: Record<string, unknown> | null = { id: 'item-1' }) {
+function fakeCtx(
+  itemRow: Record<string, unknown> | null = { id: 'item-1' },
+  evidenceRow: Record<string, unknown> | null = null,
+) {
   const recorded: Recorded = {
     update: vi.fn(async () => ({})),
     updateMany: vi.fn(async () => ({ count: 1 })),
     findFirst: vi.fn(async () => itemRow),
     progress: vi.fn(async () => ({})),
     exception: vi.fn(async () => ({})),
+    evidenceFindFirst: vi.fn(async () => evidenceRow),
+    evidenceUpdate: vi.fn(async () => ({})),
   };
   const tx = {
     // withTenantContext and incrementProgress both go through $executeRaw.
@@ -141,7 +158,8 @@ function fakeCtx(itemRow: Record<string, unknown> | null = { id: 'item-1' }) {
     },
     collectionException: { create: recorded.exception },
     evidenceItem: {
-      update: vi.fn(async () => ({})),
+      findFirst: recorded.evidenceFindFirst,
+      update: recorded.evidenceUpdate,
       updateMany: vi.fn(async () => ({ count: 1 })),
     },
   } as unknown as TenantScopedTx;
@@ -199,8 +217,23 @@ describe('recordTerminalFailure', () => {
     expect(recorded.update).not.toHaveBeenCalled();
   });
 
-  it('marks the evidence item failed when a parse job dies', async () => {
-    const { ctx, recorded } = fakeCtx();
+  it('marks extracted evidence an exception when OCR stalls, so Retry can recover it', async () => {
+    // Extract already wrote file_text and queued the once-ever OCR key. A
+    // deploy kill then left the item `extracted`; Retry only looks at
+    // exception, and re-queueing extract is a no-op.
+    const { ctx, recorded } = fakeCtx(
+      { id: 'item-1' },
+      {
+        collectionId: COLLECTION,
+        custodianId: CUSTODIAN,
+        providerItemId: 'drive:scan.pdf',
+        name: 'scan.pdf',
+        mimeType: 'application/pdf',
+        size: 12_345,
+        processingStatus: 'extracted',
+      },
+    );
+
     await recordTerminalFailure(
       ctx,
       {
@@ -211,7 +244,35 @@ describe('recordTerminalFailure', () => {
       STALLED_REASON,
     );
 
-    expect(recorded.updateMany).toHaveBeenCalled();
+    expect(recorded.evidenceUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ processingStatus: 'exception' }),
+      }),
+    );
+    const exceptionArg = recorded.exception.mock.calls[0]?.[0] as {
+      data: { detail: { evidenceItemId: string } };
+    };
+    expect(exceptionArg.data.detail.evidenceItemId).toBe('00000000-0000-4000-8000-0000000000dd');
+  });
+
+  it('leaves pending parse evidence pending so the sweeper can still recover it', async () => {
+    const { ctx, recorded } = fakeCtx(
+      { id: 'item-1' },
+      { collectionId: COLLECTION, processingStatus: 'pending' },
+    );
+
+    await recordTerminalFailure(
+      ctx,
+      {
+        kind: 'evidence-item',
+        tenantId: TENANT,
+        evidenceItemId: '00000000-0000-4000-8000-0000000000dd',
+      },
+      STALLED_REASON,
+    );
+
+    expect(recorded.evidenceUpdate).not.toHaveBeenCalled();
+    expect(recorded.exception).not.toHaveBeenCalled();
   });
 
   it('marks the PST container failed and pending evidence an exception', async () => {

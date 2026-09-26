@@ -100,8 +100,15 @@ export function failureTargetFor(
 
   // Pipeline stages after preservation carry the evidence item, not the
   // provider item. A death here leaves the item preserved but not parsed or
-  // indexed, which is the other half of what staging showed.
-  if (queue === QUEUES.processParse || queue === QUEUES.processExtract) {
+  // indexed, which is the other half of what staging showed. OCR is the same
+  // shape: extract already ran, the once-ever OCR key is burned, and leaving
+  // status at `extracted` hid the failure from Retry.
+  if (
+    queue === QUEUES.processParse ||
+    queue === QUEUES.processExtract ||
+    queue === QUEUES.processOcr ||
+    queue === QUEUES.processOcrImage
+  ) {
     const evidenceItemId = str(data, 'evidenceItemId');
     if (evidenceItemId === null) return null;
     return { kind: 'evidence-item', tenantId, evidenceItemId };
@@ -221,6 +228,47 @@ export async function recordTerminalFailure(
         },
         data: { state: 'failed', lastError: message },
       });
+      // OCR runs after extract has set `extracted` (search-index may already
+      // have moved it to `indexed`). Pending parse/extract stalls stay pending
+      // so the email sweeper can still recover them.
+      const evidence = await tx.evidenceItem.findFirst({
+        where: { id: target.evidenceItemId, tenantId: target.tenantId },
+        select: {
+          collectionId: true,
+          custodianId: true,
+          providerItemId: true,
+          name: true,
+          mimeType: true,
+          size: true,
+          processingStatus: true,
+        },
+      });
+      if (
+        evidence !== null &&
+        (evidence.processingStatus === 'extracted' || evidence.processingStatus === 'indexed')
+      ) {
+        await tx.evidenceItem.update({
+          where: { id: target.evidenceItemId },
+          data: { processingStatus: 'exception', processingDetail: message.slice(0, 500) },
+        });
+        if (evidence.collectionId !== null) {
+          await recordException(tx, {
+            tenantId: target.tenantId,
+            collectionId: evidence.collectionId,
+            custodianId: evidence.custodianId ?? undefined,
+            providerItemId: evidence.providerItemId,
+            kind: 'other',
+            message,
+            detail: {
+              evidenceItemId: target.evidenceItemId,
+              name: evidence.name,
+              mimeType: evidence.mimeType,
+              sizeBytes: Number(evidence.size),
+              recoveredBy: 'job-failure-handler',
+            },
+          });
+        }
+      }
     });
     ctx.log.warn(
       { evidenceItemId: target.evidenceItemId, reason },

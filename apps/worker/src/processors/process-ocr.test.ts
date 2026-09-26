@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { Readable } from 'node:stream';
 import {
   COLLECTION,
   EVIDENCE,
@@ -81,5 +82,50 @@ describe('processOcr — missing evidence object', () => {
     await expect(processOcr(f.ctx, payload, { runner: runner() })).rejects.toThrow(
       'socket hang up',
     );
+  });
+});
+
+describe('processOcr — engine failure is retryable later', () => {
+  it('marks the item exception when tesseract is missing, so Retry can re-queue OCR', async () => {
+    const f = fakeCtx();
+    arm(f);
+    const missing = runner();
+    missing.tesseractVersion = vi.fn().mockResolvedValue(null);
+
+    await processOcr(f.ctx, payload, { runner: missing });
+
+    expect(f.tx.evidenceItem.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          processingStatus: 'exception',
+          processingDetail: expect.stringContaining('ocr engine unavailable'),
+        }),
+      }),
+    );
+    const row = f.tx.collectionException.create.mock.calls[0]?.[0] as {
+      data: { detail: { evidenceItemId: string } };
+    };
+    expect(row.data.detail.evidenceItemId).toBe(EVIDENCE);
+  });
+
+  it('marks the item exception when tesseract throws on this file', async () => {
+    const f = fakeCtx();
+    arm(f);
+    f.store.getStream.mockResolvedValue(Readable.from(Buffer.from('png')));
+    const failing = runner();
+    failing.ocrImage = vi.fn().mockRejectedValue(new Error('tesseract: image too large'));
+
+    await processOcr(f.ctx, payload, { runner: failing });
+
+    expect(f.tx.evidenceItem.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ processingStatus: 'exception' }),
+      }),
+    );
+    const row = f.tx.collectionException.create.mock.calls[0]?.[0] as {
+      data: { detail: { evidenceItemId: string }; message: string };
+    };
+    expect(row.data.detail.evidenceItemId).toBe(EVIDENCE);
+    expect(row.data.message).toContain('ocr failed');
   });
 });

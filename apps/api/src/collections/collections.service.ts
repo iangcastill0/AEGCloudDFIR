@@ -11,6 +11,7 @@ import {
   MalwareStatus,
   ProcessingStatus,
   ConnectorStatus,
+  TextKind,
   Prisma,
   withTenantContext,
   type PrismaClient,
@@ -237,6 +238,11 @@ function readCounters(progress: unknown, source: string): ProgressCounters {
  * that kind. `process.extract` returns immediately for emails (they go through
  * `process.parse`) and would run Tika on a PST instead of reconstructing
  * messages. Either path left the item `pending` with its ledger row deleted.
+ *
+ * OCR is a later stage: extract already wrote `file_text` and burned the
+ * once-ever `ocr:<id>:v<n>` key. Re-queueing extract is a no-op (it returns
+ * once text exists) so scanned files stayed unsearchable. A fresh OCR key is
+ * the only way Retry can recover them.
  */
 function processingRetryOutbox(
   tenantId: string,
@@ -246,6 +252,8 @@ function processingRetryOutbox(
     version: number;
     kind?: string | null;
     custodianId?: string | null;
+    mimeType?: string | null;
+    hasFileText?: boolean;
   },
   round: number,
 ): {
@@ -253,7 +261,7 @@ function processingRetryOutbox(
   tenantId: string;
   topic: string;
   dedupKey: string;
-  payload: Record<string, unknown>;
+  payload: Prisma.InputJsonValue;
 } | null {
   const retry = String(round);
   if (item.kind === 'email') {
@@ -280,6 +288,16 @@ function processingRetryOutbox(
       },
     };
   }
+  if (item.hasFileText === true) {
+    const mime = (item.mimeType ?? '').split(';')[0]?.trim().toLowerCase() ?? '';
+    return {
+      evidenceItemId: item.id,
+      tenantId,
+      topic: mime.startsWith('image/') ? 'process.ocr.image' : 'process.ocr',
+      dedupKey: `ocr:${item.id}:v${String(item.version)}:retry${retry}`,
+      payload: { tenantId, evidenceItemId: item.id, version: item.version },
+    };
+  }
   return {
     evidenceItemId: item.id,
     tenantId,
@@ -287,6 +305,10 @@ function processingRetryOutbox(
     dedupKey: `extract:${item.id}:v${String(item.version)}:retry${retry}`,
     payload: { tenantId, evidenceItemId: item.id, version: item.version },
   };
+}
+
+function isOcrRetryTopic(topic: string): boolean {
+  return topic === 'process.ocr' || topic === 'process.ocr.image';
 }
 
 @Injectable()
@@ -1254,14 +1276,39 @@ export class CollectionsService {
           malwareStatus: { not: MalwareStatus.object_missing },
           NOT: { processingDetail: { startsWith: 'evidence object is MISSING' } },
         },
-        select: { id: true, version: true, kind: true, custodianId: true },
+        select: {
+          id: true,
+          version: true,
+          kind: true,
+          custodianId: true,
+          mimeType: true,
+          extractedTexts: {
+            where: { kind: TextKind.file_text },
+            select: { id: true },
+            take: 1,
+          },
+        },
         orderBy: { id: 'asc' },
         take: RETRY_ITEM_CAP,
       });
 
       const processingRound = Date.now();
       const processingJobs = stuckItems
-        .map((item) => processingRetryOutbox(auth.tenantId, id, item, processingRound))
+        .map((item) =>
+          processingRetryOutbox(
+            auth.tenantId,
+            id,
+            {
+              id: item.id,
+              version: item.version,
+              kind: item.kind,
+              custodianId: item.custodianId,
+              mimeType: item.mimeType,
+              hasFileText: (item.extractedTexts ?? []).length > 0,
+            },
+            processingRound,
+          ),
+        )
         .filter((row): row is NonNullable<typeof row> => row !== null);
 
       for (const batch of chunk(processingJobs, RETRY_BATCH_SIZE)) {
@@ -1279,11 +1326,29 @@ export class CollectionsService {
       if (processingJobs.length > 0) {
         // Move them off 'exception' so the UI reflects that work is queued.
         // If the stage fails again the processor puts them straight back.
+        // OCR retries go back to 'extracted': that is the in-flight OCR state,
+        // and requeue-pending.ts routes extracted items onto the OCR lanes.
+        // Setting them pending would make that script fire extract, which
+        // returns immediately once file_text exists and never re-queues OCR.
         const retried = new Set(processingJobs.map((row) => row.evidenceItemId));
-        await tx.evidenceItem.updateMany({
-          where: { id: { in: [...retried] } },
-          data: { processingStatus: ProcessingStatus.pending },
-        });
+        const ocrIds = processingJobs
+          .filter((row) => isOcrRetryTopic(row.topic))
+          .map((row) => row.evidenceItemId);
+        const otherIds = processingJobs
+          .filter((row) => !isOcrRetryTopic(row.topic))
+          .map((row) => row.evidenceItemId);
+        if (otherIds.length > 0) {
+          await tx.evidenceItem.updateMany({
+            where: { id: { in: otherIds } },
+            data: { processingStatus: ProcessingStatus.pending },
+          });
+        }
+        if (ocrIds.length > 0) {
+          await tx.evidenceItem.updateMany({
+            where: { id: { in: ocrIds } },
+            data: { processingStatus: ProcessingStatus.extracted },
+          });
+        }
 
         // Clear the ledger rows for exactly these items — never object_missing.
         // The exceptions list is the set of OUTSTANDING problems and feeds

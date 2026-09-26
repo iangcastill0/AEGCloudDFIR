@@ -942,6 +942,49 @@ describe('CollectionsService.action — retry covers processing exceptions', () 
     expect(updateMany).not.toHaveBeenCalled();
     expect(deleteMany).not.toHaveBeenCalled();
   });
+
+  it('re-queues OCR, not extract, when the file already has extracted text', async () => {
+    // Extract succeeded, burned ocr:<id>:v1, then OCR stalled or the engine
+    // was missing. Extract is idempotent once file_text exists, so Retry used
+    // to complete successfully and leave the scan unsearchable.
+    const { service, outboxCreateMany, updateMany } = retryService({
+      exceptedItems: [
+        {
+          id: EXCEPTED_ID,
+          version: 2,
+          kind: 'file',
+          mimeType: 'application/pdf',
+          extractedTexts: [{ id: 'text-1' }],
+        },
+      ],
+    });
+    const result = await service.action(auth, COLLECTION_ID, 'retry', fakeRequest());
+    expect(result.retriedProcessing).toBe(1);
+    const rows = (
+      outboxCreateMany.mock.calls[0]![0] as { data: { topic: string; dedupKey: string }[] }
+    ).data;
+    expect(rows[0]?.topic).toBe('process.ocr');
+    expect(rows[0]?.dedupKey).toMatch(new RegExp(`^ocr:${EXCEPTED_ID}:v2:retry`));
+    expect(updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { processingStatus: 'extracted' } }),
+    );
+  });
+
+  it('sends a failed image OCR onto the image lane', async () => {
+    const { service, outboxCreateMany } = retryService({
+      exceptedItems: [
+        {
+          id: EXCEPTED_ID,
+          version: 1,
+          mimeType: 'image/png',
+          extractedTexts: [{ id: 'text-1' }],
+        },
+      ],
+    });
+    await service.action(auth, COLLECTION_ID, 'retry', fakeRequest());
+    const rows = (outboxCreateMany.mock.calls[0]![0] as { data: { topic: string }[] }).data;
+    expect(rows[0]?.topic).toBe('process.ocr.image');
+  });
 });
 
 describe('CollectionsService.create files the collection under a case', () => {
