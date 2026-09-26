@@ -36,6 +36,8 @@ export {
   createTenantResponse,
   createInviteRequest,
   createInviteResponse,
+  grantMemberRoleRequest,
+  grantMemberRoleResponse,
   joinRequest,
   joinResponse,
   joinLinkResponse,

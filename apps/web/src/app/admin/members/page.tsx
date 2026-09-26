@@ -3,15 +3,22 @@ import { useState } from 'react';
 import { Button, EmptyState, Notice, Select, Table, TextInput } from '@aeg-clouddfir/ui';
 import { QueryBoundary } from '@/components/shared';
 import { SignupLinkPanel } from '@/components/SignupLinkPanel';
-import { useCreateInvite, useMe, useMembers } from '@/lib/hooks';
+import { useCreateInvite, useGrantMemberRole, useMe, useMembers } from '@/lib/hooks';
 import { errorMessage } from '@/lib/errors';
 
-const ROLE_OPTIONS = [
+/** Email invites cannot prove mailbox ownership; elevated roles are granted after join. */
+const INVITE_ROLE_OPTIONS = [
   { value: 'reviewer', label: 'Reviewer' },
-  { value: 'case_manager', label: 'Case manager' },
-  { value: 'org_admin', label: 'Org admin' },
   { value: 'read_only', label: 'Read only' },
+  { value: 'auditor', label: 'Auditor' },
+];
+
+const GRANT_ROLE_OPTIONS = [
+  { value: 'org_admin', label: 'Org admin' },
+  { value: 'case_manager', label: 'Case manager' },
   { value: 'production_manager', label: 'Production manager' },
+  { value: 'reviewer', label: 'Reviewer' },
+  { value: 'read_only', label: 'Read only' },
   { value: 'auditor', label: 'Auditor' },
 ];
 
@@ -21,9 +28,12 @@ export default function MembersPage() {
   const tenantId = isAdmin ? me.data?.tenant?.id : undefined;
   const members = useMembers(tenantId);
   const invite = useCreateInvite(tenantId);
+  const grant = useGrantMemberRole(tenantId);
   const [email, setEmail] = useState('');
   const [role, setRole] = useState('reviewer');
   const [copied, setCopied] = useState(false);
+  const [grantMembershipId, setGrantMembershipId] = useState('');
+  const [grantRole, setGrantRole] = useState('case_manager');
 
   return (
     <>
@@ -44,8 +54,10 @@ export default function MembersPage() {
             <section style={{ marginBottom: '2rem' }}>
               <h2>Invite a person by email</h2>
               <p>
-                Optional. A one-time link for a specific address and role. They must sign in with
-                that same email.
+                Optional. A one-time link for a specific address. They must sign in with that same
+                email. Sign-up does not verify the mailbox, so this path only grants reviewer,
+                read-only, or auditor. Grant elevated roles from the table after you confirm who
+                joined.
               </p>
               <form
                 onSubmit={(e) => {
@@ -66,7 +78,7 @@ export default function MembersPage() {
                   label="Role"
                   value={role}
                   onChange={(e) => setRole(e.target.value)}
-                  options={ROLE_OPTIONS}
+                  options={INVITE_ROLE_OPTIONS}
                 />
                 {invite.isError ? (
                   <p role="alert" className="cdfir-field__error">
@@ -99,6 +111,56 @@ export default function MembersPage() {
                   </Button>
                 </Notice>
               ) : null}
+            </section>
+          ) : null}
+          {isAdmin ? (
+            <section style={{ marginBottom: '2rem' }}>
+              <h2>Grant a role to a member</h2>
+              <p>
+                Use this for org admin, case manager, and production manager. Pick the person from
+                the members list so the grant is tied to their account, not a self-asserted email.
+              </p>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (!grantMembershipId) return;
+                  grant.mutate({ membershipId: grantMembershipId, role: grantRole });
+                }}
+              >
+                <Select
+                  label="Member"
+                  value={grantMembershipId}
+                  onChange={(e) => setGrantMembershipId(e.target.value)}
+                  options={[
+                    { value: '', label: 'Select a member…' },
+                    ...(members.data?.items ?? []).map((m) => ({
+                      value: m.membershipId,
+                      label: `${m.displayName || m.email} (${m.email})`,
+                    })),
+                  ]}
+                />
+                <Select
+                  label="Role to grant"
+                  value={grantRole}
+                  onChange={(e) => setGrantRole(e.target.value)}
+                  options={GRANT_ROLE_OPTIONS}
+                />
+                {grant.isError ? (
+                  <p role="alert" className="cdfir-field__error">
+                    {errorMessage(grant.error)}
+                  </p>
+                ) : null}
+                {grant.isSuccess ? (
+                  <Notice variant="info">
+                    {grant.data.granted
+                      ? `Granted ${grant.data.role}.`
+                      : `They already have ${grant.data.role}.`}
+                  </Notice>
+                ) : null}
+                <Button type="submit" busy={grant.isPending} disabled={!grantMembershipId}>
+                  Grant role
+                </Button>
+              </form>
             </section>
           ) : null}
           <QueryBoundary

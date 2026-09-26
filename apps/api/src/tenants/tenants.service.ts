@@ -30,6 +30,26 @@ const TENANT_CREATE_COOLDOWN_MS = 15 * 60 * 1000;
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const STANDING_JOIN_ROLE = TenantRole.reviewer;
 
+/**
+ * Roles an email invite may still grant. Authentik enrollment does not prove
+ * mailbox ownership (no confirmation mail), so matching invite.email to the
+ * signed-in address is not enough to hand out tenant control or privileged
+ * export/production rights. Those are granted from Members after join.
+ */
+const EMAIL_INVITE_ROLES: ReadonlySet<TenantRole> = new Set([
+  TenantRole.reviewer,
+  TenantRole.read_only,
+  TenantRole.auditor,
+]);
+
+function assertEmailInviteRole(role: TenantRole): void {
+  if (!EMAIL_INVITE_ROLES.has(role)) {
+    throw new BadRequestException(
+      'elevated roles cannot be granted by email invite: invite as reviewer (or read_only/auditor), then grant the role from Members after you confirm who joined',
+    );
+  }
+}
+
 function signupInviteUrl(webPublicUrl: string, token: string): string {
   // Stay on the app host. Sending this through /auth/login put the token in
   // the API access log (nested inside redirectTo, which logSafeUrl missed)
@@ -151,6 +171,7 @@ export class TenantsService {
     expiresAt: Date;
     inviteUrl: string;
   }> {
+    assertEmailInviteRole(input.role);
     const email = input.email.trim().toLowerCase();
     const token = generateInviteToken();
     const tokenHash = hashInviteToken(token);
@@ -189,6 +210,60 @@ export class TenantsService {
       expiresAt: invite.expiresAt,
       inviteUrl,
     };
+  }
+
+  /**
+   * Grant a role to someone who is already a member, by membership id.
+   *
+   * This is the path for elevated roles after email invites were narrowed:
+   * the person joins (standing link or reviewer invite), the admin sees them
+   * on Members, then grants org_admin / case_manager / production_manager
+   * against a concrete membership rather than a claimed email string.
+   */
+  async grantMemberRole(
+    auth: AuthContext,
+    membershipId: string,
+    role: TenantRole,
+    request?: FastifyRequest,
+  ): Promise<{ membershipId: string; role: TenantRole; granted: boolean }> {
+    return withTenantContext(this.prisma, auth.tenantId, async (tx) => {
+      const membership = await tx.membership.findFirst({
+        where: { id: membershipId, tenantId: auth.tenantId },
+        select: { id: true, status: true, userId: true },
+      });
+      if (!membership) throw new NotFoundException();
+      if (membership.status !== MembershipStatus.active) {
+        throw new ForbiddenException('cannot grant a role to a disabled membership');
+      }
+
+      const existing = await tx.roleAssignment.findUnique({
+        where: { membershipId_role: { membershipId: membership.id, role } },
+        select: { id: true },
+      });
+      if (existing) {
+        return { membershipId: membership.id, role, granted: false };
+      }
+
+      await tx.roleAssignment.create({
+        data: {
+          tenantId: auth.tenantId,
+          membershipId: membership.id,
+          role,
+          source: LOCAL_SOURCE,
+        },
+      });
+      await this.audit.appendTx(tx, {
+        tenantId: auth.tenantId,
+        actorUserId: auth.userId,
+        effectiveRoles: auth.roles,
+        action: 'tenant.role_granted',
+        targetType: 'user',
+        targetId: membership.userId,
+        summary: { membershipId: membership.id, role },
+        request,
+      });
+      return { membershipId: membership.id, role, granted: true };
+    });
   }
 
   async getOrCreateJoinLink(auth: AuthContext): Promise<{ inviteUrl: string; role: TenantRole }> {
@@ -276,6 +351,14 @@ export class TenantsService {
     },
     request?: FastifyRequest,
   ): Promise<{ tenantId: string; name: string; slug: string }> {
+    // Outstanding elevated invites (created before the role cap) must not
+    // still hand out org_admin to an unverified mailbox claim.
+    if (!EMAIL_INVITE_ROLES.has(invite.role)) {
+      throw new ForbiddenException(
+        'this invite grants an elevated role that can no longer be redeemed by email match; join as a reviewer, then ask an admin to grant the role from Members',
+      );
+    }
+
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { id: true, email: true },
@@ -287,11 +370,17 @@ export class TenantsService {
 
     return withTenantContext(this.prisma, invite.tenantId, async (tx) => {
       const tenant = await this.requireActiveTenant(tx, invite.tenantId);
-      await this.ensureMembership(tx, tenant.id, userId, invite.role, true);
-      await tx.tenantInvite.update({
-        where: { id: invite.id },
+      // Claim the invite in the same transaction as the membership write.
+      // A prior read of usedAt outside this transaction is not enough: two
+      // concurrent redeems both saw usedAt null and both became members.
+      const claimed = await tx.tenantInvite.updateMany({
+        where: { id: invite.id, usedAt: null },
         data: { usedAt: new Date() },
       });
+      if (claimed.count !== 1) {
+        throw new NotFoundException('invite is not valid');
+      }
+      await this.ensureMembership(tx, tenant.id, userId, invite.role, true);
       await this.audit.appendTx(tx, {
         tenantId: tenant.id,
         actorUserId: userId,
