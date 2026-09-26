@@ -9,8 +9,10 @@ import {
 import type { AppConfig } from '@aeg-clouddfir/config';
 import {
   EvidenceKind,
+  EvidenceStorageClass,
   MalwareStatus,
   ParticipantRole,
+  RelationshipKind,
   TenantRole,
   withTenantContext,
   type PrismaClient,
@@ -24,7 +26,21 @@ import type { AuthContext } from '../common/http.js';
 import { APP_CONFIG, EVIDENCE_STORE, PRISMA } from '../common/tokens.js';
 import { isCaseRestricted, mayViewPrivileged } from '../common/roles.js';
 import { AuditService } from '../audit/audit.service.js';
+import { queryInChunks } from '../common/families.js';
 import { mayReadImport } from '../imports/import-access.js';
+
+/**
+ * Relationships whose child bytes are still inside the parent's native file.
+ * Parse/extract store children as their own items but never rewrite the parent
+ * blob, so downloading the parent streams those bytes too.
+ *
+ * Not family/duplicate/version: those are separate documents.
+ */
+const CONTAINED_RELATIONSHIP_KINDS: RelationshipKind[] = [
+  RelationshipKind.attachment,
+  RelationshipKind.inline_attachment,
+  RelationshipKind.container_member,
+];
 
 const PREVIEW_SAFETY_NOTE =
   'Previews are rendered offline and never load remote content (images, trackers, scripts).';
@@ -471,8 +487,57 @@ export class EvidenceService {
   }
 
   /**
+   * True when a descendant stored as a separate item is still embedded in this
+   * item's native bytes and is malware-locked. Item-level scan of the parent
+   * often stays clean (the .eml / zip itself is not the payload).
+   */
+  private async nativeContainsMalware(tenantId: string, rootId: string): Promise<boolean> {
+    return withTenantContext(this.prisma, tenantId, async (tx) => {
+      const seen = new Set<string>([rootId]);
+      let frontier = [rootId];
+      while (frontier.length > 0) {
+        const rels = await queryInChunks(frontier, (batch) =>
+          tx.evidenceRelationship.findMany({
+            where: {
+              tenantId,
+              parentId: { in: batch },
+              kind: { in: CONTAINED_RELATIONSHIP_KINDS },
+            },
+            select: { childId: true },
+          }),
+        );
+        const childIds: string[] = [];
+        for (const rel of rels) {
+          if (seen.has(rel.childId)) continue;
+          seen.add(rel.childId);
+          childIds.push(rel.childId);
+        }
+        if (childIds.length === 0) return false;
+        const infected = await queryInChunks(childIds, (batch) =>
+          tx.evidenceItem.findMany({
+            where: {
+              tenantId,
+              id: { in: batch },
+              OR: [
+                { malwareStatus: MalwareStatus.infected },
+                { blob: { storageClass: EvidenceStorageClass.quarantine } },
+              ],
+            },
+            select: { id: true },
+          }),
+        );
+        if (infected.length > 0) return true;
+        frontier = childIds;
+      }
+      return false;
+    });
+  }
+
+  /**
    * Presign the original native bytes. Infected items are refused with 423
    * unless an org_admin explicitly confirms the danger (both paths audited).
+   * The same lock applies to a clean parent whose native file still embeds an
+   * infected attachment or archive member.
    */
   async native(
     auth: AuthContext,
@@ -491,7 +556,10 @@ export class EvidenceService {
     }
 
     let overrideUsed = false;
-    if (item.malwareStatus === MalwareStatus.infected) {
+    const malwareLocked =
+      item.malwareStatus === MalwareStatus.infected ||
+      (await this.nativeContainsMalware(auth.tenantId, item.id));
+    if (malwareLocked) {
       const isOrgAdmin = auth.roles.includes(TenantRole.org_admin);
       if (!isOrgAdmin || !confirmDangerous) {
         throw new HttpException(

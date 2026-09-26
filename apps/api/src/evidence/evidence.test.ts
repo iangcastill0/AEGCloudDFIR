@@ -5,6 +5,8 @@ import type { EvidenceObjectStore } from '@aeg-clouddfir/evidence';
 import { EvidenceService } from './evidence.service.js';
 import {
   ITEM_A,
+  ITEM_B,
+  ITEM_C,
   TENANT_ID,
   fakeAudit,
   fakePrisma,
@@ -34,7 +36,17 @@ function baseItem(overrides: Record<string, unknown> = {}) {
 
 function makeService(models: Record<string, unknown>, store: EvidenceObjectStore) {
   const audit = fakeAudit();
-  const service = new EvidenceService(fakePrisma(models), testConfig(), store, audit.service);
+  const service = new EvidenceService(
+    fakePrisma({
+      // Native download walks containment children; tests that do not care
+      // about family see an empty tree rather than a missing delegate.
+      evidenceRelationship: { findMany: vi.fn(async () => []) },
+      ...models,
+    }),
+    testConfig(),
+    store,
+    audit.service,
+  );
   return { service, audit };
 }
 
@@ -205,6 +217,106 @@ describe('EvidenceService.native', () => {
     const actions = audit.appendTx.mock.calls.map((call) => (call[1] as { action: string }).action);
     expect(actions).toContain('evidence.infected_download_override');
     expect(actions).toContain('evidence.native_downloaded');
+  });
+
+  it('locks a clean parent whose contained attachment is infected', async () => {
+    const { store, presignGet } = makeStore();
+    const { service } = makeService(
+      {
+        evidenceItem: {
+          findFirst: vi.fn(async () => baseItem({ name: 'note.eml' })),
+          findMany: vi.fn(async () => [{ id: ITEM_B }]),
+        },
+        evidenceRelationship: {
+          findMany: vi.fn(async () => [{ childId: ITEM_B }]),
+        },
+      },
+      store,
+    );
+    let caught: HttpException | undefined;
+    try {
+      await service.native(makeAuth([TenantRole.case_manager]), ITEM_A, false, fakeRequest());
+    } catch (err) {
+      caught = err as HttpException;
+    }
+    expect(caught?.getStatus()).toBe(423);
+    expect(presignGet).not.toHaveBeenCalled();
+  });
+
+  it('locks a clean archive whose nested member attachment is infected', async () => {
+    const { store, presignGet } = makeStore();
+    const { service } = makeService(
+      {
+        evidenceItem: {
+          findFirst: vi.fn(async () => baseItem({ name: 'mail.pst' })),
+          findMany: vi.fn(async ({ where }: { where: { id?: { in?: string[] } } }) => {
+            const ids = where.id?.in ?? [];
+            return ids.includes(ITEM_C) ? [{ id: ITEM_C }] : [];
+          }),
+        },
+        evidenceRelationship: {
+          findMany: vi.fn(async ({ where }: { where: { parentId?: { in?: string[] } } }) => {
+            const parents = where.parentId?.in ?? [];
+            if (parents.includes(ITEM_A)) return [{ childId: ITEM_B }];
+            if (parents.includes(ITEM_B)) return [{ childId: ITEM_C }];
+            return [];
+          }),
+        },
+      },
+      store,
+    );
+    let caught: HttpException | undefined;
+    try {
+      await service.native(makeAuth([TenantRole.case_manager]), ITEM_A, false, fakeRequest());
+    } catch (err) {
+      caught = err as HttpException;
+    }
+    expect(caught?.getStatus()).toBe(423);
+    expect(presignGet).not.toHaveBeenCalled();
+  });
+
+  it('still downloads a clean parent whose contained children are clean', async () => {
+    const { store, presignGet } = makeStore();
+    const { service } = makeService(
+      {
+        evidenceItem: {
+          findFirst: vi.fn(async () => baseItem()),
+          findMany: vi.fn(async () => []),
+        },
+        evidenceRelationship: {
+          findMany: vi.fn(async () => [{ childId: ITEM_B }]),
+        },
+      },
+      store,
+    );
+    const result = await service.native(
+      makeAuth([TenantRole.case_manager]),
+      ITEM_A,
+      false,
+      fakeRequest(),
+    );
+    expect(result.url).toContain('https://signed.example');
+    expect(presignGet).toHaveBeenCalled();
+  });
+
+  it('org_admin may override a parent that embeds infected children', async () => {
+    const { store, presignGet } = makeStore();
+    const { service, audit } = makeService(
+      {
+        evidenceItem: {
+          findFirst: vi.fn(async () => baseItem({ name: 'note.eml' })),
+          findMany: vi.fn(async () => [{ id: ITEM_B }]),
+        },
+        evidenceRelationship: {
+          findMany: vi.fn(async () => [{ childId: ITEM_B }]),
+        },
+      },
+      store,
+    );
+    await service.native(makeAuth([TenantRole.org_admin]), ITEM_A, true, fakeRequest());
+    expect(presignGet).toHaveBeenCalled();
+    const actions = audit.appendTx.mock.calls.map((call) => (call[1] as { action: string }).action);
+    expect(actions).toContain('evidence.infected_download_override');
   });
 
   it('409s when the item has no stored native', async () => {
