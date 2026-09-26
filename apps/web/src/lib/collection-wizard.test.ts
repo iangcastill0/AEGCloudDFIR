@@ -392,11 +392,16 @@ describe('audit source', () => {
     });
     s = wizardReducer(s, {
       type: 'patchAudit',
-      patch: { msContentTypes: ['Audit.Exchange'], includeGraphSignins: true },
+      patch: {
+        msContentTypes: ['Audit.Exchange'],
+        includeGraphSignins: true,
+        actorFilterText: 'alice@example.com',
+      },
     });
     const req = buildCreateRequest(s);
     expect(req.scope.audit?.microsoft?.managementContentTypes).toEqual(['Audit.Exchange']);
     expect(req.scope.audit?.microsoft?.includeGraphSignins).toBe(true);
+    expect(req.scope.audit?.actorFilter).toEqual(['alice@example.com']);
     expect(req.scope.audit?.google).toBeUndefined();
   });
 });

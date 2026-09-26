@@ -220,6 +220,17 @@ export class O365ManagementActivityConnector implements AuditConnector {
   }
 
   async fetchAuditPage(scopeKey: string, opts: FetchAuditPageOptions): Promise<AuditListPage> {
+    // The content feed is tenant-wide: there is no actor query parameter, and
+    // each blob is the untouched JSON. Honouring actorFilter by downloading
+    // everyone and dropping rows would still preserve other users' events as
+    // evidence. Fail closed so the worker records a misconfigured scope.
+    if (opts.actorFilter !== undefined && opts.actorFilter.length > 0) {
+      throw new AuditConfigError(
+        'Office 365 Management Activity cannot restrict by actor; the content feed is tenant-wide. ' +
+          'Leave the actor filter blank, or collect Graph sign-ins and directory audits only',
+      );
+    }
+
     let currentUri: string;
     let pending: Subrange[];
 

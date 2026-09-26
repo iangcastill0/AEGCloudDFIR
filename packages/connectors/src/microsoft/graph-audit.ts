@@ -18,6 +18,7 @@ import {
   type RetryPolicy,
 } from '../http.js';
 import {
+  AuditConfigError,
   type AuditBatch,
   type AuditConnector,
   type AuditListPage,
@@ -28,6 +29,35 @@ import {
   type TokenProvider,
 } from '../types.js';
 import { normalizeBaseUrl } from './common.js';
+
+/** OData string literal: wrap in single quotes and double any quote inside. */
+function odataString(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
+/**
+ * Graph can filter one UPN. Two or more used to be ignored, so the collection
+ * kept the whole tenant's audit log while the operator thought it was scoped.
+ * Fail closed, same as Google Reports and Dropbox.
+ */
+function singleActor(actorFilter: string[] | undefined): string | undefined {
+  if (actorFilter === undefined || actorFilter.length === 0) return undefined;
+  if (actorFilter.length > 1) {
+    throw new AuditConfigError(
+      'microsoft graph audit actorFilter supports at most one actor per collection; ' +
+        'run separate collections per actor, or leave the filter blank for all users',
+    );
+  }
+  return actorFilter[0];
+}
+
+/** signIns stores userPrincipalName in lowercase. directoryAudits eq is as typed. */
+function actorFilterClause(scope: GraphAuditScope, actor: string): string {
+  const lit = odataString(scope === 'signIns' ? actor.toLowerCase() : actor);
+  return scope === 'directoryAudits'
+    ? `initiatedBy/user/userPrincipalName eq ${lit}`
+    : `userPrincipalName eq ${lit}`;
+}
 
 export type GraphAuditScope = 'directoryAudits' | 'signIns';
 
@@ -154,6 +184,7 @@ export class GraphAuditConnector implements AuditConnector {
       throw new Error(`unknown Graph audit scope: ${scopeKey}`);
     }
     const config = SCOPE_CONFIG[scopeKey];
+    const actor = singleActor(opts.actorFilter);
 
     let url: string;
     if (opts.cursor !== undefined) {
@@ -163,6 +194,7 @@ export class GraphAuditConnector implements AuditConnector {
       const filters: string[] = [];
       if (opts.since !== undefined) filters.push(`${config.dateField} ge ${opts.since}`);
       if (opts.until !== undefined) filters.push(`${config.dateField} le ${opts.until}`);
+      if (actor !== undefined) filters.push(actorFilterClause(scopeKey, actor));
       if (filters.length > 0) u.searchParams.set('$filter', filters.join(' and '));
       u.searchParams.set('$top', '100');
       url = u.toString();

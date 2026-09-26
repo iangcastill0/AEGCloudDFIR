@@ -75,6 +75,25 @@ describe('GraphAuditConnector.fetchAuditPage directoryAudits', () => {
     expect(page.nextCursor).toBeDefined();
   });
 
+  it('puts a single actor on the $filter; rejects two-or-more instead of collecting everyone', async () => {
+    const c = connector();
+    await c.fetchAuditPage('directoryAudits', {
+      since: '2026-07-01T00:00:00Z',
+      until: '2026-07-31T23:59:59Z',
+      actorFilter: ['avery.chen@example.com'],
+    });
+    const req = server.requests.find((r) => r.path.endsWith('/auditLogs/directoryAudits'));
+    expect(req?.query['$filter']).toBe(
+      "activityDateTime ge 2026-07-01T00:00:00Z and activityDateTime le 2026-07-31T23:59:59Z and initiatedBy/user/userPrincipalName eq 'avery.chen@example.com'",
+    );
+
+    server.reset();
+    await expect(
+      c.fetchAuditPage('directoryAudits', { actorFilter: ['a@example.com', 'b@example.com'] }),
+    ).rejects.toThrow(/at most one actor/);
+    expect(server.requests.some((r) => r.path.includes('/auditLogs/directoryAudits'))).toBe(false);
+  });
+
   it('follows @odata.nextLink and derives the batch id from the skiptoken', async () => {
     const c = connector();
     const first = await c.fetchAuditPage('directoryAudits', {});
@@ -112,6 +131,13 @@ describe('GraphAuditConnector.fetchAuditPage signIns', () => {
     const second = await c.fetchAuditPage('signIns', { cursor: page.nextCursor });
     expect(second.batches[0]?.records[0]?.resultStatus).toBe('Invalid username or password.');
     expect(second.nextCursor).toBeUndefined();
+  });
+
+  it('filters signIns by a lowercase userPrincipalName', async () => {
+    const c = connector();
+    await c.fetchAuditPage('signIns', { actorFilter: ['Avery.Chen@example.com'] });
+    const req = server.requests.find((r) => r.path.endsWith('/auditLogs/signIns'));
+    expect(req?.query['$filter']).toBe("userPrincipalName eq 'avery.chen@example.com'");
   });
 });
 
