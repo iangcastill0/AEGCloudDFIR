@@ -32,6 +32,10 @@ import {
 } from '@aeg-clouddfir/production';
 import { sanitizeError, type WorkerContext } from '../context.js';
 import { chunkIds, queryInChunks } from '../chunked.js';
+import {
+  EMBEDDED_MALWARE_NATIVE_ERROR,
+  idsWhoseNativeEmbedsMalware,
+} from '../contained-malware.js';
 import { readAllCapped } from '../streams.js';
 import type { ProductionRunPayload } from './payloads.js';
 
@@ -231,6 +235,14 @@ export async function processProductionRun(
     });
     const sorted = sortProductionItems(sortable, params.sort, params.selection.includeFamilies);
 
+    const malwareLockedIds = await withTenantContext(ctx.prisma, tenantId, (tx) =>
+      idsWhoseNativeEmbedsMalware(
+        tx,
+        tenantId,
+        items.map((item) => item.id),
+      ),
+    );
+
     const batesConfig = {
       prefix: params.bates.prefix,
       digits: params.bates.digits,
@@ -265,7 +277,18 @@ export async function processProductionRun(
       if (sortEntry === undefined) continue;
       const item = sortEntry.loaded;
       const hasFinalRedactions = item.redactions.length > 0;
-      const nativeRequested = wantsNative(item, params);
+      const embedsMalware = malwareLockedIds.has(item.id);
+      const wouldWantNative = wantsNative(item, params);
+      const nativeRequested = wouldWantNative && !embedsMalware;
+
+      if (embedsMalware && (wouldWantNative || params.output.mode === 'natives_only')) {
+        exceptions.push({
+          evidenceItemId: item.id,
+          code: 'malware_item',
+          severity: 'blocking',
+          message: EMBEDDED_MALWARE_NATIVE_ERROR,
+        });
+      }
 
       let pdfBytes: Uint8Array | null = null;
       let pageCount = 1;
@@ -273,7 +296,10 @@ export async function processProductionRun(
       let outputKind: ProducedDraft['outputKind'] = 'image';
 
       try {
-        if (hasFinalRedactions) {
+        if (embedsMalware && params.output.mode === 'natives_only') {
+          placeholderReason = EMBEDDED_MALWARE_NATIVE_ERROR;
+          outputKind = 'placeholder';
+        } else if (hasFinalRedactions) {
           if (nativeRequested) {
             // SECURITY: a redacted document must never ship as native.
             exceptions.push({

@@ -120,6 +120,140 @@ describe('processExportRun (native)', () => {
     expect(audit.data['action']).toBe('export.completed');
   });
 
+  it('does not stream a clean parent whose contained attachment is infected', async () => {
+    const f = fakeCtx();
+    const parent = GOOD_ID;
+    const child = BAD_ID;
+    f.tx.export.findUnique.mockResolvedValue({
+      id: EXPORT_ID,
+      kind: 'native',
+      status: 'queued',
+      parameters: {
+        selection: { kind: 'items', evidenceItemIds: [parent] },
+        includeFamilies: false,
+        archiveSplitMb: 2048,
+      },
+    });
+    const parentRow = {
+      ...evidenceRow(parent, GOOD_SHA),
+      kind: 'email',
+      name: 'note.eml',
+    };
+    const childRow = {
+      ...evidenceRow(child, GOOD_SHA),
+      kind: 'attachment',
+      name: 'payload.exe',
+      malwareStatus: 'infected',
+      childRelationships: [{ parentId: parent, kind: 'attachment' }],
+    };
+    const byId = new Map<string, Record<string, unknown>>([
+      [parent, parentRow],
+      [child, childRow],
+    ]);
+    f.tx.evidenceItem.findMany.mockImplementation((args: Record<string, unknown>) => {
+      const ids = (args['where'] as { id: { in: string[] } }).id.in;
+      const found = ids.map((id) => byId.get(id)).filter((row) => row !== undefined);
+      if (args['select'] !== undefined) {
+        return Promise.resolve(
+          found.map((row) => ({
+            id: row['id'],
+            malwareStatus: row['malwareStatus'],
+            blob: row['blob'],
+          })),
+        );
+      }
+      return Promise.resolve(found);
+    });
+    f.tx.evidenceRelationship.findMany.mockImplementation((args: Record<string, unknown>) => {
+      const where = args['where'] as { parentId?: { in?: string[] } };
+      if (where.parentId?.in?.includes(parent)) {
+        return Promise.resolve([{ parentId: parent, childId: child }]);
+      }
+      return Promise.resolve([]);
+    });
+    f.store.getStream.mockImplementation(() => Promise.resolve(Readable.from(GOOD_CONTENT)));
+    const append = vi.fn();
+    const writer: ArchiveWriterLike = {
+      append,
+      finalize: vi.fn().mockResolvedValue({ entryCount: 0 }),
+    };
+
+    await processExportRun(f.ctx, payload, { createArchive: () => writer });
+
+    expect(f.store.getStream).not.toHaveBeenCalled();
+    const exceptions = String(append.mock.calls.find((c) => c[0] === 'exceptions.csv')?.[1]);
+    expect(exceptions).toContain(parent);
+    expect(exceptions).toMatch(/embedded attachment or archive member/);
+    const finalUpdate = f.tx.export.update.mock.calls.at(-1)?.[0] as {
+      data: Record<string, unknown>;
+    };
+    expect(finalUpdate.data['status']).toBe('ready');
+    expect(finalUpdate.data['itemCount']).toBe(0);
+  });
+
+  it('refuses a PST of emails whose natives still embed malware', async () => {
+    const f = fakeCtx();
+    const parent = GOOD_ID;
+    const child = BAD_ID;
+    f.tx.export.findUnique.mockResolvedValue({
+      id: EXPORT_ID,
+      kind: 'pst',
+      name: 'Mail',
+      status: 'queued',
+      parameters: {
+        selection: { kind: 'items', evidenceItemIds: [parent] },
+        includeFamilies: false,
+        archiveSplitMb: 2048,
+        pstPartMb: 3072,
+      },
+    });
+    const parentRow = {
+      ...evidenceRow(parent, GOOD_SHA),
+      kind: 'email',
+      name: 'note.eml',
+    };
+    const childRow = {
+      ...evidenceRow(child, GOOD_SHA),
+      kind: 'attachment',
+      malwareStatus: 'infected',
+    };
+    const byId = new Map<string, Record<string, unknown>>([
+      [parent, parentRow],
+      [child, childRow],
+    ]);
+    f.tx.evidenceItem.findMany.mockImplementation((args: Record<string, unknown>) => {
+      const ids = (args['where'] as { id: { in: string[] } }).id.in;
+      const found = ids.map((id) => byId.get(id)).filter((row) => row !== undefined);
+      if (args['select'] !== undefined) {
+        return Promise.resolve(
+          found.map((row) => ({
+            id: row['id'],
+            malwareStatus: row['malwareStatus'],
+            blob: row['blob'],
+          })),
+        );
+      }
+      return Promise.resolve(found);
+    });
+    f.tx.evidenceRelationship.findMany.mockResolvedValue([{ parentId: parent, childId: child }]);
+
+    await processExportRun(f.ctx, payload);
+
+    expect(f.store.getStream).not.toHaveBeenCalled();
+    const finalUpdate = f.tx.export.update.mock.calls.at(-1)?.[0] as {
+      data: Record<string, unknown>;
+    };
+    expect(finalUpdate.data['status']).toBe('failed');
+    expect(String(finalUpdate.data['statusDetail'])).toMatch(/flagged malware/);
+  });
+
+  it('still streams a clean parent whose contained children are clean', async () => {
+    const f = fakeCtx();
+    const { writer } = arm(f);
+    await processExportRun(f.ctx, payload, { createArchive: () => writer });
+    expect(f.store.getStream).toHaveBeenCalled();
+  });
+
   it('appends manifests, hashlist, exceptions, and README to the archive', async () => {
     const f = fakeCtx();
     const { writer, append } = arm(f);
@@ -706,8 +840,19 @@ function armFamily(
     },
   });
   f.tx.evidenceRelationship.findMany.mockImplementation((args: Record<string, unknown>) => {
-    const where = args['where'] as { childId: { in: string[] } };
-    const wanted = new Set(where.childId.in);
+    const where = args['where'] as {
+      childId?: { in?: string[] };
+      parentId?: { in?: string[] };
+    };
+    if (where.parentId?.in !== undefined) {
+      const wanted = new Set(where.parentId.in);
+      return Promise.resolve(
+        opts.relationships
+          .filter((r) => wanted.has(r.parentId))
+          .map((r) => ({ parentId: r.parentId, childId: r.childId })),
+      );
+    }
+    const wanted = new Set(where.childId?.in ?? []);
     return Promise.resolve(
       opts.relationships
         .filter((r) => wanted.has(r.childId))
@@ -725,6 +870,8 @@ function armFamily(
           name: r['name'],
           kind: r['kind'],
           custodian: r['custodian'],
+          malwareStatus: r['malwareStatus'],
+          blob: r['blob'],
         })),
       );
     }
