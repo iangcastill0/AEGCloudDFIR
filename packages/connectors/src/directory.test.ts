@@ -2,7 +2,8 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { startFakeProviderServer, type FakeProviderServer } from './fake-server.js';
 import { GoogleCustodianDirectory } from './google/directory.js';
-import { GraphCustodianDirectory } from './microsoft/directory.js';
+import { GraphCustodianDirectory, graphUsersCursorUrl } from './microsoft/directory.js';
+import { ConnectorError } from './types.js';
 import { StaticTokenProvider } from './oauth.js';
 
 const FIXTURES = fileURLToPath(new URL('../fixtures', import.meta.url));
@@ -38,6 +39,32 @@ describe('GraphCustodianDirectory', () => {
     const page2 = await d.listUsers({ cursor: page1.nextCursor });
     expect(page2.users.map((u) => u.externalId)).toEqual(['u-3']);
     expect(page2.nextCursor).toBeUndefined();
+  });
+
+  it('refuses a cursor on another host before attaching the bearer token', async () => {
+    let fetched: string | undefined;
+    const d = new GraphCustodianDirectory({
+      tokenProvider: new StaticTokenProvider('secret-graph-token'),
+      graphBaseUrl: `${server.url}/graph`,
+      fetchImpl: async (url) => {
+        fetched = String(url);
+        throw new Error('must not fetch');
+      },
+      sleepImpl: () => Promise.resolve(),
+    });
+    await expect(d.listUsers({ cursor: 'https://attacker.example/steal' })).rejects.toBeInstanceOf(
+      ConnectorError,
+    );
+    expect(fetched).toBeUndefined();
+  });
+
+  it('refuses a same-host cursor that is not the users listing', async () => {
+    const base = `${server.url}/graph`;
+    expect(() => graphUsersCursorUrl(base, `${base}/users/ceo/messages`)).toThrow(ConnectorError);
+    expect(() => graphUsersCursorUrl(base, 'http://169.254.169.254/latest/meta-data/')).toThrow(
+      ConnectorError,
+    );
+    expect(graphUsersCursorUrl(base, `${base}/users?$skiptoken=abc`)).toContain('/users?');
   });
 
   it('uses $search with ConsistencyLevel: eventual in search mode', async () => {

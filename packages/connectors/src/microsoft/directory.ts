@@ -4,8 +4,41 @@
  */
 import { z } from 'zod';
 import { ensureOk, providerFetch } from '../http.js';
-import type { CustodianDirectory, DirectoryUserPage, ListUsersOptions } from '../types.js';
+import {
+  ConnectorError,
+  type CustodianDirectory,
+  type DirectoryUserPage,
+  type ListUsersOptions,
+} from '../types.js';
 import { graphFetchOptions, normalizeBaseUrl, type GraphConnectorOptions } from './common.js';
+
+/**
+ * Graph @odata.nextLink is stored as the paging cursor and sent back on
+ * GET /connectors/:id/custodians?cursor=. providerFetch always attaches the
+ * connector bearer token, so the cursor must be a users listing on the
+ * configured Graph host — not an attacker URL.
+ */
+export function graphUsersCursorUrl(graphBaseUrl: string, cursor: string): string {
+  const base = new URL(normalizeBaseUrl(graphBaseUrl));
+  let next: URL;
+  try {
+    next = new URL(cursor);
+  } catch {
+    throw new ConnectorError('paging cursor is not a valid URL');
+  }
+  if (next.username !== '' || next.password !== '') {
+    throw new ConnectorError('paging cursor must not carry credentials');
+  }
+  if (next.origin !== base.origin) {
+    throw new ConnectorError('paging cursor is not on the configured Graph host');
+  }
+  const expectedPath = `${base.pathname.replace(/\/$/, '')}/users`;
+  const path = next.pathname.endsWith('/') ? next.pathname.slice(0, -1) : next.pathname;
+  if (path !== expectedPath) {
+    throw new ConnectorError('paging cursor is not a Graph users listing URL');
+  }
+  return next.toString();
+}
 
 const userSchema = z.object({
   id: z.string(),
@@ -33,7 +66,7 @@ export class GraphCustodianDirectory implements CustodianDirectory {
     const search = opts.search?.trim() ?? '';
     const searching = search !== '';
     if (opts.cursor !== undefined) {
-      url = opts.cursor;
+      url = graphUsersCursorUrl(this.base, opts.cursor);
     } else {
       const u = new URL(`${this.base}/users`);
       u.searchParams.set('$select', 'id,mail,displayName,userPrincipalName');
