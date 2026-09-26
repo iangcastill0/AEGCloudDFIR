@@ -77,7 +77,7 @@ export class TagsController {
   }
 
   @Post('bulk')
-  @RequireRoles(TenantRole.case_manager, TenantRole.reviewer)
+  @RequireRoles(TenantRole.case_manager, TenantRole.reviewer, TenantRole.org_admin)
   @HttpCode(200)
   async bulk(
     @Body() body: unknown,

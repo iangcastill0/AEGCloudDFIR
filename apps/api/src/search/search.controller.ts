@@ -17,6 +17,7 @@ import type { FastifyRequest } from 'fastify';
 import '../common/http.js';
 import type { AuthContext } from '../common/http.js';
 import { parseCursorQuery } from '../common/pagination.js';
+import { EVIDENCE_READ_ROLES } from '../common/roles.js';
 import { SessionGuard } from '../auth/guards/session.guard.js';
 import { TenantGuard } from '../auth/guards/tenant.guard.js';
 import { RolesGuard } from '../auth/guards/roles.guard.js';
@@ -36,7 +37,7 @@ export class SearchController {
   constructor(private readonly search: SearchService) {}
 
   @Post()
-  @RequireRoles(TenantRole.case_manager, TenantRole.reviewer, TenantRole.read_only)
+  @RequireRoles(...EVIDENCE_READ_ROLES)
   @HttpCode(200)
   async execute(@Body() body: unknown, @Req() request: FastifyRequest): Promise<SearchResultDto> {
     return this.search.execute(requireAuth(request), body, request);
@@ -50,13 +51,13 @@ export class SearchController {
    * hardcoded copy in the browser would drift the first time a field is added.
    */
   @Get('fields')
-  @RequireRoles(TenantRole.case_manager, TenantRole.reviewer, TenantRole.read_only)
+  @RequireRoles(...EVIDENCE_READ_ROLES)
   fields(): { items: { name: string; type: string }[] } {
     return { items: this.search.searchableFields() };
   }
 
   @Post('explain')
-  @RequireRoles(TenantRole.case_manager, TenantRole.reviewer, TenantRole.read_only)
+  @RequireRoles(...EVIDENCE_READ_ROLES)
   @HttpCode(200)
   async explain(@Body() body: unknown, @Req() request: FastifyRequest): Promise<ExplainResultDto> {
     return this.search.explain(requireAuth(request), body);
@@ -65,7 +66,7 @@ export class SearchController {
 
 @Controller('api/v1/saved-searches')
 @UseGuards(SessionGuard, TenantGuard, RolesGuard)
-@RequireRoles(TenantRole.case_manager, TenantRole.reviewer)
+@RequireRoles(TenantRole.case_manager, TenantRole.reviewer, TenantRole.org_admin)
 export class SavedSearchesController {
   constructor(private readonly savedSearches: SavedSearchesService) {}
 
