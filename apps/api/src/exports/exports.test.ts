@@ -117,6 +117,51 @@ describe('ExportsService.create', () => {
       expect.objectContaining({ action: 'export.created' }),
     );
   });
+
+  it('copies the saved-search AST into frozen parameters so a later rewrite cannot change the export', async () => {
+    const SEARCH_ID = '12121212-1212-4121-8121-121212121212';
+    const originalAst = { kind: 'term', value: 'invoice' };
+    const savedSearchFindFirst = vi.fn(async () => ({ queryAst: originalAst }));
+    const exportCreate = vi.fn(async () => exportRow({ status: ExportStatus.queued }));
+    const { store } = makeStore();
+    const { service } = makeService(
+      {
+        export: {
+          findFirst: vi.fn(async () => null),
+          count: vi.fn(async () => 0),
+          create: exportCreate,
+        },
+        savedSearch: { findFirst: savedSearchFindFirst },
+        tenant: { findUnique: vi.fn(async () => ({ id: TENANT_ID, planQuota: {} })) },
+        outboxEvent: { create: vi.fn(async () => ({})) },
+      },
+      store,
+    );
+
+    await service.create(
+      auth,
+      {
+        idempotencyKey: 'idem-export-search-1',
+        kind: 'native',
+        name: 'Search export',
+        selection: { kind: 'saved_search', savedSearchId: SEARCH_ID },
+        includeFamilies: false,
+        attachments: 'inline',
+        archiveSplitMb: 2048,
+      },
+      fakeRequest(),
+    );
+
+    const created = exportCreate.mock.calls[0]?.[0] as { data: { parameters: unknown } };
+    expect(savedSearchFindFirst).toHaveBeenCalled();
+    expect(created.data.parameters).toEqual({
+      selection: { kind: 'saved_search', savedSearchId: SEARCH_ID },
+      includeFamilies: false,
+      attachments: 'inline',
+      archiveSplitMb: 2048,
+      frozenQueryAst: originalAst,
+    });
+  });
 });
 
 /**

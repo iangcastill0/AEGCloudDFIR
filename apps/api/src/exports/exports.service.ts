@@ -228,12 +228,30 @@ export class ExportsService {
         );
 
         // Frozen parameters: EXACTLY the worker contract subset.
+        //
+        // A saved-search export stores the id AND a copy of the AST. The
+        // worker re-runs that copy, not the live row. Reviewers may edit any
+        // saved search in the tenant, and the worker search is privileged, so
+        // a rewrite while the export sits in the queue would change what gets
+        // packed — drop evidence, or pull in privileged items. Productions
+        // freeze selectionItemIds on submit for the same reason.
+        let frozenQueryAst: Prisma.InputJsonValue | undefined;
+        if (input.selection.kind === 'saved_search') {
+          const saved = await tx.savedSearch.findFirst({
+            where: { id: input.selection.savedSearchId, tenantId: auth.tenantId },
+            select: { queryAst: true },
+          });
+          if (!saved) throw new NotFoundException();
+          frozenQueryAst = saved.queryAst as Prisma.InputJsonValue;
+        }
+
         const parameters = {
           selection: input.selection,
           includeFamilies: input.includeFamilies,
           attachments: input.attachments,
           ...(input.csv !== undefined ? { csv: input.csv } : {}),
           archiveSplitMb: input.archiveSplitMb,
+          ...(frozenQueryAst !== undefined ? { frozenQueryAst } : {}),
         };
 
         const exportRow = await tx.export.create({

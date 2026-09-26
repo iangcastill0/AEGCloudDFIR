@@ -9,6 +9,7 @@ import {
   loadItemsInBatches,
   partitionPstSelection,
   processExportRun,
+  resolveSelectionIds,
   PST_NOT_EMAIL_EXCEPTION,
   pstExportStatusDetail,
   shouldStartNewArchive,
@@ -958,5 +959,67 @@ describe('native export leaves email attachments inside the parent', () => {
     expect(readme).toContain('Attachment layout: inline');
     expect(readme).toContain('inline-attachments.csv');
     expect(readme).toContain('RFC822');
+  });
+});
+
+const SEARCH_ID = '12121212-1212-4121-8121-121212121212';
+const FROZEN_AST = { kind: 'term' as const, value: 'invoice' };
+const REWRITTEN_AST = { kind: 'match_all' as const };
+
+function savedSearchParams(frozenQueryAst?: unknown) {
+  return {
+    selection: { kind: 'saved_search' as const, savedSearchId: SEARCH_ID },
+    includeFamilies: false,
+    attachments: 'inline' as const,
+    archiveSplitMb: 2048,
+    pstPartMb: 3072,
+    ...(frozenQueryAst !== undefined ? { frozenQueryAst } : {}),
+  };
+}
+
+describe('resolveSelectionIds (saved search freeze)', () => {
+  it('runs the frozen AST even if the live saved search was rewritten', async () => {
+    const f = fakeCtx();
+    f.tx.savedSearch.findUnique.mockResolvedValue({ queryAst: REWRITTEN_AST });
+    f.search.search.mockResolvedValue({ total: 1, items: [{ id: EVIDENCE }] });
+
+    const ids = await resolveSelectionIds(f.ctx, TENANT, savedSearchParams(FROZEN_AST));
+
+    expect(ids).toEqual([EVIDENCE]);
+    expect(f.tx.savedSearch.findUnique).not.toHaveBeenCalled();
+    const request = f.search.search.mock.calls[0]?.[0] as { query: unknown };
+    expect(JSON.stringify(request.query)).toContain('invoice');
+    expect(JSON.stringify(request.query)).not.toContain('match_all');
+  });
+
+  it('still runs after the saved search row is deleted, as long as the AST was frozen', async () => {
+    const f = fakeCtx();
+    f.tx.savedSearch.findUnique.mockResolvedValue(null);
+    f.search.search.mockResolvedValue({ total: 1, items: [{ id: EVIDENCE }] });
+
+    const ids = await resolveSelectionIds(f.ctx, TENANT, savedSearchParams(FROZEN_AST));
+
+    expect(ids).toEqual([EVIDENCE]);
+    expect(f.tx.savedSearch.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the live row for exports queued before the freeze existed', async () => {
+    const f = fakeCtx();
+    f.tx.savedSearch.findUnique.mockResolvedValue({ queryAst: FROZEN_AST });
+    f.search.search.mockResolvedValue({ total: 1, items: [{ id: EVIDENCE }] });
+
+    const ids = await resolveSelectionIds(f.ctx, TENANT, savedSearchParams());
+
+    expect(ids).toEqual([EVIDENCE]);
+    expect(f.tx.savedSearch.findUnique).toHaveBeenCalled();
+  });
+
+  it('fails closed when a legacy export has no freeze and the search is gone', async () => {
+    const f = fakeCtx();
+    f.tx.savedSearch.findUnique.mockResolvedValue(null);
+
+    await expect(resolveSelectionIds(f.ctx, TENANT, savedSearchParams())).rejects.toThrow(
+      /no longer exists/,
+    );
   });
 });
