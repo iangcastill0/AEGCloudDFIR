@@ -48,11 +48,16 @@ type AttachmentLayout = z.infer<typeof attachmentLayout>;
 /**
  * Frozen Export.parameters shape (written by apps/api from
  * createExportRequest): selection + includeFamilies + attachments + csv +
- * archiveSplitMb.
+ * archiveSplitMb + optional frozenQueryAst.
  *
  * `attachments` defaults to `inline`, so an export row frozen before this
  * existed reads as inline. That only matters for a row still queued or
  * running, because `processExportRun` returns early on one already `ready`.
+ *
+ * `frozenQueryAst` is the saved-search query copied at create. Without it the
+ * worker re-read the live row, and a reviewer rewrite in the queue window
+ * changed the privileged export. Rows queued before this field existed still
+ * fall back to the live row.
  */
 const exportParameters = z.object({
   selection: z.discriminatedUnion('kind', [
@@ -76,6 +81,7 @@ const exportParameters = z.object({
    * contract for the full reason.
    */
   pstPartMb: z.number().int().min(64).max(3072).default(3072),
+  frozenQueryAst: z.unknown().optional(),
 });
 type ExportParameters = z.infer<typeof exportParameters>;
 
@@ -155,7 +161,8 @@ export const EXPORT_CSV_COLUMNS: readonly string[] = [
   ...AUDIT_CSV_COLUMNS,
 ];
 
-async function resolveSelectionIds(
+/** Exported for tests: frozen AST must win over a rewritten saved search. */
+export async function resolveSelectionIds(
   ctx: WorkerContext,
   tenantId: string,
   params: ExportParameters,
@@ -180,13 +187,20 @@ async function resolveSelectionIds(
     );
     return [...new Set(rows.map((r) => r.evidenceItemId))];
   }
-  // saved_search: run the stored, pre-validated AST through the search
-  // adapter with a search_after loop (capped).
-  const saved = await withTenantContext(ctx.prisma, tenantId, (tx) =>
-    tx.savedSearch.findUnique({ where: { id: selection.savedSearchId } }),
-  );
-  if (saved === null) throw new Error('saved search referenced by the export no longer exists');
-  const validated = validateAst(saved.queryAst as unknown as QueryNode, DEFAULT_FIELD_REGISTRY);
+  // saved_search: run the AST frozen at create, not the live row. A reviewer
+  // can rewrite any saved search in the tenant, and this search is privileged.
+  const queryAst =
+    params.frozenQueryAst !== undefined && params.frozenQueryAst !== null
+      ? params.frozenQueryAst
+      : (
+          await withTenantContext(ctx.prisma, tenantId, (tx) =>
+            tx.savedSearch.findUnique({ where: { id: selection.savedSearchId } }),
+          )
+        )?.queryAst;
+  if (queryAst === undefined || queryAst === null) {
+    throw new Error('saved search referenced by the export no longer exists');
+  }
+  const validated = validateAst(queryAst as QueryNode, DEFAULT_FIELD_REGISTRY);
   const ids: string[] = [];
   let searchAfter: (string | number)[] | undefined;
   while (ids.length < SAVED_SEARCH_RESULT_CAP) {
