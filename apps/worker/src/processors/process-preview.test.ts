@@ -93,6 +93,19 @@ describe('processPreview', () => {
     expect(f.store.getStream).not.toHaveBeenCalled();
   });
 
+  it('never renders an infected file whose blob was left in the evidence bucket', async () => {
+    // Shared blobs are marked infected and not moved. Image previews copy
+    // those bytes verbatim, so storageClass alone is not the lock.
+    const f = fakeCtx();
+    arm(f, {
+      malwareStatus: 'infected',
+      blob: { id: 'b', objectKey: 'k', storageClass: 'original' },
+    });
+    await processPreview(f.ctx, payload, { runner: runner() });
+    expect(f.tx.preview.upsert).not.toHaveBeenCalled();
+    expect(f.store.getStream).not.toHaveBeenCalled();
+  });
+
   it('records WHY when a type cannot be previewed', async () => {
     // "No safe preview is available" told a reviewer nothing about whether
     // the file was broken, unsupported, or never collected.

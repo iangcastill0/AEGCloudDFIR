@@ -274,6 +274,7 @@ export async function processScan(
     }
   }
 
+  const previewKeys: string[] = [];
   await withTenantContext(ctx.prisma, tenantId, async (tx) => {
     await tx.malwareScan.create({
       data: {
@@ -347,5 +348,46 @@ export async function processScan(
       ],
       skipDuplicates: true,
     });
+    // Scan and preview start together. An image preview is the original
+    // bytes. Drop any derivative that won the race so a later presign
+    // cannot serve it (the API also refuses infected items).
+    const previewRows = await tx.preview.findMany({
+      where: { tenantId, evidenceItemId },
+      select: { objectKey: true, pageCount: true },
+    });
+    if (previewRows.length > 0) {
+      previewKeys.push(
+        ...previewRows.flatMap((row) => previewObjectKeys(row.objectKey, row.pageCount)),
+      );
+      await tx.preview.deleteMany({ where: { tenantId, evidenceItemId } });
+    }
   });
+
+  for (const key of previewKeys) {
+    try {
+      await ctx.s3.send(
+        new DeleteObjectCommand({
+          Bucket: ctx.config.CDFIR_S3_BUCKET_EVIDENCE,
+          Key: key,
+        }),
+      );
+    } catch {
+      // Best-effort. Preview() will not mint a URL for an infected item.
+    }
+  }
+}
+
+/**
+ * Keys for one Preview row. Rasterised documents store only page 1 on the
+ * row and name the rest preview-pageNNN.png beside it.
+ */
+function previewObjectKeys(objectKey: string, pageCount: number): string[] {
+  const match = /^(.*preview-page)(\d+)(\.png)$/.exec(objectKey);
+  if (match === null || pageCount < 2) return [objectKey];
+  const [, prefix, digits, suffix] = match;
+  const width = (digits ?? '').length;
+  return Array.from(
+    { length: pageCount },
+    (_, i) => `${prefix ?? ''}${String(i + 1).padStart(width, '0')}${suffix ?? ''}`,
+  );
 }
