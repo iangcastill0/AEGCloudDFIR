@@ -80,10 +80,19 @@ export async function processScan(
           payload: { tenantId, evidenceItemId, version },
         });
       } else if (item.sourceForImport !== null && item.sourceForImport !== undefined) {
+        // The first source scan burns import:<id>:initial even when ClamAV
+        // is down: analyze then marks the import failed so Retry appears.
+        // Retry re-queues this scan with a fresh key. A second analyze must
+        // too — skipDuplicates would otherwise drop :initial forever, and
+        // the UI only shows Retry while status is failed.
+        const priorScanFailed = item.malwareScans[0]?.result === 'scan_failed';
         outboxRows.push({
           tenantId,
           topic: QUEUES.importAnalyze,
-          dedupKey: dedupKeys.importAnalyze(item.sourceForImport.id),
+          dedupKey: dedupKeys.importAnalyze(
+            item.sourceForImport.id,
+            priorScanFailed ? `retry${Date.now()}` : 'initial',
+          ),
           payload: { tenantId, importId: item.sourceForImport.id },
         });
       } else if (result === 'clean' || !ctx.config.CDFIR_CLAMAV_ENABLED) {

@@ -123,6 +123,7 @@ describe('processScan', () => {
       expect.arrayContaining([
         expect.objectContaining({
           topic: 'import.analyze',
+          dedupKey: 'import:99999999-9999-4999-8999-999999999999:initial',
           payload: {
             tenantId: TENANT,
             importId: '99999999-9999-4999-8999-999999999999',
@@ -130,6 +131,25 @@ describe('processScan', () => {
         }),
       ]),
     );
+  });
+
+  it('re-queues Crush analysis with a fresh key after a failed source scan', async () => {
+    const importId = '99999999-9999-4999-8999-999999999999';
+    const f = fakeCtx();
+    arm(f, {
+      importId,
+      sourceForImport: { id: importId },
+      malwareScans: [{ id: 's1', result: 'scan_failed' }],
+    });
+
+    await processScan(f.ctx, payload, {
+      clamFactory: () => clam({ infected: false, signature: '' }),
+    });
+
+    const analyze = createManyRows(f.tx.outboxEvent).find((row) => row.topic === 'import.analyze');
+    expect(analyze?.payload).toEqual({ tenantId: TENANT, importId });
+    expect(analyze?.dedupKey).toMatch(new RegExp(`^import:${importId}:retry\\d+$`));
+    expect(analyze?.dedupKey).not.toBe(`import:${importId}:initial`);
   });
 
   it('queues member processing only after that extracted member scans clean', async () => {
