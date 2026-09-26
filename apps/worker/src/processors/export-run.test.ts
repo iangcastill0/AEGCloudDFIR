@@ -120,6 +120,133 @@ describe('processExportRun (native)', () => {
     expect(audit.data['action']).toBe('export.completed');
   });
 
+  it('does not stream infected natives, even when the blob is still in the evidence bucket', async () => {
+    // Shared blobs stay in the evidence bucket when ClamAV flags them. Native
+    // download returns 423; productions refuse the set. Export used to copy
+    // the bytes into the zip because it keyed off storageClass, not malwareStatus.
+    const f = fakeCtx();
+    const { writer, append } = arm(f);
+    f.tx.evidenceItem.findMany.mockResolvedValue([
+      evidenceRow(GOOD_ID, GOOD_SHA),
+      {
+        ...evidenceRow(BAD_ID, GOOD_SHA),
+        malwareStatus: 'infected',
+        blob: {
+          objectKey: `tenants/${TENANT}/originals/sha256/aa/${GOOD_SHA}`,
+          storageClass: 'original',
+        },
+      },
+    ]);
+
+    await processExportRun(f.ctx, payload, { createArchive: () => writer });
+
+    expect(f.store.getStream).toHaveBeenCalledTimes(1);
+    expect(f.store.getStream.mock.calls[0]?.[0]).toBe('evidence');
+    expect(f.store.getStream.mock.calls[0]?.[1]).toBe(
+      `tenants/${TENANT}/originals/sha256/aa/${GOOD_SHA}`,
+    );
+
+    const upserts = f.tx.exportItem.upsert.mock.calls.map(
+      (c) =>
+        c[0] as {
+          where: { exportId_evidenceItemId: { evidenceItemId: string } };
+          create: Record<string, unknown>;
+        },
+    );
+    const good = upserts.find((u) => u.where.exportId_evidenceItemId.evidenceItemId === GOOD_ID);
+    const infected = upserts.find((u) => u.where.exportId_evidenceItemId.evidenceItemId === BAD_ID);
+    expect(good?.create['state']).toBe('verified');
+    expect(infected?.create['state']).toBe('failed');
+    expect(String(infected?.create['error'])).toContain('flagged as malware');
+
+    const exceptions = String(append.mock.calls.find((c) => c[0] === 'exceptions.csv')?.[1]);
+    expect(exceptions).toContain(BAD_ID);
+    expect(exceptions).toContain('flagged as malware');
+
+    const finalUpdate = f.tx.export.update.mock.calls.at(-1)?.[0] as {
+      data: Record<string, unknown>;
+    };
+    expect(finalUpdate.data['status']).toBe('ready');
+    expect(finalUpdate.data['itemCount']).toBe(1);
+  });
+
+  it('does not read the quarantine bucket for a sole-owner infected item', async () => {
+    const f = fakeCtx();
+    const { writer } = arm(f);
+    f.tx.export.findUnique.mockResolvedValue({
+      id: EXPORT_ID,
+      kind: 'native',
+      status: 'queued',
+      parameters: {
+        selection: { kind: 'items', evidenceItemIds: [BAD_ID] },
+        includeFamilies: false,
+        archiveSplitMb: 2048,
+      },
+    });
+    f.tx.evidenceItem.findMany.mockResolvedValue([
+      {
+        ...evidenceRow(BAD_ID, GOOD_SHA),
+        malwareStatus: 'infected',
+        blob: {
+          objectKey: `tenants/${TENANT}/quarantine/sha256/aa/${GOOD_SHA}`,
+          storageClass: 'quarantine',
+        },
+      },
+    ]);
+
+    await processExportRun(f.ctx, payload, { createArchive: () => writer });
+
+    expect(f.store.getStream).not.toHaveBeenCalled();
+    const upserts = f.tx.exportItem.upsert.mock.calls.map(
+      (c) =>
+        c[0] as {
+          where: { exportId_evidenceItemId: { evidenceItemId: string } };
+          create: Record<string, unknown>;
+        },
+    );
+    const infected = upserts.find((u) => u.where.exportId_evidenceItemId.evidenceItemId === BAD_ID);
+    expect(infected?.create['state']).toBe('failed');
+    expect(String(infected?.create['error'])).toContain('flagged as malware');
+  });
+
+  it('refuses a PST of only infected emails without reading their natives', async () => {
+    const f = fakeCtx();
+    arm(f);
+    f.tx.export.findUnique.mockResolvedValue({
+      id: EXPORT_ID,
+      kind: 'pst',
+      name: 'Mail',
+      status: 'queued',
+      parameters: {
+        selection: { kind: 'items', evidenceItemIds: [BAD_ID] },
+        includeFamilies: false,
+        archiveSplitMb: 2048,
+        pstPartMb: 3072,
+      },
+    });
+    f.tx.evidenceItem.findMany.mockResolvedValue([
+      {
+        ...evidenceRow(BAD_ID, GOOD_SHA),
+        kind: 'email',
+        name: 'msg.eml',
+        malwareStatus: 'infected',
+        blob: {
+          objectKey: `tenants/${TENANT}/quarantine/sha256/aa/${GOOD_SHA}`,
+          storageClass: 'quarantine',
+        },
+      },
+    ]);
+
+    await processExportRun(f.ctx, payload);
+
+    expect(f.store.getStream).not.toHaveBeenCalled();
+    const finalUpdate = f.tx.export.update.mock.calls.at(-1)?.[0] as {
+      data: Record<string, unknown>;
+    };
+    expect(finalUpdate.data['status']).toBe('failed');
+    expect(String(finalUpdate.data['statusDetail'])).toContain('flagged as malware');
+  });
+
   it('appends manifests, hashlist, exceptions, and README to the archive', async () => {
     const f = fakeCtx();
     const { writer, append } = arm(f);

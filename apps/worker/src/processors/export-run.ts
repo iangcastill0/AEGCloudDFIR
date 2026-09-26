@@ -104,6 +104,14 @@ function isAttachmentKind(kind: string): boolean {
 }
 
 /**
+ * Native download returns 423 for infected items (org_admin override only).
+ * Productions block them as non-overridable. Export used to stream the bytes
+ * anyway — from the quarantine bucket, and from shared blobs that stay in
+ * evidence. The gate is `malwareStatus`, not `storageClass`.
+ */
+const INFECTED_NATIVE_EXPORT_ERROR = 'this item is flagged as malware; native export is locked';
+
+/**
  * Splitter decision, factored out for unit testing: start a new archive part
  * when the current one is non-empty and the next item would push it past the
  * split threshold. A single oversized item still goes into its own part.
@@ -736,6 +744,7 @@ async function runPstExportKind(
   batches: AsyncIterable<LoadedExportItem[]>,
 ): Promise<ExportResult> {
   const items: PstExportItem[] = [];
+  const malwareOmitted: { evidenceItemId: string; error: string }[] = [];
   const loaded: {
     id: string;
     kind: string;
@@ -749,6 +758,13 @@ async function runPstExportKind(
         childRelationships: item.childRelationships,
       });
       if (item.kind !== 'email') continue;
+      if (item.malwareStatus === 'infected' || item.blob?.storageClass === 'quarantine') {
+        malwareOmitted.push({
+          evidenceItemId: item.id,
+          error: INFECTED_NATIVE_EXPORT_ERROR,
+        });
+        continue;
+      }
       items.push({
         evidenceItemId: item.id,
         sha256: item.sha256,
@@ -773,6 +789,12 @@ async function runPstExportKind(
 
   const split = partitionPstSelection(loaded);
   if (items.length === 0) {
+    if (malwareOmitted.length > 0) {
+      throw new Error(
+        `every selected email is flagged as malware; native export is locked ` +
+          `(${String(malwareOmitted.length)} item(s))`,
+      );
+    }
     throw new Error(
       split.omitted.length > 0
         ? `this selection has no email items, so there is nothing to put in a PST ` +
@@ -794,7 +816,7 @@ async function runPstExportKind(
     spoolThresholdBytes: ctx.config.CDFIR_PSTB_SPOOL_THRESHOLD_BYTES,
     partBytes: params.pstPartMb * 1024 * 1024,
     storeDisplayName: pstStoreDisplayName(exportName),
-    extraExceptions: split.omitted,
+    extraExceptions: [...split.omitted, ...malwareOmitted],
   });
 
   return {
@@ -1127,6 +1149,10 @@ async function runNativeExport(
     const size = Number(item.size);
     if (item.blob === null || item.sha256 === '') {
       entry.error = 'no preserved native bytes';
+      return 'failed';
+    }
+    if (item.malwareStatus === 'infected' || item.blob.storageClass === 'quarantine') {
+      entry.error = INFECTED_NATIVE_EXPORT_ERROR;
       return 'failed';
     }
     if (shouldStartNewArchive(bytesInPart, size, splitBytes)) {
