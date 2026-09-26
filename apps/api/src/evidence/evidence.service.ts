@@ -30,6 +30,9 @@ import { mayReadImport } from '../imports/import-access.js';
 const PREVIEW_SAFETY_NOTE =
   'Previews are rendered offline and never load remote content (images, trackers, scripts).';
 
+const PREVIEW_INFECTED_NOTE =
+  'This file was quarantined by the malware scan. Native download is locked.';
+
 export interface AuditRecordDto {
   id: string;
   system: string;
@@ -456,8 +459,17 @@ export class EvidenceService {
     note: string;
   }> {
     const item = await this.requireItem(auth, id, (tx) =>
-      tx.evidenceItem.findFirst({ where: { id, tenantId: auth.tenantId }, select: { id: true } }),
+      tx.evidenceItem.findFirst({
+        where: { id, tenantId: auth.tenantId },
+        select: { id: true, malwareStatus: true },
+      }),
     );
+    // Native download already 423s infected items. Image previews are a
+    // verbatim copy of those bytes, so presigning them would hand the payload
+    // to any reviewer who opened the item. Return no URLs.
+    if (item.malwareStatus === MalwareStatus.infected) {
+      return { items: [], note: PREVIEW_INFECTED_NOTE };
+    }
     const previews = await withTenantContext(this.prisma, auth.tenantId, (tx) =>
       tx.preview.findMany({
         where: { tenantId: auth.tenantId, evidenceItemId: item.id },

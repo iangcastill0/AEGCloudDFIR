@@ -71,7 +71,9 @@ export async function processPreview(
   if (item.blob === null) return;
   // An infected file is never rendered. The native download has its own
   // deliberate gate for that; a preview must not quietly route around it.
-  if (item.blob.storageClass === 'quarantine') {
+  // storageClass is not enough: a shared blob is marked infected and left in
+  // the evidence bucket, and image previews copy those bytes verbatim.
+  if (item.blob.storageClass === 'quarantine' || item.malwareStatus === 'infected') {
     await note(ctx, tenantId, item, 'This file was quarantined by the malware scan.');
     return;
   }

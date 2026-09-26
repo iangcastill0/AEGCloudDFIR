@@ -364,4 +364,29 @@ describe('processScan', () => {
       }),
     );
   });
+
+  it('deletes a preview that won the race with the scan', async () => {
+    const f = fakeCtx();
+    arm(f);
+    // Shared blob: marked infected, original stays. Preview still has to go.
+    f.tx.evidenceItem.count.mockResolvedValue(1);
+    f.tx.preview.findMany.mockResolvedValue([
+      { objectKey: 'tenants/t/derivatives/preview.bin', pageCount: 1 },
+    ]);
+    await processScan(f.ctx, payload, {
+      clamFactory: () => clam({ infected: true, signature: 'Eicar-Test-Signature' }),
+    });
+    expect(f.store.promoteToOriginal).not.toHaveBeenCalled();
+    expect(f.tx.preview.deleteMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { tenantId: TENANT, evidenceItemId: EVIDENCE } }),
+    );
+    expect(f.s3Send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({
+          Bucket: 'evidence-test',
+          Key: 'tenants/t/derivatives/preview.bin',
+        }),
+      }),
+    );
+  });
 });

@@ -394,6 +394,37 @@ describe('EvidenceService.preview', () => {
     expect(presignGet).toHaveBeenCalledWith(TENANT_ID, 'k-html-v2', { ttlSeconds: 300 });
     expect(presignGet).not.toHaveBeenCalledWith(TENANT_ID, 'k-html-v1', expect.anything());
   });
+
+  it('does not presign a verbatim image preview for an infected item', async () => {
+    const { store, presignGet } = makeStore();
+    const findMany = vi.fn(async () => [
+      {
+        kind: 'thumbnail',
+        version: 1,
+        objectKey: 'k-infected-png',
+        mimeType: 'image/png',
+        pageCount: 1,
+      },
+    ]);
+    const { service } = makeService(
+      {
+        evidenceItem: {
+          findFirst: vi.fn(async () => ({
+            id: ITEM_A,
+            malwareStatus: MalwareStatus.infected,
+          })),
+        },
+        tagAssignment: { count: vi.fn(async () => 0) },
+        preview: { findMany },
+      },
+      store,
+    );
+    const result = await service.preview(makeAuth([TenantRole.reviewer]), ITEM_A);
+    expect(result.items).toEqual([]);
+    expect(result.note).toContain('quarantined');
+    expect(presignGet).not.toHaveBeenCalled();
+    expect(findMany).not.toHaveBeenCalled();
+  });
 });
 
 describe('EvidenceService.auditRecords', () => {
