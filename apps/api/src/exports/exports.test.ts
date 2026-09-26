@@ -9,6 +9,7 @@ import { signDownloadToken } from './download-token.js';
 import type { SelectionService } from '../search/selection.service.js';
 import {
   ITEM_A,
+  TAG_ID,
   TENANT_ID,
   fakeAudit,
   fakePrisma,
@@ -115,6 +116,52 @@ describe('ExportsService.create', () => {
     expect(audit.appendTx).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ action: 'export.created' }),
+    );
+  });
+
+  it('counts a tag export through the forensic-import fence', async () => {
+    const tagCount = vi.fn(async () => 1);
+    const exportCreate = vi.fn(async () =>
+      exportRow({ status: ExportStatus.queued, itemCount: 1 }),
+    );
+    const { store } = makeStore();
+    const { service } = makeService(
+      {
+        export: {
+          findFirst: vi.fn(async () => null),
+          count: vi.fn(async () => 0),
+          create: exportCreate,
+        },
+        tag: { findFirst: vi.fn(async () => ({ id: TAG_ID })) },
+        tagAssignment: { count: tagCount },
+        tenant: { findUnique: vi.fn(async () => ({ id: TENANT_ID, planQuota: {} })) },
+        outboxEvent: { create: vi.fn(async () => ({})) },
+      },
+      store,
+    );
+
+    await service.create(
+      auth,
+      {
+        idempotencyKey: 'idem-export-tag-acl',
+        kind: 'native',
+        name: 'Tag export',
+        selection: { kind: 'tag', tagId: TAG_ID },
+        includeFamilies: false,
+        attachments: 'inline',
+        archiveSplitMb: 2048,
+      },
+      fakeRequest(),
+    );
+
+    expect(tagCount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          evidenceItem: expect.objectContaining({
+            OR: expect.arrayContaining([{ importId: null }]),
+          }),
+        }),
+      }),
     );
   });
 });

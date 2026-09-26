@@ -26,6 +26,7 @@ import { chunk, expandFamilies, inOwnTx, queryInChunks } from '../common/familie
 import { enqueueReindex } from '../common/reindex.js';
 import { isCaseRestricted, mayViewPrivileged } from '../common/roles.js';
 import { AuditService } from '../audit/audit.service.js';
+import { importReadableEvidenceWhere } from '../imports/import-access.js';
 import { SelectionService } from '../search/selection.service.js';
 
 const ITEM_INSERT_CHUNK = 1000;
@@ -332,9 +333,14 @@ export class CasesService {
     // The cost is that a failure half way leaves a partly-filled case rather
     // than nothing. That is the honest trade and it is recoverable: every write
     // here skips duplicates, so running the add again completes it.
-    const finalIds = input.includeFamilies
+    const expandedIds = input.includeFamilies
       ? await expandFamilies(inOwnTx(this.prisma, auth.tenantId), auth.tenantId, sourceIds)
       : [...new Set(sourceIds)];
+    // Review already hides another user's unattached forensic import. Adding
+    // by tag / items / saved search used to skip that fence, file the bytes
+    // into the caller's case, and then unlock native download via case
+    // membership. Drop those ids before the insert.
+    const finalIds = await this.keepImportReadable(auth, expandedIds);
 
     let added = 0;
     for (const ids of chunk(finalIds, ITEM_INSERT_CHUNK)) {
@@ -382,6 +388,26 @@ export class CasesService {
     });
 
     return { requested: sourceIds.length, added };
+  }
+
+  /**
+   * Same import ACL as `requireItem` / live search: org admins see everything;
+   * everyone else keeps non-import evidence plus imports they uploaded or that
+   * already sit on a case they are assigned to.
+   */
+  private async keepImportReadable(auth: AuthContext, ids: string[]): Promise<string[]> {
+    if (ids.length === 0) return ids;
+    const fence = importReadableEvidenceWhere(auth);
+    const rows = await queryInChunks(ids, (batch) =>
+      withTenantContext(this.prisma, auth.tenantId, (tx) =>
+        tx.evidenceItem.findMany({
+          where: { tenantId: auth.tenantId, id: { in: batch }, ...fence },
+          select: { id: true },
+        }),
+      ),
+    );
+    const allowed = new Set(rows.map((row) => row.id));
+    return ids.filter((id) => allowed.has(id));
   }
 
   /**
